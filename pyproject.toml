@@ -1,0 +1,12 @@
+[build-system]
+requires = []
+build-backend = "madrona-py-build"
+backend-path = ["external/py"]
+
+[project]
+name = "madrona_mp_env"
+version = "0.0.1"
+
+[tool.madrona.packages.madrona_mp_env]
+ext-only = true
+ext-out-dir = "build"
