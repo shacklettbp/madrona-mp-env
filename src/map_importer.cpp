@@ -151,9 +151,9 @@ static ImportedMeshData filterMeshes(
             uint32_t b_i = a_i + 1;
             uint32_t c_i = a_i + 2;
 
-            uint32_t orig_tri_a_idx = orig.indices[a_i];
-            uint32_t orig_tri_b_idx = orig.indices[b_i];
-            uint32_t orig_tri_c_idx = orig.indices[c_i];
+            uint32_t orig_tri_a_idx = orig_mesh.vertexOffset + orig.indices[a_i];
+            uint32_t orig_tri_b_idx = orig_mesh.vertexOffset + orig.indices[b_i];
+            uint32_t orig_tri_c_idx = orig_mesh.vertexOffset + orig.indices[c_i];
 
             Vector3 a = orig.vertices[orig_tri_a_idx];
             Vector3 b = orig.vertices[orig_tri_b_idx];
@@ -165,11 +165,11 @@ static ImportedMeshData filterMeshes(
                 //continue;
             }
 
-            uint32_t new_tri_a_idx = new_vertices.size();
+            uint32_t new_tri_a_idx = new_vertices.size() - new_vert_offset;
             new_vertices.push_back(a);
-            uint32_t new_tri_b_idx = new_vertices.size();
+            uint32_t new_tri_b_idx = new_vertices.size() - new_vert_offset;
             new_vertices.push_back(b);
-            uint32_t new_tri_c_idx = new_vertices.size();
+            uint32_t new_tri_c_idx = new_vertices.size() - new_vert_offset;
             new_vertices.push_back(c);
 
             new_indices.push_back(new_tri_a_idx);
