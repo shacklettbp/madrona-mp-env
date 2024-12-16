@@ -136,7 +136,7 @@ int main(int argc, char *argv[])
         usageErr();
     }
 
-    std::string collision_data_file = scene_dir + "/collision.bin";
+    std::string collision_data_file = scene_dir + "/collisions.bin";
     std::string navmesh_file = scene_dir + "/navmesh.bin";
     std::string spawn_data_file = scene_dir + "/spawns.bin";
     std::string zone_data_file = scene_dir + "/zones.bin";

@@ -40,6 +40,8 @@ target_link_libraries(madrona_mp_env_importer PUBLIC
     madrona_embree
 )
 
+add_subdirectory(nav)
+
 add_library(madrona_mp_env_mgr STATIC
     mgr.hpp mgr.cpp
 )
@@ -124,3 +126,9 @@ endif()
 
 add_executable(headless headless.cpp)
 target_link_libraries(headless madrona_mw_core madrona_mp_env_mgr)
+
+add_executable(convert_assets convert_assets.cpp)
+target_link_libraries(convert_assets
+  madrona_mw_core madrona_mp_env_mgr
+  madrona_mp_env_nav_build
+)

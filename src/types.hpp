@@ -30,6 +30,11 @@ using madrona::math::Quat;
 using madrona::Navmesh;
 using madrona::RandKey;
 
+using madrona::u16;
+using madrona::i16;
+using madrona::u32;
+using madrona::i32;
+
 struct TDMEpisode {
   Vector3 startPositions[consts::maxTeamSize * 2];
   float startRotations[consts::maxTeamSize * 2];
