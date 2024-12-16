@@ -22,7 +22,7 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --run-name $1 \
     --game-mode Zone \
     --num-updates 1000000 \
-    --num-worlds 2048 \
+    --num-worlds 1024 \
     --lr 1e-4 \
     --steps-per-update 40 \
     --num-bptt-chunks 2 \

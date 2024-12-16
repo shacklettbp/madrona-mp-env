@@ -598,12 +598,9 @@ static void loadAssets(VizState *viz, const VizConfig &cfg)
       { rgb8ToFloat(100, 230, 100),   -1, 0.8f, 1.0f },
   });
   
-  auto collision_data_path =
-      std::filesystem::path(DATA_DIR) / cfg.mapDataFilename;
-  
   AABB world_bounds;
   auto collision_data = importCollisionData(
-      collision_data_path.string().c_str(), cfg.mapOffset, cfg.mapRotation,
+      cfg.mapDataFilename, cfg.mapOffset, cfg.mapRotation,
       &world_bounds);
   
   MapRenderableCollisionData map_render_data =

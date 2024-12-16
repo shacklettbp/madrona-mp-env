@@ -154,6 +154,47 @@ int main(int argc, char *argv[])
   }
 
   {
+    std::string navmesh_in_str = dir_str + "/navmesh.obj";
+    auto navmesh_in_c_str = navmesh_in_str.c_str();
+
+    std::array<char, 1024> nav_import_err;
+    auto nav_imported_obj = importer.importFromDisk(
+      Span(&navmesh_in_c_str, 1),
+      Span(nav_import_err.data(), nav_import_err.size()), true);
+
+    if (!nav_imported_obj.has_value()) {
+      FATAL("Failed to load: %s", nav_import_err.data());
+    }
+
+    auto &nav_src_mesh = nav_imported_obj->objects[0].meshes[0];
+
+    std::ofstream navmesh_out(dir_str + "/navmesh.bin", std::ios::binary);
+    assert(navmesh_out.is_open() && navmesh_out.good());
+
+    u32 num_verts = nav_src_mesh.numVertices;
+
+    navmesh_out.write((char *)&num_verts, sizeof(u32));
+    navmesh_out.write((char *)nav_src_mesh.positions,
+                      sizeof(Vector3) * num_verts);
+
+    u32 num_tris = nav_src_mesh.numFaces;
+    navmesh_out.write((char *)&num_tris, sizeof(u32));
+
+    u32 *face_counts = tmp_alloc.allocN<u32>(num_tris);
+    for (u32 i = 0; i < num_tris; i++) {
+      face_counts[i] = 3;
+    }
+
+    navmesh_out.write((char *)face_counts, sizeof(u32) * num_tris);
+
+    u32 num_indices = num_tris * 3;
+    navmesh_out.write((char *)&num_indices, sizeof(u32));
+    navmesh_out.write((char *)nav_src_mesh.indices, sizeof(u32) * num_indices);
+
+    tmp_alloc.release();
+  }
+
+  {
     std::string spawns_in_str = dir_str + "/spawns.obj";
     auto spawns_in_c_str = spawns_in_str.c_str();
 

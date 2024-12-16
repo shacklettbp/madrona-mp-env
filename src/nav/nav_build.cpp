@@ -136,13 +136,13 @@ static NavmeshBuildResult buildFromSourceObjects(
     }
   }
 
-  float cell_size = 1.f;
-  float cell_height = 1.f;
+  float cell_size = consts::agentRadius / 4.f;
+  float cell_height = consts::proneHeight;
 
   rcHeightfield heightfield;
   REQ_RC(rcInitHeightfield(rc_ctx, heightfield, 
-      (bounds.pMax.x - bounds.pMin.x) / cell_size,
-      (bounds.pMax.y - bounds.pMin.y) / cell_size,
+      ceilf((bounds.pMax.x - bounds.pMin.x) / cell_size),
+      ceilf((bounds.pMax.y - bounds.pMin.y) / cell_size),
       bounds.pMin,
       bounds.pMax,
       cell_size,
@@ -157,7 +157,7 @@ static NavmeshBuildResult buildFromSourceObjects(
         area_ids[i] = RC_NULL_AREA;
       }
 
-      rcMarkWalkableTriangles(rc_ctx, 10.f,
+      rcMarkWalkableTriangles(rc_ctx, 0.25f * math::pi,
           src_mesh.positions,
           src_mesh.numVertices, src_mesh.indices,
           src_mesh.numFaces, area_ids);
@@ -169,7 +169,8 @@ static NavmeshBuildResult buildFromSourceObjects(
   }
 
   rcCompactHeightfield compact_heightfield;
-  REQ_RC(rcBuildCompactHeightfield(rc_ctx, 1, 1, heightfield, compact_heightfield));
+  REQ_RC(rcBuildCompactHeightfield(
+      rc_ctx, consts::standHeight, 1, heightfield, compact_heightfield));
 
   // Finish initializing heightfield
   REQ_RC(rcConnectCompactHeightfieldNeighbors(rc_ctx, compact_heightfield));

@@ -224,9 +224,10 @@ MapCollisionAssets importCollisionData(const char *path,
                                            float rot_around_z,
                                            AABB *world_bounds)
 {
-    printf("%s\n", path);
     std::ifstream file(path, std::ios::binary);
-    assert(file.is_open());
+    if (!file.is_open()) {
+      FATAL("Failed to open %s", path);
+    }
 
     file.read((char *)world_bounds, sizeof(AABB));
 
@@ -592,7 +593,9 @@ ZoneData loadMapZones(std::filesystem::path zone_file_path)
     zones_file.read((char *)&num_zones, sizeof(uint32_t));
 
     DynArray<AABB> zone_aabbs(num_zones);
+    zone_aabbs.resize(num_zones, [](auto){});
     DynArray<float> zone_rotations(num_zones);
+    zone_rotations.resize(num_zones, [](auto){});
 
     zones_file.read((char *)zone_aabbs.data(),
                          sizeof(AABB) * num_zones);
