@@ -599,6 +599,17 @@ ZoneData loadMapZones(std::filesystem::path zone_file_path)
     zones_file.read((char *)zone_rotations.data(),
                          sizeof(float) * num_zones);
 
+    for (u32 i = 0; i < num_zones; i++) {
+      printf("(%f %f %f) (%f %f %f) %f\n",
+             zone_aabbs[i].pMin.x,
+             zone_aabbs[i].pMin.y,
+             zone_aabbs[i].pMin.z,
+             zone_aabbs[i].pMax.x,
+             zone_aabbs[i].pMax.y,
+             zone_aabbs[i].pMax.z,
+             zone_rotations[i]);
+    }
+
     return ZoneData {
         .aabbs = std::move(zone_aabbs),
         .rotations = std::move(zone_rotations),

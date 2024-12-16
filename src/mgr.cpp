@@ -1188,7 +1188,11 @@ Manager::Impl * Manager::Impl::init(
     ZoneData zone_data = loadMapZones(
         std::filesystem::path(DATA_DIR) / zones_filename);
 
-    Zones zones;
+    Zones zones {
+      .bboxes = zone_data.aabbs.data(),
+      .rotations = zone_data.rotations.data(),
+      .numZones = (u32)zone_data.aabbs.size(),
+    };
 
     DynArray<GoalRegion> goal_regions = hardcodedGoalRegions();
     GoalRegion *goal_regions_ptr = nullptr;

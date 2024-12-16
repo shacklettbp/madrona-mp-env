@@ -185,12 +185,12 @@ int main(int argc, char *argv[])
       spawn_pos = convertPosition(spawn_pos);
 
       float yaw_min, yaw_max;
-      if (spawn_pos.x < 0.f) {
-        yaw_min = 0.25f * math::pi;
-        yaw_max = 0.75f * math::pi;
+      if (spawn_pos.y < 0.f) {
+        yaw_min = -0.25f * math::pi;
+        yaw_max = 0.25f * math::pi;
       } else {
-        yaw_min = -0.75f * math::pi;
-        yaw_max = -0.25f * math::pi;
+        yaw_min = 0.75f * math::pi;
+        yaw_max = 1.25f * math::pi;
       }
 
       all_spawns[i] = {
