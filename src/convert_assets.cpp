@@ -173,8 +173,14 @@ int main(int argc, char *argv[])
 
     u32 num_verts = nav_src_mesh.numVertices;
 
+    Vector3 *scaled_verts = tmp_alloc.allocN<Vector3>(num_verts);
+
+    for (u32 i = 0; i < num_verts; i++) {
+      scaled_verts[i] = convertPosition(nav_src_mesh.positions[i]);
+    }
+
     navmesh_out.write((char *)&num_verts, sizeof(u32));
-    navmesh_out.write((char *)nav_src_mesh.positions,
+    navmesh_out.write((char *)scaled_verts,
                       sizeof(Vector3) * num_verts);
 
     u32 num_tris = nav_src_mesh.numFaces;

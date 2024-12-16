@@ -265,6 +265,8 @@ cfg = TrainConfig(
     compute_dtype = dtype,
     seed = 5,
     metrics_buffer_size = 10,
+    baseline_policy_id = -1,
+    custom_policy_ids = [-1],
 )
 
 policy = make_policy(dtype, args.scene, cfg.actions)
