@@ -113,7 +113,7 @@ sim = madrona_mp_env.SimManager(
     rand_seed = 5,
     num_pbt_policies = args.pbt_ensemble_size + args.pbt_past_policies,
     policy_history_size = args.pbt_past_policies,
-    scene_name = args.scene,
+    scene_path = args.scene,
 )
 
 jax_gpu = jax.devices()[0].platform == 'gpu'

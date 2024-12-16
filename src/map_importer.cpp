@@ -224,6 +224,7 @@ MapCollisionAssets importCollisionData(const char *path,
                                            float rot_around_z,
                                            AABB *world_bounds)
 {
+    printf("%s\n", path);
     std::ifstream file(path, std::ios::binary);
     assert(file.is_open());
 
@@ -598,17 +599,6 @@ ZoneData loadMapZones(std::filesystem::path zone_file_path)
 
     zones_file.read((char *)zone_rotations.data(),
                          sizeof(float) * num_zones);
-
-    for (u32 i = 0; i < num_zones; i++) {
-      printf("(%f %f %f) (%f %f %f) %f\n",
-             zone_aabbs[i].pMin.x,
-             zone_aabbs[i].pMin.y,
-             zone_aabbs[i].pMin.z,
-             zone_aabbs[i].pMax.x,
-             zone_aabbs[i].pMax.y,
-             zone_aabbs[i].pMax.z,
-             zone_rotations[i]);
-    }
 
     return ZoneData {
         .aabbs = std::move(zone_aabbs),

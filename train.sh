@@ -9,7 +9,7 @@ if [ -z $2 ]; then
     exit
 fi
 
-rm -rf /mnt/d/ckpts/$1
+rm -rf ${REPO_DIR}/ckpts/$1
 
 #
 #

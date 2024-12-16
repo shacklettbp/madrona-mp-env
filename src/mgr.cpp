@@ -650,8 +650,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
 static MapData loadMapData(const char *map_data_name, Vector3 translation,
                            float rot_around_z, AABB *world_bounds)
 {
-    MapCollisionAssets imported = importCollisionData(
-        (std::filesystem::path(DATA_DIR) / map_data_name).string().c_str(),
+    MapCollisionAssets imported = importCollisionData(map_data_name,
         translation, rot_around_z, world_bounds);
 
     MeshBVH bvh;
@@ -1078,12 +1077,9 @@ Manager::Impl * Manager::Impl::init(
     AABB world_bounds;
     MapData map_data = loadMapData(
         collision_data_filename, map_offset, map_rotation, &world_bounds);
-    MapNavmesh navmesh_data = importNavmesh(
-        (std::filesystem::path(DATA_DIR) / navmesh_filename).string().c_str(),
-        world_bounds);
+    MapNavmesh navmesh_data = importNavmesh(navmesh_filename, world_bounds);
 
-    MapSpawnData map_spawn_data = loadMapSpawnData(
-        std::filesystem::path(DATA_DIR) / spawns_filename);
+    MapSpawnData map_spawn_data = loadMapSpawnData(spawns_filename);
 
     DynArray<Spawn> &a_spawns = map_spawn_data.aSpawns;
     DynArray<Spawn> &b_spawns = map_spawn_data.bSpawns;
@@ -1185,8 +1181,7 @@ Manager::Impl * Manager::Impl::init(
 
     SpawnCurriculum spawn_curriculum = buildSpawnCurriculum(navmesh);
 
-    ZoneData zone_data = loadMapZones(
-        std::filesystem::path(DATA_DIR) / zones_filename);
+    ZoneData zone_data = loadMapZones(zones_filename);
 
     Zones zones {
       .bboxes = zone_data.aabbs.data(),

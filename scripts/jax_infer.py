@@ -107,7 +107,7 @@ sim = madrona_mp_env.SimManager(
     num_pbt_policies = num_policies,
     rand_seed = 10,
     policy_history_size = 1,
-    scene_name = args.scene,
+    scene_path = args.scene,
     record_log_path = args.record,
 )
 

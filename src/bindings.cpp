@@ -2,6 +2,8 @@
 
 #include <madrona/py/bindings.hpp>
 
+#include <filesystem>
+
 namespace nb = nanobind;
 
 namespace madronaMPEnv {
@@ -43,16 +45,12 @@ NB_MODULE(madrona_mp_env, m) {
                             uint32_t team_size,
                             uint32_t num_pbt_policies,
                             uint32_t policy_history_size,
-                            const char *scene_name,
-                            const char *collision_data_file,
-                            const char *navmesh_data_file,
-                            const char *spawn_data_file,
-                            const char *zone_data_file,
-                            madrona::math::Vector3 map_offset,
-                            float map_rotation,
+                            const char *scene_path,
                             nb::handle replay_log_path,
                             nb::handle record_log_path,
                             nb::handle event_log_path) {
+            std::filesystem::path scene_path_dir(scene_path);
+
             new (self) Manager(Manager::Config {
                 .execMode = exec_mode,
                 .gpuID = (int)gpu_id,
@@ -65,13 +63,17 @@ NB_MODULE(madrona_mp_env, m) {
                 .numPBTPolicies = num_pbt_policies,
                 .policyHistorySize = policy_history_size,
                 .map = MapConfig {
-                  .name = scene_name,
-                  .collisionDataFile = collision_data_file,
-                  .navmeshFile = navmesh_data_file,
-                  .spawnDataFile = spawn_data_file,
-                  .zoneDataFile = zone_data_file,
-                  .mapOffset = map_offset,
-                  .mapRotation = map_rotation,
+                  .name = scene_path_dir.filename().string().c_str(),
+                  .collisionDataFile =
+                    (scene_path_dir / "collisions.bin").string().c_str(),
+                  .navmeshFile =
+                    (scene_path_dir / "navmesh.bin").string().c_str(),
+                  .spawnDataFile =
+                    (scene_path_dir / "spawns.bin").string().c_str(),
+                  .zoneDataFile =
+                    (scene_path_dir / "zones.bin").string().c_str(),
+                  .mapOffset = Vector3::zero(),
+                  .mapRotation = 0.f,
                 },
                 .highlevelMove = false,
                 .replayLogPath = replay_log_path.is_none() ? nullptr :
@@ -91,13 +93,7 @@ NB_MODULE(madrona_mp_env, m) {
            nb::arg("team_size"),
            nb::arg("num_pbt_policies"),
            nb::arg("policy_history_size"),
-           nb::arg("scene_name"),
-           nb::arg("collision_data_file"),
-           nb::arg("navmesh_data_file"),
-           nb::arg("spawn_data_file"),
-           nb::arg("zone_data_file"),
-           nb::arg("map_offset"),
-           nb::arg("map_rotation"),
+           nb::arg("scene_path"),
            nb::arg("replay_log_path") = nb::none(),
            nb::arg("record_log_path") = nb::none(),
            nb::arg("event_log_path") = nb::none())

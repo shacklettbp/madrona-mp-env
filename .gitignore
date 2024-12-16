@@ -5,3 +5,5 @@
 /scripts/__pycache__
 /external/py/__pycache__
 /CMakeSettings.json
+/tb
+/ckpts
