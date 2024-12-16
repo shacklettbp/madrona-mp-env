@@ -35,7 +35,7 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --profile-port 5000 \
     --scene $2 \
     --bf16 \
-    --eval-frequency 100 \
+    --eval-frequency 500 \
     --gpu-sim
     #--restore 61000 \
     #--randomize-hp-mag \
