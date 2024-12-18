@@ -39,6 +39,7 @@ arg_parser.add_argument('--num-channels', type=int, default=256)
 
 arg_parser.add_argument('--ckpt-path', type=str, required=True)
 arg_parser.add_argument('--record', type=str, default=None)
+arg_parser.add_argument('--event-log', type=str, default=None)
 
 arg_parser.add_argument('--gpu-sim', action='store_true')
 arg_parser.add_argument('--gpu-id', type=int, default=0)
@@ -109,6 +110,7 @@ sim = madrona_mp_env.SimManager(
     policy_history_size = 1,
     scene_path = args.scene,
     record_log_path = args.record,
+    event_log_path = args.event_log,
 )
 
 jax_gpu = jax.devices()[0].platform == 'gpu'

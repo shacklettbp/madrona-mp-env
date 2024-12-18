@@ -132,3 +132,20 @@ target_link_libraries(convert_assets
   madrona_mw_core madrona_mp_env_mgr
   madrona_mp_env_nav_build
 )
+
+add_library(madrona_mp_env_db STATIC
+  db.hpp db.cpp
+)
+
+find_package(SQLite3 REQUIRED)
+
+target_link_libraries(madrona_mp_env_db PUBLIC
+  madrona_mw_core
+  SQLite::SQLite3
+)
+
+add_executable(build_db build_db.cpp)
+target_link_libraries(build_db
+  madrona_mw_core madrona_mp_env_mgr
+  madrona_mp_env_db
+)

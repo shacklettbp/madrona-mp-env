@@ -529,16 +529,50 @@ struct StepLog {
     AgentLogData agentData[consts::maxTeamSize * 2];
 };
 
+enum class EventType : u32 {
+  Capture,
+};
+
+struct EventLogGlobalState {
+  u32 numEvents;
+  u32 numStepStates;
+};
+
+struct EventPlayerState {
+  i16 pos[3];
+  u16 yaw;
+  u16 magNumBullets;
+  u16 isReloading;
+};
+
+struct EventStepState {
+  u64 matchID;
+  u32 step;
+  EventPlayerState players[consts::maxTeamSize * 2];
+};
+
+struct EventStepStateEntity : madrona::Archetype<
+  EventStepState
+> {};
+
 struct GameEvent {
     struct Capture {
-        Vector3 pos;
-        int32_t playerIdx;
+      u8 zoneIDX;
+      u8 captureTeam;
+      u16 inZoneMask;
     };
 
+    EventType type;
+    u64 matchID;
+    u32 step;
     union {
         Capture capture;
     };
 };
+
+struct GameEventEntity : madrona::Archetype<
+    GameEvent
+> {};
 
 struct Breadcrumb {
     Vector3 pos;
@@ -592,13 +626,6 @@ struct GoalRegionsState {
     float teamStepRewards[2];
 };
 
-struct StepEvents {
-    static constexpr CountT maxEvents = consts::maxTeamSize * 2;
-
-    GameEvent events[maxEvents];
-    int32_t numEvents;
-};
-
 struct TaskConfig {
     bool autoReset;
     bool showSpawns;
@@ -632,7 +659,7 @@ struct TaskConfig {
     StepLog *recordLog;
     StepLog *replayLog;
 
-    StepEvents *eventLog;
+    EventLogGlobalState *eventGlobalState;
 
     GoalRegion *goalRegions;
     int32_t numGoalRegions;

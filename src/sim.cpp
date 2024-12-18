@@ -14,11 +14,66 @@ using namespace madrona::phys;
 
 namespace madronaMPEnv {
 
+static inline void logEvent(Engine &ctx, const GameEvent &event)
+{
+    ctx.getDirect<GameEvent>(2, ctx.makeTemporary<GameEventEntity>()) = event;
+
+    AtomicU32Ref num_events_atomic(ctx.data().eventGlobalState->numEvents);
+    num_events_atomic.fetch_add_relaxed(1);
+
+    AtomicU32Ref event_logged_in_step_atomic(ctx.data().eventLoggedInStep);
+    event_logged_in_step_atomic.store<sync::relaxed>(1);
+}
+
+static void writeEventStepState(Engine &ctx)
+{
+  u32 cur_step = ctx.singleton<MatchInfo>().curStep;
+
+  if (ctx.data().eventLoggedInStep == 0 && cur_step % 20 != 0) {
+    return;
+  }
+
+  ctx.data().eventLoggedInStep = 0;
+
+  AtomicU32Ref num_step_states_atomic(ctx.data().eventGlobalState->numStepStates);
+  num_step_states_atomic.fetch_add_relaxed(1);
+
+  EventStepState &state_out =
+    ctx.getDirect<EventStepState>(2, ctx.makeTemporary<EventStepStateEntity>());
+
+  state_out.matchID = ctx.data().matchID;
+  state_out.step = cur_step;
+
+  for (CountT i = 0; i < consts::maxTeamSize * 2; i++) {
+    EventPlayerState &player_state = state_out.players[i];
+
+    if (i >= (CountT)ctx.data().numAgents) {
+      player_state = {};
+      break;
+    }
+
+    Entity e = ctx.data().agents[i];
+
+    Vector3 pos = ctx.get<Position>(e);
+    player_state.pos[0] = (i16)pos.x;
+    player_state.pos[1] = (i16)pos.y;
+    player_state.pos[2] = (i16)pos.z;
+
+    Aim aim = ctx.get<Aim>(e);
+    player_state.yaw = (u16)(aim.yaw * 65535 / math::pi);
+
+    Magazine mag = ctx.get<Magazine>(e);
+
+    player_state.magNumBullets = mag.numBullets;
+    player_state.isReloading = mag.isReloading;
+  }
+}
+
 static inline constexpr float discreteTurnDelta()
 {
     constexpr float turn_max = 10;
 
-    return turn_max / (consts::numTurnBuckets / 2);
+    return turn_max / f32(CountT(consts::numTurnBuckets / 2));
 }
 
 static float closestPointSegmentSegment(Vector3 p1, Vector3 q1,
@@ -253,6 +308,12 @@ void Sim::registerTypes(ECSRegistry &registry,
 
     registry.registerArchetype<StaticGeometry>();
 
+    registry.registerComponent<GameEvent>();
+    registry.registerArchetype<GameEventEntity>();
+
+    registry.registerComponent<EventStepState>();
+    registry.registerArchetype<EventStepStateEntity>();
+
     registry.exportSingleton<WorldReset>(
         (uint32_t)ExportID::Reset);
 
@@ -418,11 +479,21 @@ void Sim::registerTypes(ECSRegistry &registry,
         ExportID::FullTeamDone);
     registry.exportColumn<FullTeamInterface, FullTeamPolicy>(
         ExportID::FullTeamPolicyAssignments);
+
+    registry.exportColumn<GameEventEntity, GameEvent>(
+        ExportID::EventLog);
+
+    registry.exportColumn<EventStepStateEntity, EventStepState>(
+        ExportID::EventStepState);
 }
 
 static inline void initWorld(Engine &ctx, bool triggered_reset)
 {
-  const TrainControl &train_ctrl = *ctx.data().trainControl;
+    ctx.data().matchID = 
+      (((u64)ctx.worldID().idx) << 32) |
+      ((u64)ctx.data().curEpisodeIdx);
+
+    const TrainControl &train_ctrl = *ctx.data().trainControl;
     MatchInfo &match_info = ctx.singleton<MatchInfo>();
 
     RandKey episode_rand_key = rand::split_i(
@@ -3746,62 +3817,65 @@ inline void zoneMatchInfoSystem(Engine &ctx, MatchInfo &match_info)
     }
 
     {
-        ZoneStats &cur_zone_stats = ctx.data().zoneStats[zone_state.curZone];
+      ZoneStats &cur_zone_stats = ctx.data().zoneStats[zone_state.curZone];
 
-        cur_zone_stats.numTotalActiveSteps += 1;
+      cur_zone_stats.numTotalActiveSteps += 1;
 
-        if (zone_state.isCaptured) {
-            cur_zone_stats.numTeamCapturedSteps[zone_state.curControllingTeam] += 1;
-        }
+      if (zone_state.isCaptured) {
+        cur_zone_stats.numTeamCapturedSteps[zone_state.curControllingTeam] += 1;
+      }
 
-        if (zone_state.isContested) {
-            cur_zone_stats.numContestedSteps += 1;
-        }
+      if (zone_state.isContested) {
+        cur_zone_stats.numContestedSteps += 1;
+      }
 
+      if (new_captured) {
+        cur_zone_stats.numSwaps += 1;
+      }
+
+      if (ctx.data().eventGlobalState) {
         if (new_captured) {
-            cur_zone_stats.numSwaps += 1;
-        }
+          AABB zone_aabb = ctx.data().zones.bboxes[zone_state.curZone];
+          float zone_aabb_rot_angle = ctx.data().zones.rotations[zone_state.curZone];
 
-        if (ctx.data().eventLog) {
-            StepEvents &events = ctx.data().eventLog[ctx.worldID().idx];
-            events.numEvents = 0;
-        }
+          Quat to_zone_frame = Quat::angleAxis(zone_aabb_rot_angle, math::up).inv();
 
-        if (new_captured && ctx.data().eventLog) {
-            StepEvents &events = ctx.data().eventLog[ctx.worldID().idx];
+          zone_aabb.pMin = to_zone_frame.rotateVec(zone_aabb.pMin);
+          zone_aabb.pMax = to_zone_frame.rotateVec(zone_aabb.pMax);
 
-            AABB zone_aabb = ctx.data().zones.bboxes[zone_state.curZone];
-            float zone_aabb_rot_angle = ctx.data().zones.rotations[zone_state.curZone];
+          u32 in_zone_mask = 0;
+          for (CountT i = 0; i < (CountT)ctx.data().numAgents; i++) {
+            Entity agent = ctx.data().agents[i];
+            int32_t agent_team = ctx.get<TeamInfo>(agent).team;
 
-            Quat to_zone_frame = Quat::angleAxis(zone_aabb_rot_angle, math::up).inv();
+            if (agent_team == zone_state.curControllingTeam) {
+              Vector3 pos = ctx.get<Position>(agent);
+              pos.z += consts::standHeight / 2.f;
 
-            zone_aabb.pMin = to_zone_frame.rotateVec(zone_aabb.pMin);
-            zone_aabb.pMax = to_zone_frame.rotateVec(zone_aabb.pMax);
+              Vector3 pos_in_zone_frame = to_zone_frame.rotateVec(pos);
 
-            for (CountT i = 0; i < (CountT)ctx.data().numAgents; i++) {
-                Entity agent = ctx.data().agents[i];
-                int32_t agent_team = ctx.get<TeamInfo>(agent).team;
+              if (!zone_aabb.contains(pos_in_zone_frame)) {
+                continue;
+              }
 
-                if (agent_team == zone_state.curControllingTeam) {
-                    Vector3 pos = ctx.get<Position>(agent);
-                    pos.z += consts::standHeight / 2.f;
-
-                    Vector3 pos_in_zone_frame = to_zone_frame.rotateVec(pos);
-
-                    if (!zone_aabb.contains(pos_in_zone_frame)) {
-                        continue;
-                    }
-
-
-                    events.events[events.numEvents++] = GameEvent {
-                        .capture = {
-                            .pos = pos,
-                            .playerIdx = (int32_t)i,
-                        }
-                    };
-                }
+              in_zone_mask |= (1_u32 << (u32)i);
             }
+          }
+
+          logEvent(ctx, {
+            .type = EventType::Capture,
+            .matchID = ctx.data().matchID,
+            .step = (u32)match_info.curStep,
+            .capture = {
+              .zoneIDX = (u8)zone_state.curZone,
+              .captureTeam = (u8)zone_state.curControllingTeam,
+              .inZoneMask = (u16)in_zone_mask,
+            }
+          });
         }
+
+        writeEventStepState(ctx);
+      }
     }
 
     if (match_finished) {
@@ -4354,6 +4428,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
 {
     auto &builder = taskgraph_mgr.init(TaskGraphID::Step);
 
+    builder.addToGraph<ClearTmpNode<GameEventEntity>>({});
+    builder.addToGraph<ClearTmpNode<EventStepStateEntity>>({});
 
     auto pvpGameplayLogic = [&](Span<const TaskGraphNodeID> deps) {
         if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
@@ -4989,6 +5065,11 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
           HardcodedBotAction,
           AgentPolicy
       >>({});
+
+#ifdef MADRONA_GPU_MODE
+  queueSortByWorld<GameEventEntity>(builder, {});
+  queueSortByWorld<EventStepStateEntity>(builder, {});
+#endif
 }
 
 Sim::Sim(Engine &ctx,
@@ -5108,7 +5189,10 @@ Sim::Sim(Engine &ctx,
         ctx.data().zoneStats[i].numTotalActiveSteps = 0;
     }
 
-    eventLog = cfg.eventLog;
+    matchID = ~0_u64;
+
+    eventGlobalState = cfg.eventGlobalState;
+    eventLoggedInStep = 0;
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, TaskConfig, Sim::WorldInit);

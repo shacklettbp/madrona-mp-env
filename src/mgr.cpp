@@ -63,9 +63,8 @@ struct Manager::Impl {
                 WorldReset *reset_buffer,
                 ExploreAction *explore_action_buffer,
                 void *pvp_action_buffer,
-                TrainControl *train_ctrl
-    )
-        : cfg(mgr_cfg),
+                TrainControl *train_ctrl)
+      : cfg(mgr_cfg),
         worldResetBuffer(reset_buffer),
         exploreActionsBuffer(explore_action_buffer),
         pvpActionsBuffer(pvp_action_buffer),
@@ -78,7 +77,7 @@ struct Manager::Impl {
                 mgr_cfg.teamSize)
         ),
         trainCtrl(train_ctrl)
-        {}
+    {}
 
     inline virtual ~Impl() {}
 
@@ -100,6 +99,25 @@ struct Manager::Impl {
                               VizState *viz);
 };
 
+static void writeGameEvents(
+    std::fstream &event_log_file,
+    std::fstream &step_log_file,
+    const GameEvent *events, uint32_t num_events,
+    const EventStepState *step_states, uint32_t num_step_states,
+    CountT num_worlds, int32_t step_idx)
+{
+  (void)num_worlds;
+  (void)step_idx;
+
+  event_log_file.write((char *)&num_events, sizeof(uint32_t));
+  event_log_file.write((char *)events, sizeof(GameEvent) * num_events);
+
+  step_log_file.write((char *)&num_step_states, sizeof(u32));
+  step_log_file.write((char *)step_states, sizeof(EventStepState) * num_step_states);
+}
+    
+
+#if 0
 static void writeEventsCSV(
     std::fstream &log_file, const StepEvents *world_events, CountT num_worlds, int32_t step_idx)
 {
@@ -127,6 +145,7 @@ static void writeEventsCSV(
         }
     }
 }
+#endif
 
 struct Manager::CPUImpl final : Manager::Impl {
     using TaskGraphT =
@@ -137,11 +156,17 @@ struct Manager::CPUImpl final : Manager::Impl {
 
     StepLog *replayLogBuffer;
     StepLog *recordLogBuffer;
-    StepEvents *eventLogBuffer;
+
+    GameEvent *eventLogExported;
+    EventStepState *eventLogStepStatesExported;
+    EventLogGlobalState *eventLogGlobalState;
 
     Optional<std::fstream> replayLog;
     Optional<std::fstream> recordLog;
     Optional<std::fstream> eventLog;
+    Optional<std::fstream> eventStepsLog;
+
+    i32 stepIdx;
 
     inline CPUImpl(const Manager::Config &mgr_cfg,
                    WorldReset *reset_buffer,
@@ -152,7 +177,7 @@ struct Manager::CPUImpl final : Manager::Impl {
                    TaskGraphT &&cpu_exec,
                    StepLog *replay_log_buffer,
                    StepLog *record_log_buffer,
-                   StepEvents *event_log_buffer,
+                   EventLogGlobalState *event_log_global_state,
                    const char *replay_log_path,
                    const char *record_log_path,
                    const char *event_log_path)
@@ -162,10 +187,16 @@ struct Manager::CPUImpl final : Manager::Impl {
         rewardHyperParams(reward_hyper_params),
         replayLogBuffer(replay_log_buffer),
         recordLogBuffer(record_log_buffer),
-        eventLogBuffer(event_log_buffer),
+        eventLogExported(
+          (GameEvent *)cpuExec.getExported((CountT)ExportID::EventLog)),
+        eventLogStepStatesExported(
+          (EventStepState *)cpuExec.getExported((CountT)ExportID::EventStepState)),
+        eventLogGlobalState(event_log_global_state),
         replayLog(Optional<std::fstream>::none()),
         recordLog(Optional<std::fstream>::none()),
-        eventLog(Optional<std::fstream>::none())
+        eventLog(Optional<std::fstream>::none()),
+        eventStepsLog(Optional<std::fstream>::none()),
+        stepIdx(0)
     {
         if (replayLogBuffer) {
             replayLog.emplace(replay_log_path,
@@ -185,13 +216,17 @@ struct Manager::CPUImpl final : Manager::Impl {
             }
         }
 
-        if (eventLogBuffer) {
-            eventLog.emplace(event_log_path,
-                             std::ios::out);
+        if (event_log_path) {
+            std::string dir_str = event_log_path;
+            eventLog.emplace(dir_str + "/events.bin",
+                             std::ios::out | std::ios::binary);
 
             if (!eventLog->is_open()) {
                 FATAL("Failed to open record log %s", event_log_path);
             }
+
+            eventStepsLog.emplace(dir_str + "/steps.bin",
+                                  std::ios::out | std::ios::binary);
         }
     }
 
@@ -217,10 +252,20 @@ struct Manager::CPUImpl final : Manager::Impl {
                                  sizeof(StepLog) * cfg.numWorlds);
             }
 
-            if (eventLogBuffer) {
-                writeEventsCSV(*eventLog, eventLogBuffer, cfg.numWorlds, 0);
+            if (eventLog.has_value()) {
+              writeGameEvents(*eventLog,
+                              *eventStepsLog,
+                              eventLogExported,
+                              eventLogGlobalState->numEvents, 
+                              eventLogStepStatesExported,
+                              eventLogGlobalState->numStepStates, 
+                              cfg.numWorlds, stepIdx);
+              eventLogGlobalState->numEvents = 0;
+              eventLogGlobalState->numStepStates = 0;
             }
         }
+
+        stepIdx += 1;
     }
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -269,15 +314,25 @@ struct Manager::CUDAImpl final : Manager::Impl {
 
     StepLog *replayLogBuffer;
     StepLog *recordLogBuffer;
-    StepEvents *eventLogBuffer;
 
     StepLog *replayLogStaging;
     StepLog *recordLogStaging;
-    StepEvents *eventLogStaging;
+
+    GameEvent *eventLogExported;
+    EventStepState *eventLogStepStatesExported;
+    EventLogGlobalState *eventLogGlobalState;
+
+    GameEvent *eventLogReadBack;
+    EventStepState *eventLogStepStatesReadback;
+    uint32_t eventLogReadBackSize;
+    uint32_t eventLogStepStatesReadBackSize;
+
+    EventLogGlobalState *eventLogGlobalStateReadback;
 
     Optional<std::fstream> replayLog;
     Optional<std::fstream> recordLog;
     Optional<std::fstream> eventLog;
+    Optional<std::fstream> eventStepsLog;
 
     RandKey staggerShuffleRND;
     int32_t stepIdx;
@@ -291,7 +346,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                     MWCudaExecutor &&gpu_exec,
                     StepLog *replay_log_buffer,
                     StepLog *record_log_buffer,
-                    StepEvents *event_log_buffer,
+                    EventLogGlobalState *event_log_global_state,
                     const char *replay_log_path,
                     const char *record_log_path,
                     const char *event_log_path,
@@ -304,13 +359,22 @@ struct Manager::CUDAImpl final : Manager::Impl {
         rewardHyperParams(reward_hyper_params),
         replayLogBuffer(replay_log_buffer),
         recordLogBuffer(record_log_buffer),
-        eventLogBuffer(event_log_buffer),
         replayLogStaging(nullptr),
         recordLogStaging(nullptr),
-        eventLogStaging(nullptr),
+        eventLogExported(
+            (GameEvent *)gpuExec.getExported((CountT)ExportID::EventLog)),
+        eventLogStepStatesExported(
+          (EventStepState *)gpuExec.getExported((CountT)ExportID::EventStepState)),
+        eventLogGlobalState(event_log_global_state),
+        eventLogReadBack(nullptr),
+        eventLogStepStatesReadback(nullptr),
+        eventLogReadBackSize(0),
+        eventLogStepStatesReadBackSize(0),
+        eventLogGlobalStateReadback(nullptr),
         replayLog(Optional<std::fstream>::none()),
         recordLog(Optional<std::fstream>::none()),
         eventLog(Optional<std::fstream>::none()),
+        eventStepsLog(Optional<std::fstream>::none()),
         staggerShuffleRND(stagger_shuffle_key),
         stepIdx(0)
     {
@@ -330,21 +394,85 @@ struct Manager::CUDAImpl final : Manager::Impl {
                               std::ios::binary | std::ios::out);
         }
 
-        if (eventLogBuffer) {
-            eventLogStaging = (StepEvents *)cu::allocReadback(
-                sizeof(StepEvents) * mgr_cfg.numWorlds);
-
-            eventLog.emplace(event_log_path, std::ios::out);
+        if (event_log_path) {
+            std::string dir_str = event_log_path;
+            eventLog.emplace(dir_str + "/events.bin",
+                             std::ios::out | std::ios::binary);
 
             if (!eventLog->is_open()) {
-                FATAL("Failed to open record log %s", event_log_path);
+                FATAL("Failed to open events file %s", event_log_path);
             }
+
+            eventStepsLog.emplace(dir_str + "/steps.bin",
+                                  std::ios::out | std::ios::binary);
+
+            if (!eventStepsLog->is_open()) {
+                FATAL("Failed to open event steps file %s", event_log_path);
+            }
+
+            eventLogGlobalStateReadback =
+              (EventLogGlobalState *)cu::allocReadback(sizeof(EventLogGlobalState));
         }
     }
 
     inline virtual ~CUDAImpl() final
     {
         REQ_CUDA(cudaFree(rewardHyperParams));
+    }
+
+    inline void saveEvents(cudaStream_t strm)
+    {
+      if (!eventLog.has_value()) {
+        return;
+      }
+
+      cudaMemcpyAsync(eventLogGlobalStateReadback,
+                 eventLogGlobalState,
+                 sizeof(EventLogGlobalState),
+                 cudaMemcpyDeviceToHost,
+                 strm);
+
+      REQ_CUDA(cudaStreamSynchronize(strm));
+
+      u32 num_events = eventLogGlobalStateReadback->numEvents;
+      u32 num_steps = eventLogGlobalStateReadback->numStepStates;
+
+      if (num_events == 0 && num_steps == 0) {
+        return;
+      }
+
+      cudaMemsetAsync(eventLogGlobalState, 0, sizeof(EventLogGlobalState),
+                      strm);
+
+      if (num_events > eventLogReadBackSize) {
+        cu::deallocCPU(eventLogReadBack);
+
+        eventLogReadBack = (GameEvent *)cu::allocReadback(
+            sizeof(GameEvent) * num_events);
+      }
+
+      if (num_steps > eventLogStepStatesReadBackSize) {
+        cu::deallocCPU(eventLogStepStatesReadback);
+
+        eventLogStepStatesReadback = (EventStepState *)cu::allocReadback(
+            sizeof(EventStepState) * num_steps);
+      }
+
+      cudaMemcpyAsync(eventLogReadBack, eventLogExported,
+                 sizeof(GameEvent) * num_events,
+                 cudaMemcpyDeviceToHost,
+                 strm);
+
+      cudaMemcpyAsync(eventLogStepStatesReadback, eventLogStepStatesExported,
+                      sizeof(EventStepState) * num_steps,
+                      cudaMemcpyDeviceToHost,
+                      strm);
+
+      REQ_CUDA(cudaStreamSynchronize(strm));
+
+      writeGameEvents(*eventLog, *eventStepsLog, eventLogReadBack, num_events, 
+                      eventLogStepStatesReadback, num_steps,
+                      cfg.numWorlds, stepIdx);
     }
 
     inline virtual void run(TaskGraphID graph_id)
@@ -370,13 +498,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                              sizeof(StepLog) * cfg.numWorlds);
         }
 
-        if (eventLogBuffer) {
-            REQ_CUDA(cudaMemcpy(eventLogStaging, eventLogBuffer,
-                                sizeof(StepEvents) * cfg.numWorlds,
-                                cudaMemcpyDeviceToHost));
-
-            writeEventsCSV(*eventLog, eventLogStaging, cfg.numWorlds, stepIdx);
-        }
+        saveEvents(nullptr);
 
         stepIdx++;
     }
@@ -535,6 +657,12 @@ struct Manager::CUDAImpl final : Manager::Impl {
             recordLog->write((char *)recordLogStaging,
                              sizeof(StepLog) * cfg.numWorlds);
         }
+
+        if (eventLog.has_value()) {
+          cudaMemsetAsync(eventLogGlobalState, 0, sizeof(EventLogGlobalState),
+                      strm);
+        }
+
         printf("Sim Stream Init Finished\n");
     }
 
@@ -607,15 +735,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                              sizeof(StepLog) * cfg.numWorlds);
         }
 
-        if (eventLogBuffer) {
-            REQ_CUDA(cudaMemcpyAsync(eventLogStaging, eventLogBuffer,
-                                     sizeof(StepEvents) * cfg.numWorlds,
-                                     cudaMemcpyDeviceToHost, strm));
-
-            REQ_CUDA(cudaStreamSynchronize(strm));
-
-            writeEventsCSV(*eventLog, eventLogStaging, cfg.numWorlds, stepIdx);
-        }
+        saveEvents(strm);
 
         stepIdx++;
     }
@@ -1263,7 +1383,7 @@ Manager::Impl * Manager::Impl::init(
 
     StepLog *record_log = nullptr;
     StepLog *replay_log = nullptr;
-    StepEvents *event_log = nullptr;
+    EventLogGlobalState *event_log_global_state = nullptr;
 
     switch (mgr_cfg.execMode) {
         case ExecMode::CUDA: {
@@ -1451,8 +1571,9 @@ Manager::Impl * Manager::Impl::init(
             }
 
             if (mgr_cfg.eventLogPath != nullptr) {
-                event_log = (StepEvents *)cu::allocGPU(
-                    sizeof(StepEvents) * mgr_cfg.numWorlds);
+                event_log_global_state = (EventLogGlobalState *)cu::allocGPU(
+                    sizeof(EventLogGlobalState));
+                cudaMemset(event_log_global_state, 0, sizeof(EventLogGlobalState));
             }
 
             TDMEpisode *gpu_episodes = (TDMEpisode *)cu::allocGPU(
@@ -1558,8 +1679,10 @@ Manager::Impl * Manager::Impl::init(
             }
 
             if (mgr_cfg.eventLogPath != nullptr) {
-                event_log = (StepEvents *)malloc(
-                    sizeof(StepEvents) * mgr_cfg.numWorlds);
+                event_log_global_state = (EventLogGlobalState *)malloc(
+                    sizeof(EventLogGlobalState));
+                event_log_global_state->numEvents = 0;
+                event_log_global_state->numStepStates = 0;
             }
         } break;
         default: {
@@ -1595,7 +1718,7 @@ Manager::Impl * Manager::Impl::init(
         .rewardHyperParams = reward_hyper_params,
         .recordLog = record_log,
         .replayLog = replay_log,
-        .eventLog = event_log,
+        .eventGlobalState = event_log_global_state,
         .goalRegions = goal_regions_ptr,
         .numGoalRegions = (int32_t)num_goal_regions,
         .numEpisodes = num_episodes,
@@ -1666,7 +1789,7 @@ Manager::Impl * Manager::Impl::init(
                 std::move(gpu_exec),
                 replay_log,
                 record_log,
-                event_log,
+                event_log_global_state,
                 mgr_cfg.replayLogPath,
                 mgr_cfg.recordLogPath,
                 mgr_cfg.eventLogPath,
@@ -1718,7 +1841,7 @@ Manager::Impl * Manager::Impl::init(
                 std::move(cpu_exec),
                 replay_log,
                 record_log,
-                event_log,
+                event_log_global_state,
                 mgr_cfg.replayLogPath,
                 mgr_cfg.recordLogPath,
                 mgr_cfg.eventLogPath,

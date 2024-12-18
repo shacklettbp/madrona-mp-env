@@ -52,6 +52,9 @@ enum class ExportID : uint32_t {
     FullTeamDone,
     FullTeamPolicyAssignments,
 
+    EventLog,
+    EventStepState,
+
     NumExports,
 };
 
@@ -145,7 +148,10 @@ struct Sim : public madrona::WorldBase {
 
     std::array<ZoneStats, consts::maxZones> zoneStats;
 
-    StepEvents *eventLog;
+    u64 matchID;
+
+    EventLogGlobalState *eventGlobalState;
+    u32 eventLoggedInStep;
 
     GoalRegion *goalRegions;
     int32_t numGoalRegions;
