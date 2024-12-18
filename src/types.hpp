@@ -539,8 +539,9 @@ struct EventLogGlobalState {
 };
 
 struct EventPlayerState {
+  u16 playerID;
   i16 pos[3];
-  u16 yaw;
+  i16 yaw;
   u16 magNumBullets;
   u16 isReloading;
 };

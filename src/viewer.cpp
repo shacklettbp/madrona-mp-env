@@ -57,79 +57,91 @@ int main(int argc, char *argv[])
     bool doAITeam1 = false;
     bool doAITeam2 = false;
 
+    char *analytics_db_path = nullptr;
+
     for (int i = 1; i < argc; i++) {
-        char *arg = argv[i];
+      char *arg = argv[i];
 
-        if (arg[0] == '-' && arg[1] == '-') {
-            arg += 2;
+      if (arg[0] == '-' && arg[1] == '-') {
+        arg += 2;
 
-            if (!strcmp("backend", arg)) {
-                i += 1;
+        if (!strcmp("backend", arg)) {
+          i += 1;
 
-                if (i == argc) {
-                    usageErr();
-                }
+          if (i == argc) {
+            usageErr();
+          }
 
-                char *value = argv[i];
-                if (!strcmp("cpu", value)) {
-                    exec_mode = ExecMode::CPU;
-                } else if (!strcmp("cuda", value)) {
-                    exec_mode = ExecMode::CUDA;
-                } else {
-                    usageErr();
-                }
-            } else if (!strcmp("record", arg)) {
-                if (record_log_path != nullptr) {
-                    usageErr();
-                }
+          char *value = argv[i];
+          if (!strcmp("cpu", value)) {
+            exec_mode = ExecMode::CPU;
+          } else if (!strcmp("cuda", value)) {
+            exec_mode = ExecMode::CUDA;
+          } else {
+            usageErr();
+          }
+        } else if (!strcmp("record", arg)) {
+          if (record_log_path != nullptr) {
+            usageErr();
+          }
 
-                i += 1;
+          i += 1;
 
-                if (i == argc) {
-                    usageErr();
-                }
+          if (i == argc) {
+            usageErr();
+          }
 
-                record_log_path = argv[i];
-            } else if (!strcmp("replay", arg)) {
-                if (replay_log_path != nullptr) {
-                    usageErr();
-                }
+          record_log_path = argv[i];
+        } else if (!strcmp("replay", arg)) {
+          if (replay_log_path != nullptr) {
+            usageErr();
+          }
 
-                i += 1;
+          i += 1;
 
-                if (i == argc) {
-                    usageErr();
-                }
+          if (i == argc) {
+            usageErr();
+          }
 
-                replay_log_path = argv[i];
-            } else if (!strcmp("scene", arg)) {
-                if (!scene_dir.empty()) {
-                    usageErr();
-                }
+          replay_log_path = argv[i];
+        } else if (!strcmp("scene", arg)) {
+          if (!scene_dir.empty()) {
+            usageErr();
+          }
 
-                i += 1;
+          i += 1;
 
-                if (i == argc) {
-                    usageErr();
-                }
+          if (i == argc) {
+            usageErr();
+          }
 
-                scene_dir = argv[i];
-            }
-            else if (!strcmp("doaiteam1", arg)) {
-                doAITeam1 = true;
-            }
-			else if (!strcmp("doaiteam2", arg)) {
-				doAITeam2 = true;
-			}
-        } else {
-            if (num_worlds_set) {
-                usageErr();
-            }
+          scene_dir = argv[i];
+        } else if (!strcmp("doaiteam1", arg)) {
+          doAITeam1 = true;
+        } else if (!strcmp("doaiteam2", arg)) {
+          doAITeam2 = true;
+        } else if (!strcmp("analytics-db", arg)) {
+          if (analytics_db_path != nullptr) {
+            usageErr();
+          }
 
-            num_worlds_set = true;
+          i += 1;
 
-            num_worlds = (uint32_t)atoi(arg);
+          if (i == argc) {
+            usageErr();
+          }
+
+          analytics_db_path = argv[i];
         }
+      } else {
+        if (num_worlds_set) {
+          usageErr();
+        }
+
+        num_worlds_set = true;
+
+        num_worlds = (uint32_t)atoi(arg);
+      }
     }
 
     if (scene_dir.empty()) {
@@ -159,6 +171,7 @@ int main(int argc, char *argv[])
       .mapRotation = map_rotation,
       .doAITeam1 = doAITeam1,
       .doAITeam2 = doAITeam2,
+      .analyticsDBPath = analytics_db_path,
     });
 
     const bool highlevel_move = false;

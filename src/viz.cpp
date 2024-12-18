@@ -11,6 +11,8 @@
 #include "map_importer.hpp"
 #include "mgr.hpp"
 
+#include "db.hpp"
+
 #include "viz_shader_common.hpp"
 
 #include <madrona/navmesh.hpp>
@@ -257,6 +259,11 @@ static FlyCamera initCam(Vector3 pos, Quat rot)
   };
 }
 
+struct AnalyticsDB {
+  sqlite3 *hdl = nullptr;
+  sqlite3_stmt *filterStatesByCaptureEvents = nullptr;
+};
+
 struct VizState {
   UISystem *ui;
   Window *window;
@@ -337,6 +344,8 @@ struct VizState {
   std::vector<Mesh> meshes = {};
   std::vector<Object> objects = {};
   std::vector<AssetGroup> objectAssetGroups = {};
+
+  AnalyticsDB db = {};
 
   inline VizState() {
       flyCam.fwd = normalize(flyCam.fwd);
@@ -670,6 +679,32 @@ static void vizStep(VizState *viz, Manager &mgr);
 static constexpr inline f32 MOUSE_SPEED = 1e-1f;
 // FIXME
 
+static AnalyticsDB loadAnalyticsDB(const char *path)
+{
+  sqlite3 *hdl = nullptr;
+  REQ_SQL(hdl, sqlite3_open(path, &hdl));
+
+  sqlite3_stmt *filter_states_by_capture_events_stmt;
+  REQ_SQL(hdl, sqlite3_prepare_v2(hdl, R"(
+SELECT pos_x, pos_y, pos_z, yaw FROM player_states
+INNER JOIN capture_events ON player_states.step_id = capture_events.step_id
+WHERE (? IS NULL OR capture_events.num_in_zone >= ?)
+  AND (? IS NULL OR capture_events.zone_idx = ?)
+  AND (? IS NULL OR capture_events.capture_team_idx = ?)
+)", -1, &filter_states_by_capture_events_stmt, nullptr));
+
+  return AnalyticsDB {
+    .hdl = hdl,
+    .filterStatesByCaptureEvents = filter_states_by_capture_events_stmt,
+  };
+}
+
+static void unloadAnalyticsDB(AnalyticsDB db)
+{
+  REQ_SQL(db.hdl, sqlite3_finalize(db.filterStatesByCaptureEvents));
+  REQ_SQL(db.hdl, sqlite3_close(db.hdl));
+}
+
 VizState * init(const VizConfig &cfg)
 {
   VizState *viz = new VizState {};
@@ -882,11 +917,19 @@ VizState * init(const VizConfig &cfg)
 
   loadAssets(viz, cfg);
 
+  if (cfg.analyticsDBPath != nullptr) {
+    viz->db = loadAnalyticsDB(cfg.analyticsDBPath);
+  }
+
   return viz;
 }
 
 void shutdown(VizState *viz)
 {
+  if (viz->db.hdl != nullptr) {
+    unloadAnalyticsDB(viz->db);
+  }
+
   GPURuntime *gpu = viz->gpu;
 
   gpu->waitUntilWorkFinished(viz->mainQueue);
@@ -1778,6 +1821,13 @@ static inline void playerInfoUI(Engine &ctx, VizState *viz)
   }
 }
 
+static void analyticsDBUI(Engine &ctx, VizState *viz)
+{
+  ImGui::Begin("Analytics");
+
+  ImGui::End();
+}
+
 static Engine & uiLogic(VizState *viz, Manager &mgr)
 {
   ImGuiSystem::newFrame(viz->ui, viz->window->systemUIScale, 1.f / 60.f);
@@ -1785,6 +1835,8 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   Engine &ctx = cfgUI(viz, mgr);
 
   playerInfoUI(ctx, viz);
+
+  analyticsDBUI(ctx, viz);
 
   return ctx;
 }

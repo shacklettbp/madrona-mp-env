@@ -29,6 +29,8 @@ struct VizConfig {
   float mapRotation;
   bool doAITeam1;
   bool doAITeam2;
+
+  const char *analyticsDBPath;
 };
 
 struct VizCamera {};

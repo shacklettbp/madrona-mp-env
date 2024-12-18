@@ -42,6 +42,17 @@ target_link_libraries(madrona_mp_env_importer PUBLIC
 
 add_subdirectory(nav)
 
+find_package(SQLite3 REQUIRED)
+
+add_library(madrona_mp_env_db STATIC
+  db.hpp db.cpp
+)
+
+target_link_libraries(madrona_mp_env_db PUBLIC
+  madrona_mw_core
+  SQLite::SQLite3
+)
+
 add_library(madrona_mp_env_mgr STATIC
     mgr.hpp mgr.cpp
 )
@@ -57,6 +68,7 @@ target_link_libraries(madrona_mp_env_mgr
         madrona_physics_loader
         madrona_mp_env_importer
         meshoptimizer
+        madrona_mp_env_db
 )
 
 if (TARGET madrona_cuda)
@@ -125,23 +137,13 @@ if (TARGET madrona_viz)
 endif()
 
 add_executable(headless headless.cpp)
-target_link_libraries(headless madrona_mw_core madrona_mp_env_mgr)
+target_link_libraries(headless
+  madrona_mw_core madrona_mp_env_mgr)
 
 add_executable(convert_assets convert_assets.cpp)
 target_link_libraries(convert_assets
   madrona_mw_core madrona_mp_env_mgr
   madrona_mp_env_nav_build
-)
-
-add_library(madrona_mp_env_db STATIC
-  db.hpp db.cpp
-)
-
-find_package(SQLite3 REQUIRED)
-
-target_link_libraries(madrona_mp_env_db PUBLIC
-  madrona_mw_core
-  SQLite::SQLite3
 )
 
 add_executable(build_db build_db.cpp)

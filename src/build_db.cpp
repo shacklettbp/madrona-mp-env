@@ -62,6 +62,7 @@ step_idx INTEGER
 CREATE TABLE player_states (
 id INTEGER PRIMARY KEY AUTOINCREMENT,
 step_id INTEGER,
+player_idx INTEGER,
 pos_x INTEGER,
 pos_y INTEGER,
 pos_z INTEGER,
@@ -87,9 +88,9 @@ INSERT INTO match_steps (match_id, step_idx) VALUES (?, ?);
   sqlite3_stmt *insert_player_state_stmt;
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO player_states (
-  step_id, pos_x, pos_y, pos_z,
+  step_id, player_idx, pos_x, pos_y, pos_z,
   yaw, num_bullets, is_reloading)
-VALUES (?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_player_state_stmt, nullptr));
 
   sqlite3_stmt *insert_capture_event_stmt;
@@ -127,12 +128,13 @@ VALUES (?, ?, ?, ?);
         EventPlayerState player_state = step.players[player];
 
         sqlite3_bind_int(insert_player_state_stmt, 1, step_id);
-        sqlite3_bind_int(insert_player_state_stmt, 2, player_state.pos[0]);
-        sqlite3_bind_int(insert_player_state_stmt, 3, player_state.pos[1]);
-        sqlite3_bind_int(insert_player_state_stmt, 4, player_state.pos[2]);
-        sqlite3_bind_int(insert_player_state_stmt, 5, player_state.yaw);
-        sqlite3_bind_int(insert_player_state_stmt, 6, player_state.magNumBullets);
-        sqlite3_bind_int(insert_player_state_stmt, 7, player_state.isReloading);
+        sqlite3_bind_int(insert_player_state_stmt, 2, player_state.playerID);
+        sqlite3_bind_int(insert_player_state_stmt, 3, player_state.pos[0]);
+        sqlite3_bind_int(insert_player_state_stmt, 4, player_state.pos[1]);
+        sqlite3_bind_int(insert_player_state_stmt, 5, player_state.pos[2]);
+        sqlite3_bind_int(insert_player_state_stmt, 6, player_state.yaw);
+        sqlite3_bind_int(insert_player_state_stmt, 7, player_state.magNumBullets);
+        sqlite3_bind_int(insert_player_state_stmt, 8, player_state.isReloading);
 
         execResetStmt(db, insert_player_state_stmt);
       }
@@ -154,10 +156,6 @@ VALUES (?, ?, ?, ?);
           .matchID = event.matchID,
           .step = event.step,
         });
-
-        if (iter == step_id_lookup.end()) {
-          printf("%lu %u\n", event.matchID, event.step);
-        }
 
         assert(iter != step_id_lookup.end());
 

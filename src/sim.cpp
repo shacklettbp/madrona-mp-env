@@ -54,13 +54,15 @@ static void writeEventStepState(Engine &ctx)
 
     Entity e = ctx.data().agents[i];
 
+    player_state.playerID = (u16)i;
+
     Vector3 pos = ctx.get<Position>(e);
     player_state.pos[0] = (i16)pos.x;
     player_state.pos[1] = (i16)pos.y;
     player_state.pos[2] = (i16)pos.z;
 
     Aim aim = ctx.get<Aim>(e);
-    player_state.yaw = (u16)(aim.yaw * 65535 / math::pi);
+    player_state.yaw = (i16)(aim.yaw * 32768 / math::pi);
 
     Magazine mag = ctx.get<Magazine>(e);
 
