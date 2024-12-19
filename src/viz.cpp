@@ -405,13 +405,14 @@ static inline float srgbToLinear(float srgb)
     return powf((srgb + 0.055f) / 1.055f, 2.4f);
 }
 
-static inline Vector4 rgb8ToFloat(uint8_t r, uint8_t g, uint8_t b)
+static inline Vector4 rgb8ToFloat(uint8_t r, uint8_t g, uint8_t b,
+                                  float alpha = 1.f)
 {
     return {
         srgbToLinear((float)r / 255.f),
         srgbToLinear((float)g / 255.f),
         srgbToLinear((float)b / 255.f),
-        1.f,
+        alpha,
     };
 }
 
@@ -835,8 +836,9 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   float box_width = ImGui::CalcTextSize(" ").x * 7_i32;
 
   ImGui::PushItemWidth(box_width);
-  ImGui::DragInt("Minimum Num Players in Zone", &db.captureEventsFilter.minNumInZone, 1.f, 1,
-      consts::maxTeamSize, "%d", ImGuiSliderFlags_AlwaysClamp);
+  ImGui::DragInt("Minimum Players in Zone",
+                 &db.captureEventsFilter.minNumInZone, 1.f, 1,
+                consts::maxTeamSize, "%d", ImGuiSliderFlags_AlwaysClamp);
 
   ImGui::DragInt("Zone ID", &db.captureEventsFilter.zoneIDX,
                  1.0, -1, ctx.data().zones.numZones - 1,
@@ -2313,6 +2315,66 @@ static void renderShotViz(Engine &ctx, VizState *viz,
   raster_enc.draw(0, num_lines * 2);
 }
 
+static void renderZones(Engine &ctx, VizState *viz,
+                        RasterPassEncoder &raster_enc)
+{
+  auto renderZone = 
+    [&]
+  (Vector3 center, float rotation, Vector3 diag, Vector4 color,
+   u32 num_tris)
+  {
+    raster_enc.drawData(GoalRegionPerDraw {
+      .txfm = computeNonUniformScaleTxfm(
+          center, Quat::angleAxis(rotation, math::up),
+          Diag3x3 { diag.x, diag.y, diag.z }),
+      .color = color,
+    });
+
+    raster_enc.draw(0, num_tris);
+  };
+
+  ZoneState &zone_state = ctx.singleton<ZoneState>();
+
+  auto renderZones =
+    [&]
+  (u32 num_tris)
+  {
+    for (CountT i = 0; i < ctx.data().zones.numZones; i++) {
+        AABB aabb = ctx.data().zones.bboxes[i];
+        float rotation = ctx.data().zones.rotations[i];
+
+        Vector3 diag = aabb.pMax - aabb.pMin;
+        Vector3 center = 0.5f * (aabb.pMax + aabb.pMin);
+
+        Vector4 color = rgb8ToFloat(100, 230, 100, 1.f);
+
+#if 0
+        if (i != zone_state.curZone) {
+
+            obj_id = 6;
+        } else if (zone_state.curControllingTeam == -1 ||
+                   !zone_state.isCaptured) {
+            obj_id = 7;
+        } else if (zone_state.curControllingTeam == 0) {
+            obj_id = 8;
+        } else if (zone_state.curControllingTeam == 1) {
+            obj_id = 9;
+        } else {
+            obj_id = 0;
+        }
+#endif
+
+        renderZone(center, rotation, diag, color, num_tris);
+    }
+  };
+
+  raster_enc.setShader(viz->goalRegionsShaderWireframe);
+  renderZones(24);
+
+  raster_enc.setShader(viz->goalRegionsShaderWireframeNoDepth);
+  renderZones(24);
+}
+
 static void renderAgents(Engine &ctx, VizState *viz,
                          RasterPassEncoder &raster_enc)
 {
@@ -2396,6 +2458,8 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   renderGoalRegions(ctx, viz, raster_enc);
 
   renderShotViz(ctx, viz, raster_enc);
+
+  renderZones(ctx, viz, raster_enc);
 
 #if 0
   raster_enc.setShader(viz->opaqueGeoShader);

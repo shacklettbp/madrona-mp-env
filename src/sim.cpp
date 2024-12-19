@@ -1771,31 +1771,6 @@ inline void zoneSystem(Engine &ctx,
     }
 }
 
-inline void zoneVizSystem(Engine &ctx,
-                               ZoneState &zone_state)
-{
-    // Visualization purposes only
-    for (CountT i = 0; i < ctx.data().zones.numZones; i++) {
-        Entity zone_entity = ctx.data().zoneEntities[i];
-
-        int32_t obj_id;
-        if (i != zone_state.curZone) {
-            obj_id = 6;
-        } else if (zone_state.curControllingTeam == -1 ||
-                   !zone_state.isCaptured) {
-            obj_id = 7;
-        } else if (zone_state.curControllingTeam == 0) {
-            obj_id = 8;
-        } else if (zone_state.curControllingTeam == 1) {
-            obj_id = 9;
-        } else {
-            obj_id = 0;
-        }
-
-        ctx.get<ObjectID>(zone_entity) = { obj_id };
-    }
-}
-
 inline void cleanupShotVizSystem(Engine &ctx,
                                  Entity e,
                                  ShotVizRemaining &remaining)
@@ -5041,14 +5016,6 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
 
 #ifndef MADRONA_GPU_MODE
     if (cfg.viz) {
-      if (cfg.task == Task::Zone ||
-              cfg.task == Task::ZoneCaptureDefend) {
-          builder.addToGraph<ParallelForNode<Engine,
-              zoneVizSystem,
-                  ZoneState
-              >>({post_reset});
-      }
-
       VizSystem::setupGameTasks(cfg.viz, builder);
     }
 #endif

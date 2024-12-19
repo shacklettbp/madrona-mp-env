@@ -74,7 +74,7 @@ float4 vertMainWireframe(uint id : SV_VertexID) : SV_Position
   uint idx = base_idx * 18 + offset;
 
   return wireframeVertexShaderTransform<VertexFetch, O2CTransform>(
-    idx, 2.0, global.view.fbDims, fetcher, txfm);
+    idx, 3.0, global.view.fbDims, fetcher, txfm);
 }
 
 [shader("fragment")]

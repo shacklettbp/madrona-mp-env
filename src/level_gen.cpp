@@ -85,8 +85,6 @@ void createPersistentEntities(Engine &ctx, const TaskConfig &cfg)
             ctx.get<Position>(zone) = center;
             ctx.get<Rotation>(zone) = rot_txfm;
             ctx.get<Scale>(zone) = Diag3x3 { diff.x, diff.y, diff.z };
-            ctx.get<ObjectID>(zone) = { 6 };
-
             ctx.data().zoneEntities[i] = zone;
         }
     }

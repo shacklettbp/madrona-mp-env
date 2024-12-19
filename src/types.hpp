@@ -819,8 +819,7 @@ struct Turret : public madrona::Archetype<
 struct ZoneViz : public madrona::Archetype<
     Position,
     Rotation,
-    Scale,
-    ObjectID
+    Scale
 > {};
 
 struct FullTeamID {
