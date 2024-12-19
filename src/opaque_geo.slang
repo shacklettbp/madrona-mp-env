@@ -16,6 +16,7 @@ struct V2F {
   float4 pos    : SV_Position;
   float3 normal : NORMAL0;
   float2 uv     : TEXCOORD0;
+  float worldZ : TEXCOORD1;
 };
 
 [shader("vertex")]
@@ -36,6 +37,8 @@ V2F vertMain(VertInput v)
   out.normal = objectNormalToWorld(w2o, normal_o);
   out.uv = v.uv;
 
+  out.worldZ = pos_w.z;
+
   return out;
 }
 
@@ -50,5 +53,9 @@ float4 fragMain(V2F v2f) : SV_Target0
 
   float brightness = lerp(0.25, 1, dot_view);
 
-  return perDraw.baseColor * float4(float3(brightness), 1.f);
+  float4 color = lerp(perDraw.baseColor, float4(0.3, 0.3, 1, 1),
+      clamp(v2f.worldZ / 500, 0.0, 1.0));
+
+
+  return color * float4(float3(brightness), 1.f);
 }
