@@ -29,8 +29,6 @@
 #include <vector>
 #include <random>
 
-#pragma optimize("", off)
-
 namespace NavUtils
 {
 	using madrona::math::Vector3;
@@ -245,6 +243,16 @@ struct FlyCamera {
   float orthoHeight = 5.f;
 };
 
+struct PlayerSnapshot {
+  Vector3 pos;
+  float yaw;
+  Magazine mag;
+};
+
+struct StepSnapshot {
+  PlayerSnapshot players[consts::maxTeamSize * 2];
+};
+
 static FlyCamera initCam(Vector3 pos, Quat rot)
 {
   Vector3 fwd = normalize(rot.rotateVec(math::fwd));
@@ -259,9 +267,37 @@ static FlyCamera initCam(Vector3 pos, Quat rot)
   };
 }
 
+enum class AnalyticsThreadCtrl : u32 {
+  Idle,
+  CaptureEventsFilter,
+  Exit,
+};
+
+struct CaptureEventsFilter {
+  i32 minNumInZone = 1;
+  i32 zoneIDX = -1;
+};
+
 struct AnalyticsDB {
   sqlite3 *hdl = nullptr;
-  sqlite3_stmt *filterStatesByCaptureEvents = nullptr;
+  sqlite3_stmt *filterStatesByCaptureEventsFilter = nullptr;
+
+  CaptureEventsFilter captureEventsFilter = {};
+
+  alignas(MADRONA_CACHE_LINE) AtomicU32 threadCtrl =
+      (u32)AnalyticsThreadCtrl::Idle;
+
+  AtomicU32 resultsStatus = 0;
+
+  Optional<DynArray<StepSnapshot>> filteredResults =
+      Optional<DynArray<StepSnapshot>>::none();
+
+  Optional<DynArray<StepSnapshot>> displayResults =
+      Optional<DynArray<StepSnapshot>>::none();
+
+  int currentSelectedResult = -1;
+
+  std::thread bgThread = {};
 };
 
 struct VizState {
@@ -679,29 +715,222 @@ static void vizStep(VizState *viz, Manager &mgr);
 static constexpr inline f32 MOUSE_SPEED = 1e-1f;
 // FIXME
 
-static AnalyticsDB loadAnalyticsDB(const char *path)
+static void sendAnalyticsThreadCmd(AnalyticsDB &db, AnalyticsThreadCtrl ctrl)
 {
-  sqlite3 *hdl = nullptr;
-  REQ_SQL(hdl, sqlite3_open(path, &hdl));
+  while (true) {
+    u32 cur = db.threadCtrl.load_relaxed();
+    if (cur == (u32)AnalyticsThreadCtrl::Idle) {
+      break;
+    }
 
-  sqlite3_stmt *filter_states_by_capture_events_stmt;
-  REQ_SQL(hdl, sqlite3_prepare_v2(hdl, R"(
-SELECT pos_x, pos_y, pos_z, yaw FROM player_states
+    db.threadCtrl.wait<sync::relaxed>(cur);
+  }
+
+  db.threadCtrl.store_release((u32)ctrl);
+  db.threadCtrl.notify_one();
+}
+
+static void analyticsBGThread(AnalyticsDB &db)
+{
+  while (true) {
+    db.threadCtrl.wait<sync::acquire>(0);
+    auto ctrl = (AnalyticsThreadCtrl)db.threadCtrl.exchange<sync::relaxed>(
+      (u32)AnalyticsThreadCtrl::Idle);
+    db.threadCtrl.notify_one();
+
+    switch (ctrl) {
+    case AnalyticsThreadCtrl::Idle: continue;
+    case AnalyticsThreadCtrl::Exit: return;
+    case AnalyticsThreadCtrl::CaptureEventsFilter: {
+      DynArray<StepSnapshot> results(1000);
+
+      printf("Capture events filter\n");
+
+      CaptureEventsFilter filter = db.captureEventsFilter;
+
+      sqlite3_bind_int(db.filterStatesByCaptureEventsFilter, 1,
+                       filter.minNumInZone);
+      sqlite3_bind_int(db.filterStatesByCaptureEventsFilter, 2,
+                       filter.minNumInZone);
+
+      if (db.captureEventsFilter.zoneIDX == -1) {
+        sqlite3_bind_null(db.filterStatesByCaptureEventsFilter, 3);
+        sqlite3_bind_null(db.filterStatesByCaptureEventsFilter, 4);
+      } else {
+        sqlite3_bind_int(db.filterStatesByCaptureEventsFilter, 3,
+                         filter.zoneIDX);
+        sqlite3_bind_int(db.filterStatesByCaptureEventsFilter, 4,
+                         filter.zoneIDX);
+      }
+
+      sqlite3_bind_null(db.filterStatesByCaptureEventsFilter, 5);
+      sqlite3_bind_null(db.filterStatesByCaptureEventsFilter, 6);
+
+      i64 cur_step_id = -1;
+      i64 cur_player_idx = 0;
+      StepSnapshot *cur_snapshot = nullptr;
+      while (sqlite3_step(db.filterStatesByCaptureEventsFilter) ==
+             SQLITE_ROW) {
+        i64 step_id = sqlite3_column_int(
+            db.filterStatesByCaptureEventsFilter, 0);
+
+        if (step_id != cur_step_id) {
+          cur_step_id = step_id;
+          cur_player_idx = 0;
+          results.push_back({});
+          cur_snapshot = &results.back();
+        }
+
+        i64 pos_x = sqlite3_column_int(
+            db.filterStatesByCaptureEventsFilter, 1);
+        i64 pos_y = sqlite3_column_int(
+            db.filterStatesByCaptureEventsFilter, 2);
+        i64 pos_z = sqlite3_column_int(
+            db.filterStatesByCaptureEventsFilter, 3);
+        i64 yaw = sqlite3_column_int(
+            db.filterStatesByCaptureEventsFilter, 4);
+
+        i64 num_bullets = sqlite3_column_int(
+            db.filterStatesByCaptureEventsFilter, 5);
+        i64 is_reloading = sqlite3_column_int(
+            db.filterStatesByCaptureEventsFilter, 6);
+
+        cur_snapshot->players[cur_player_idx++] = {
+          .pos = { (float)pos_x, (float)pos_y, (float)pos_z },
+          .yaw = (float)yaw * math::pi / 32768.f,
+          .mag = {
+            .numBullets = (i32)num_bullets,
+            .isReloading = (i32)is_reloading,
+          },
+        };
+        assert(cur_player_idx <= consts::maxTeamSize * 2);
+      }
+
+      REQ_SQL(db.hdl, sqlite3_reset(db.filterStatesByCaptureEventsFilter));
+
+      db.filteredResults = std::move(results);
+      db.resultsStatus.store_release(2);
+
+      printf("Returned results\n");
+    } break;
+    default: MADRONA_UNREACHABLE();
+    }
+  }
+}
+
+static void analyticsDBUI(Engine &ctx, VizState *viz)
+{
+  AnalyticsDB &db = viz->db;
+
+  ImGui::Begin("Analytics");
+
+  ImGui::Text("Filter Capture Events");
+  ImGui::Separator();
+
+  u32 filter_results_status = db.resultsStatus.load_relaxed();
+  if (filter_results_status != 0) {
+    ImGui::BeginDisabled();
+  }
+
+  float box_width = ImGui::CalcTextSize(" ").x * 7_i32;
+
+  ImGui::PushItemWidth(box_width);
+  ImGui::DragInt("Minimum Num Players in Zone", &db.captureEventsFilter.minNumInZone, 1.f, 1,
+      consts::maxTeamSize, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  ImGui::DragInt("Zone ID", &db.captureEventsFilter.zoneIDX,
+                 1.0, -1, ctx.data().zones.numZones - 1,
+                 db.captureEventsFilter.zoneIDX == -1 ? "Any" : "%d",
+                 ImGuiSliderFlags_AlwaysClamp);
+  ImGui::PopItemWidth();
+
+
+  if (ImGui::Button("Filter")) {
+    db.resultsStatus.store_relaxed(1);
+    sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::CaptureEventsFilter);
+  }
+
+  if (filter_results_status != 0) {
+    ImGui::EndDisabled();
+  }
+
+  if (filter_results_status == 2) {
+    std::atomic_thread_fence(sync::acquire);
+
+    db.displayResults = std::move(db.filteredResults);
+    db.resultsStatus.store_relaxed(0);
+    filter_results_status = 0;
+  }
+
+  u32 num_filter_results = 0;
+  if (filter_results_status == 0 && db.displayResults.has_value()) {
+    num_filter_results = db.displayResults->size();
+  }
+
+  ImGui::Spacing();
+  ImGui::Spacing();
+  ImGui::Text("Visualize Events");
+
+  if (num_filter_results == 0) {
+    ImGui::BeginDisabled();
+    db.currentSelectedResult = -1;
+  }
+
+  ImGui::PushItemWidth(box_width);
+  ImGui::DragInt("Event Index", &db.currentSelectedResult,
+                 1, 0, num_filter_results, 
+                 num_filter_results == 0 ? "" :
+                   (db.currentSelectedResult == -1 ? "[Select]" : "%d"),
+                 ImGuiSliderFlags_AlwaysClamp);
+
+  ImGui::PopItemWidth();
+
+  if (num_filter_results == 0) {
+    ImGui::EndDisabled();
+  }
+
+  if (num_filter_results > 0 && db.currentSelectedResult != -1) {
+    auto &step_snapshot = (*db.displayResults)[db.currentSelectedResult];
+
+    for (i32 i = 0; i < consts::maxTeamSize * 2; i++) {
+      auto &player_snapshot = step_snapshot.players[i];
+
+      Entity agent = ctx.data().agents[i];
+      ctx.get<Position>(agent) = player_snapshot.pos;
+      ctx.get<Rotation>(agent) = Quat::angleAxis(
+          player_snapshot.yaw, math::up);
+    }
+  }
+
+  ImGui::End();
+}
+
+static void loadAnalyticsDB(VizState *viz, const char *path)
+{
+  AnalyticsDB &db = viz->db;
+
+  REQ_SQL(db.hdl, sqlite3_open(path, &db.hdl));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT player_states.step_id, pos_x, pos_y, pos_z, yaw,
+       num_bullets, is_reloading
+FROM player_states
 INNER JOIN capture_events ON player_states.step_id = capture_events.step_id
 WHERE (? IS NULL OR capture_events.num_in_zone >= ?)
   AND (? IS NULL OR capture_events.zone_idx = ?)
   AND (? IS NULL OR capture_events.capture_team_idx = ?)
-)", -1, &filter_states_by_capture_events_stmt, nullptr));
+ORDER BY player_states.step_id, player_states.player_idx
+)", -1, &db.filterStatesByCaptureEventsFilter, nullptr));
 
-  return AnalyticsDB {
-    .hdl = hdl,
-    .filterStatesByCaptureEvents = filter_states_by_capture_events_stmt,
-  };
+  db.bgThread = std::thread(analyticsBGThread, std::ref(db));
 }
 
-static void unloadAnalyticsDB(AnalyticsDB db)
+static void unloadAnalyticsDB(AnalyticsDB &db)
 {
-  REQ_SQL(db.hdl, sqlite3_finalize(db.filterStatesByCaptureEvents));
+  sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::Exit);
+  db.bgThread.join();
+
+  REQ_SQL(db.hdl, sqlite3_finalize(db.filterStatesByCaptureEventsFilter));
   REQ_SQL(db.hdl, sqlite3_close(db.hdl));
 }
 
@@ -918,7 +1147,7 @@ VizState * init(const VizConfig &cfg)
   loadAssets(viz, cfg);
 
   if (cfg.analyticsDBPath != nullptr) {
-    viz->db = loadAnalyticsDB(cfg.analyticsDBPath);
+    loadAnalyticsDB(viz, cfg.analyticsDBPath);
   }
 
   return viz;
@@ -1819,13 +2048,6 @@ static inline void playerInfoUI(Engine &ctx, VizState *viz)
         planAI(ctx, viz, ctx.worldID().idx, agent);
     }
   }
-}
-
-static void analyticsDBUI(Engine &ctx, VizState *viz)
-{
-  ImGui::Begin("Analytics");
-
-  ImGui::End();
 }
 
 static Engine & uiLogic(VizState *viz, Manager &mgr)
