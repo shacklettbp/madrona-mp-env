@@ -23,26 +23,44 @@ static inline void logEvent(Engine &ctx, const GameEvent &event)
 
     AtomicU32Ref event_logged_in_step_atomic(ctx.data().eventLoggedInStep);
     event_logged_in_step_atomic.store<sync::relaxed>(1);
+
+    AtomicU32Ref event_mask_atomic(ctx.data().eventMask);
+    event_mask_atomic.fetch_or<sync::relaxed>((u32)event.type);
 }
 
 static void writeEventStepState(Engine &ctx)
 {
   u32 cur_step = ctx.singleton<MatchInfo>().curStep;
 
-  if (ctx.data().eventLoggedInStep == 0 && cur_step % 20 != 0) {
+  u32 num_events = ctx.data().eventLoggedInStep;
+
+  if (num_events == 0 && cur_step % 20 != 0) {
     return;
   }
 
+  u32 event_mask = ctx.data().eventMask;
+
   ctx.data().eventLoggedInStep = 0;
+  ctx.data().eventMask = 0;
 
   AtomicU32Ref num_step_states_atomic(ctx.data().eventGlobalState->numStepStates);
   num_step_states_atomic.fetch_add_relaxed(1);
 
   EventStepState &state_out =
     ctx.getDirect<EventStepState>(2, ctx.makeTemporary<EventStepStateEntity>());
+  
+  state_out.numEvents = num_events;
+  state_out.eventMask = event_mask;
 
   state_out.matchID = ctx.data().matchID;
   state_out.step = cur_step;
+
+  {
+    ZoneState &zone_state = ctx.singleton<ZoneState>();
+    state_out.curZone = (u8)zone_state.curZone;
+    state_out.curZoneController = (i8)(
+        zone_state.isCaptured ? zone_state.curControllingTeam : -1);
+  }
 
   for (CountT i = 0; i < consts::maxTeamSize * 2; i++) {
     EventPlayerState &player_state = state_out.players[i];
@@ -1185,20 +1203,30 @@ inline void fireSystem(Engine &ctx,
     bool queue_fire = action.fire == 1;
 
     if (alive.mask == 0.f) {
-        return;
+      return;
     }
 
     if (action.reload == 1) {
-        if (magazine.numBullets == weapon_stats.magSize) {
-            combat_state.reloadedFullMag = true;
-        }
+      logEvent(ctx, GameEvent {
+        .type = EventType::Reload,
+        .matchID = ctx.data().matchID,
+        .step = (u32)ctx.singleton<MatchInfo>().curStep,
+        .reload = {
+          .player = u8(team_info.team * consts::maxTeamSize + team_info.offset),
+          .numBulletsAtReloadTime = u8(magazine.numBullets),
+        },
+      });
 
-        magazine.numBullets = weapon_stats.magSize;
-        magazine.isReloading = weapon_stats.reloadTime;
+      if (magazine.numBullets == weapon_stats.magSize) {
+          combat_state.reloadedFullMag = true;
+      }
 
-        for (int32_t i = 0; i < weapon_stats.fireQueueSize; i++) {
-            combat_state.fireQueue[i] = false;
-        }
+      magazine.numBullets = weapon_stats.magSize;
+      magazine.isReloading = weapon_stats.reloadTime;
+
+      for (int32_t i = 0; i < weapon_stats.fireQueueSize; i++) {
+          combat_state.fireQueue[i] = false;
+      }
     }
 
     bool reload_in_progress = magazine.isReloading > 0;
@@ -1360,6 +1388,7 @@ inline void fireSystem(Engine &ctx,
     }
 
     bool hit_success = hit;
+    ResultRef<TeamInfo> hit_teaminfo = nullptr;
     if (hit_entity == Entity::none()) {
         hit_success = false;
     } else if (
@@ -1367,7 +1396,7 @@ inline void fireSystem(Engine &ctx,
         ctx.data().taskType == Task::Zone ||
         ctx.data().taskType == Task::ZoneCaptureDefend
     ) {
-        auto hit_teaminfo = ctx.getSafe<TeamInfo>(hit_entity);
+        hit_teaminfo = ctx.getSafe<TeamInfo>(hit_entity);
         if (!hit_teaminfo.valid()) {
             hit_success = false;
         }
@@ -1403,7 +1432,20 @@ inline void fireSystem(Engine &ctx,
 
     HP hp = ctx.get<HP>(hit_entity);
     if (hp.hp <= weapon_stats.dmgPerBullet) {
-        combat_state.successfulKill = true;
+      combat_state.successfulKill = true;
+
+      logEvent(ctx, GameEvent {
+        .type = EventType::Kill,
+        .matchID = ctx.data().matchID,
+        .step = (u32)ctx.singleton<MatchInfo>().curStep,
+        .kill = {
+          .killer =
+            u8(hit_teaminfo.value().team * consts::maxTeamSize +
+               hit_teaminfo.value().offset),
+          .killed =
+            u8(team_info.team * consts::maxTeamSize + team_info.offset),
+        },
+      });
     }
 
     DamageDealt &dmg = ctx.get<DamageDealt>(hit_entity);
@@ -3810,7 +3852,7 @@ inline void zoneMatchInfoSystem(Engine &ctx, MatchInfo &match_info)
         cur_zone_stats.numSwaps += 1;
       }
 
-      if (ctx.data().eventGlobalState) {
+      if (ctx.data().eventGlobalState && ctx.data().matchID != ~0_u64) {
         if (new_captured) {
           AABB zone_aabb = ctx.data().zones.bboxes[zone_state.curZone];
           float zone_aabb_rot_angle = ctx.data().zones.rotations[zone_state.curZone];
@@ -4401,473 +4443,16 @@ inline void planAStarAISystem(Engine &ctx,
   };
 }
 
-void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
+static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
+                             Span<const TaskGraphNodeID> deps)
 {
-    auto &builder = taskgraph_mgr.init(TaskGraphID::Step);
+  // Conditionally reset the world if the episode is over
+  auto reset_sys = builder.addToGraph<ParallelForNode<Engine,
+    resetSystem,
+      WorldReset
+    >>(deps);
 
-    builder.addToGraph<ClearTmpNode<GameEventEntity>>({});
-    builder.addToGraph<ClearTmpNode<EventStepStateEntity>>({});
-
-    auto pvpGameplayLogic = [&](Span<const TaskGraphNodeID> deps) {
-        if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
-            SimFlags::FullTeamPolicy) {
-
-          builder.addToGraph<ParallelForNode<Engine,
-            readFullTeamActionsPolicies,
-              FullTeamID,
-              FullTeamActions,
-              FullTeamPolicy
-            >>({});
-        }
-
-        builder.addToGraph<ParallelForNode<Engine,
-            applyBotActionsSystem,
-                HardcodedBotAction,
-                PvPAction,
-                AgentPolicy
-            >>({});
-
-        TaskGraphNodeID move_finished_sys;
-        if (cfg.highlevelMove) {
-            auto move_sys = builder.addToGraph<ParallelForNode<Engine,
-                coarseMovementSystem,
-                    CoarsePvPAction,
-                    Rotation,
-                    Aim,
-                    AgentVelocity,
-                    Alive,
-                    CombatState,
-                    StandState
-                >>(deps);
-
-            move_finished_sys = move_sys;
-        } else {
-            auto deaccelerate = builder.addToGraph<ParallelForNode<Engine,
-                deaccelerateSystem,
-                    AgentVelocity
-                >>(deps);
-
-            auto stand_sys = builder.addToGraph<ParallelForNode<Engine,
-                pvpStandSystem,
-                    PvPAction,
-                    StandState,
-                    Alive 
-                >>({deaccelerate});
-
-            auto move_sys = builder.addToGraph<ParallelForNode<Engine,
-                pvpMovementSystem,
-                    PvPAction,
-                    Rotation,
-                    AgentVelocity,
-                    Alive,
-                    CombatState,
-                    StandState
-                >>({stand_sys});
-
-            auto turn_sys = builder.addToGraph<ParallelForNode<Engine,
-                pvpTurnSystem,
-                    PvPAction,
-                    Rotation,
-                    Aim,
-                    Alive
-                >>({move_sys});
-
-            move_finished_sys = turn_sys;
-        }
-
-        auto apply_velocity = builder.addToGraph<ParallelForNode<Engine,
-            applyVelocitySystem,
-                Position,
-                AgentVelocity,
-                IntermediateMoveState
-            >>({move_finished_sys});
-
-        apply_velocity = builder.addToGraph<ParallelForNode<Engine,
-            updateMoveStateSystem,
-                Position,
-                AgentVelocity,
-                IntermediateMoveState
-            >>({apply_velocity});
-
-        auto fall_sys = builder.addToGraph<ParallelForNode<Engine,
-            fallSystem,
-                Position,
-                IntermediateMoveState,
-                Alive
-            >>({apply_velocity});
-
-        fall_sys = builder.addToGraph<ParallelForNode<Engine,
-            updateMoveStatePostFallSystem,
-                Position,
-                IntermediateMoveState
-            >>({fall_sys});
-
-        TaskGraphNodeID move_done = fall_sys;
-
-        TaskGraphNodeID battle_done;
-        if (cfg.highlevelMove) {
-            auto battle_sys = builder.addToGraph<ParallelForNode<Engine,
-                hlBattleSystem,
-                    Position,
-                    Rotation,
-                    Aim,
-                    Opponents,
-                    Magazine,
-                    TeamInfo,
-                    StandState,
-                    Alive,
-                    CombatState
-                >>({move_done});
-        } else {
-            auto fire_sys = builder.addToGraph<ParallelForNode<Engine,
-                fireSystem,
-                    Position,
-                    Rotation,
-                    Aim,
-                    PvPAction,
-                    Opponents,
-                    Magazine,
-                    TeamInfo,
-                    StandState,
-                    Alive,
-                    CombatState
-                >>({move_done});
-
-            if (cfg.task == Task::Turret) {
-                fire_sys = builder.addToGraph<ParallelForNode<Engine,
-                    turretFireSystem,
-                        Position,
-                        Rotation,
-                        Aim,
-                        Magazine,
-                        Alive,
-                        TurretState
-                    >>({fire_sys});
-            }
-
-            battle_done = fire_sys;
-        }
-
-        auto apply_dmg_sys = builder.addToGraph<ParallelForNode<Engine,
-            applyDmgSystem,
-                Position,
-                AgentVelocity,
-                HP,
-                DamageDealt,
-                Alive,
-                CombatState
-            >>({battle_done});
-
-        if (cfg.task == Task::Turret) {
-            apply_dmg_sys = builder.addToGraph<ParallelForNode<Engine,
-                applyDmgToTurretSystem,
-                    Position,
-                    HP,
-                    DamageDealt,
-                    Alive
-                >>({apply_dmg_sys});
-        }
-
-        auto respawn_sys = builder.addToGraph<ParallelForNode<Engine,
-        respawnSystem,
-        LevelData
-            >>({apply_dmg_sys});
-
-        auto autoheal_sys = builder.addToGraph<ParallelForNode<Engine,
-            autoHealSystem,
-                HP,
-                Alive,
-                CombatState
-            >>({respawn_sys});
-
-        TaskGraphNodeID sim_done = autoheal_sys;
-
-        if (cfg.task == Task::Zone ||
-            cfg.task == Task::ZoneCaptureDefend) {
-            auto zone_sys = builder.addToGraph<ParallelForNode<Engine,
-                zoneSystem,
-                    ZoneState
-                >>({sim_done});
-
-            sim_done = zone_sys;
-        }
-
-        if (cfg.recordLog != nullptr) {
-            sim_done = builder.addToGraph<ParallelForNode<Engine,
-                pvpRecordSystem,
-                    MatchInfo
-                >>({sim_done});
-        }
-
-        sim_done = builder.addToGraph<ParallelForNode<Engine,
-            leaveBreadcrumbsSystem,
-                Position,
-                TeamInfo,
-                BreadcrumbAgentState
-        >>({sim_done});
-
-#ifdef MADRONA_GPU_MODE
-        sim_done = queueSortByWorld<BreadcrumbEntity>(
-            builder, {sim_done});
-#endif
-
-        sim_done = builder.addToGraph<ParallelForNode<Engine,
-            accumulateBreadcrumbPenaltiesSystem,
-                Entity,
-                Breadcrumb
-            >>({sim_done});
-
-
-        sim_done = builder.addToGraph<ParallelForNode<Engine,
-            deleteBreadcrumbsSystem,
-                BreadcrumbDelete 
-            >>({sim_done});
-
-        sim_done = builder.addToGraph<ClearTmpNode<BreadcrumbDeleteEntity>>({sim_done});
-
-#ifdef MADRONA_GPU_MODE
-        sim_done = queueSortByWorld<BreadcrumbEntity>(
-            builder, {sim_done});
-#endif
-
-        return sim_done;
-    };
-
-    auto pvpReplayLogic = [&](Span<const TaskGraphNodeID> deps) {
-        auto replay = builder.addToGraph<ParallelForNode<Engine,
-            pvpReplaySystem,
-                MatchInfo
-            >>(deps);
-
-
-        if (cfg.task == Task::Zone ||
-                cfg.task == Task::ZoneCaptureDefend) {
-            auto zone_sys = builder.addToGraph<ParallelForNode<Engine,
-                zoneSystem,
-                    ZoneState
-                >>({replay});
-
-            replay = zone_sys;
-        }
-
-        return replay;
-    };
-
-    TaskGraphNodeID sim_done;
-    if (cfg.task == Task::Explore) {
-#if 0
-        auto deaccelerate = builder.addToGraph<ParallelForNode<Engine,
-            deaccelerateSystem,
-                AgentVelocity
-            >>({});
-
-        auto move_sys = builder.addToGraph<ParallelForNode<Engine,
-            exploreMovementSystem,
-                ExploreAction,
-                Rotation,
-                Velocity
-            >>({deaccelerate});
-
-        auto fall = builder.addToGraph<ParallelForNode<Engine,
-            fallSystem,
-                Position,
-                Alive
-            >>({move_sys});
-
-        auto apply_velocity = builder.addToGraph<ParallelForNode<Engine,
-            applyVelocitySystem,
-                Position,
-                AgentVelocity
-            >>({fall});
-
-        auto collision_sys = builder.addToGraph<ParallelForNode<Engine,
-            exploreWorldCollisionSystem,
-                Position,
-                ExploreAction
-            >>({apply_velocity});
-
-        sim_done = collision_sys;
-#endif
-        assert(false);
-        MADRONA_UNREACHABLE();
-    } else if (cfg.task == Task::TDM ||
-               cfg.task == Task::Zone ||
-               cfg.task == Task::ZoneCaptureDefend ||
-               cfg.task == Task::Turret) {
-        if (cfg.replayLog != nullptr) {
-            sim_done = pvpReplayLogic({});
-        } else {
-            sim_done = pvpGameplayLogic({});
-        }
-
-        if (cfg.viz) {
-            auto cleanup_shot_viz_sys = builder.addToGraph<ParallelForNode<Engine,
-                cleanupShotVizSystem,
-                    Entity,
-                    ShotVizRemaining
-                >>({sim_done});
-
-            auto destroy_shot_viz_sys = builder.addToGraph<ParallelForNode<Engine,
-                destroyShotVizSystem,
-                    ShotVizCleanupTracker
-                >>({cleanup_shot_viz_sys});
-
-            auto destroy_trackers = builder.addToGraph<ClearTmpNode<ShotVizCleanup>>(
-                {destroy_shot_viz_sys});
-            sim_done = destroy_trackers;
-
-#ifdef MADRONA_GPU_MODE
-            auto sort_shot_viz = queueSortByWorld<ShotViz>(
-                builder, {destroy_trackers});
-
-            sim_done = sort_shot_viz;
-#endif
-        }
-    } else {
-        assert(false);
-    }
-
-    // Track if the match is finished
-    TaskGraphNodeID match_info_sys;
-
-    if (cfg.task == Task::TDM) {
-        match_info_sys = builder.addToGraph<ParallelForNode<Engine,
-            tdmMatchInfoSystem,
-                MatchInfo
-            >>({sim_done});
-
-        match_info_sys = builder.addToGraph<ParallelForNode<Engine,
-            updateTDMMatchResultsSystem,
-                MatchResult
-            >>({match_info_sys});
-    } else if (cfg.task == Task::Zone ||
-               cfg.task == Task::ZoneCaptureDefend) {
-        match_info_sys = builder.addToGraph<ParallelForNode<Engine,
-            zoneMatchInfoSystem,
-                MatchInfo
-            >>({sim_done});
-    } else if (cfg.task == Task::Turret) {
-        match_info_sys = builder.addToGraph<ParallelForNode<Engine,
-            turretMatchInfoSystem,
-                MatchInfo
-            >>({sim_done});
-    } else {
-        assert(false);
-    }
-
-    auto goal_regions_eval = builder.addToGraph<ParallelForNode<Engine,
-        evaluateGoalRegionsSystem,
-            GoalRegionsState
-        >>({match_info_sys});
-
-    auto explore_visit = builder.addToGraph<ParallelForNode<Engine,
-        exploreVisitedSystem,
-            Position,
-            StartPos,
-            ExploreTracker
-        >>({goal_regions_eval});
-
-    // Compute initial reward now that physics has updated the world state
-    TaskGraphNodeID reward_sys;
-    if (cfg.task == Task::Explore) {
-        reward_sys = builder.addToGraph<ParallelForNode<Engine,
-            exploreRewardSystem,
-                Position,
-                ExploreTracker,
-                Reward
-            >>({explore_visit});
-    } else if (cfg.task == Task::TDM ||
-            cfg.task == Task::Zone ||
-            cfg.task == Task::ZoneCaptureDefend) {
-        if (cfg.task == Task::TDM) {
-            reward_sys = builder.addToGraph<ParallelForNode<Engine,
-                tdmRewardSystem,
-                    Position,
-                    AgentPolicy,
-                    Aim,
-                    Alive,
-                    Opponents,
-                    CombatState,
-                    BreadcrumbAgentState,
-                    ExploreTracker,
-                    Reward 
-                >>({explore_visit});
-        } else if (cfg.task == Task::Zone) {
-            reward_sys = builder.addToGraph<ParallelForNode<Engine,
-                zoneRewardSystem,
-                    Position,
-                    AgentPolicy,
-                    TeamInfo,
-                    Aim,
-                    Alive,
-                    Teammates,
-                    Opponents,
-                    CombatState,
-                    BreadcrumbAgentState,
-                    ExploreTracker,
-                    Reward 
-                >>({explore_visit});
-        } else if (cfg.task == Task::ZoneCaptureDefend) {
-            reward_sys = builder.addToGraph<ParallelForNode<Engine,
-                zoneCaptureDefendRewardSystem,
-                    Position,
-                    AgentPolicy,
-                    TeamInfo,
-                    Aim,
-                    Alive,
-                    Opponents,
-                    CombatState,
-                    ExploreTracker,
-                    Reward 
-                >>({explore_visit});
-        } else {
-            assert(false);
-        }
-
-        reward_sys = builder.addToGraph<ParallelForNode<Engine,
-            pvpTeamRewardSystem,
-                TeamRewardState
-            >>({reward_sys});
-
-        reward_sys = builder.addToGraph<ParallelForNode<Engine,
-            pvpFinalRewardSystem,
-                TeamInfo,
-                AgentPolicy,
-                Reward
-            >>({reward_sys});
-    } else if (cfg.task == Task::Turret) {
-        reward_sys = builder.addToGraph<ParallelForNode<Engine,
-            turretRewardSystem,
-                Alive,
-                Teammates,
-                CombatState,
-                ExploreTracker,
-                Reward
-            >>({explore_visit});
-    } else {
-        assert(false);
-    }
-
-    // Set done values if match is finished
-    auto done_sys = builder.addToGraph<ParallelForNode<Engine,
-        doneSystem,
-            Done
-        >>({reward_sys});
-
-    builder.addToGraph<ParallelForNode<Engine,
-        fullTeamDoneRewardSystem,
-          FullTeamID,
-          FullTeamReward,
-          FullTeamDone
-        >>({});
-
-    // Conditionally reset the world if the episode is over
-    auto reset_sys = builder.addToGraph<ParallelForNode<Engine,
-        resetSystem,
-            WorldReset
-        >>({done_sys});
-
-    TaskGraphNodeID post_reset = builder.addToGraph<ResetTmpAllocNode>({reset_sys});
+  TaskGraphNodeID post_reset = builder.addToGraph<ResetTmpAllocNode>({reset_sys});
 
 #ifdef MADRONA_GPU_MODE
     post_reset = builder.addToGraph<RecycleEntitiesNode>({post_reset});
@@ -5039,6 +4624,478 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
   queueSortByWorld<GameEventEntity>(builder, {});
   queueSortByWorld<EventStepStateEntity>(builder, {});
 #endif
+}
+
+static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
+{
+  resetAndObsTasks(builder, cfg, {});
+}
+
+static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
+{
+  builder.addToGraph<ClearTmpNode<GameEventEntity>>({});
+  builder.addToGraph<ClearTmpNode<EventStepStateEntity>>({});
+
+  auto pvpGameplayLogic = [&](Span<const TaskGraphNodeID> deps) {
+    if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
+        SimFlags::FullTeamPolicy) {
+
+      builder.addToGraph<ParallelForNode<Engine,
+        readFullTeamActionsPolicies,
+          FullTeamID,
+          FullTeamActions,
+          FullTeamPolicy
+        >>({});
+    }
+
+    builder.addToGraph<ParallelForNode<Engine,
+        applyBotActionsSystem,
+            HardcodedBotAction,
+            PvPAction,
+            AgentPolicy
+        >>({});
+
+    TaskGraphNodeID move_finished_sys;
+    if (cfg.highlevelMove) {
+        auto move_sys = builder.addToGraph<ParallelForNode<Engine,
+            coarseMovementSystem,
+                CoarsePvPAction,
+                Rotation,
+                Aim,
+                AgentVelocity,
+                Alive,
+                CombatState,
+                StandState
+            >>(deps);
+
+        move_finished_sys = move_sys;
+    } else {
+        auto deaccelerate = builder.addToGraph<ParallelForNode<Engine,
+            deaccelerateSystem,
+                AgentVelocity
+            >>(deps);
+
+        auto stand_sys = builder.addToGraph<ParallelForNode<Engine,
+            pvpStandSystem,
+                PvPAction,
+                StandState,
+                Alive 
+            >>({deaccelerate});
+
+        auto move_sys = builder.addToGraph<ParallelForNode<Engine,
+            pvpMovementSystem,
+                PvPAction,
+                Rotation,
+                AgentVelocity,
+                Alive,
+                CombatState,
+                StandState
+            >>({stand_sys});
+
+        auto turn_sys = builder.addToGraph<ParallelForNode<Engine,
+            pvpTurnSystem,
+                PvPAction,
+                Rotation,
+                Aim,
+                Alive
+            >>({move_sys});
+
+        move_finished_sys = turn_sys;
+    }
+
+    auto apply_velocity = builder.addToGraph<ParallelForNode<Engine,
+        applyVelocitySystem,
+            Position,
+            AgentVelocity,
+            IntermediateMoveState
+        >>({move_finished_sys});
+
+    apply_velocity = builder.addToGraph<ParallelForNode<Engine,
+        updateMoveStateSystem,
+            Position,
+            AgentVelocity,
+            IntermediateMoveState
+        >>({apply_velocity});
+
+    auto fall_sys = builder.addToGraph<ParallelForNode<Engine,
+        fallSystem,
+            Position,
+            IntermediateMoveState,
+            Alive
+        >>({apply_velocity});
+
+    fall_sys = builder.addToGraph<ParallelForNode<Engine,
+        updateMoveStatePostFallSystem,
+            Position,
+            IntermediateMoveState
+        >>({fall_sys});
+
+    TaskGraphNodeID move_done = fall_sys;
+
+    TaskGraphNodeID battle_done;
+    if (cfg.highlevelMove) {
+      auto battle_sys = builder.addToGraph<ParallelForNode<Engine,
+          hlBattleSystem,
+              Position,
+              Rotation,
+              Aim,
+              Opponents,
+              Magazine,
+              TeamInfo,
+              StandState,
+              Alive,
+              CombatState
+          >>({move_done});
+    } else {
+      auto fire_sys = builder.addToGraph<ParallelForNode<Engine,
+          fireSystem,
+              Position,
+              Rotation,
+              Aim,
+              PvPAction,
+              Opponents,
+              Magazine,
+              TeamInfo,
+              StandState,
+              Alive,
+              CombatState
+          >>({move_done});
+
+      if (cfg.task == Task::Turret) {
+          fire_sys = builder.addToGraph<ParallelForNode<Engine,
+              turretFireSystem,
+                  Position,
+                  Rotation,
+                  Aim,
+                  Magazine,
+                  Alive,
+                  TurretState
+              >>({fire_sys});
+      }
+
+      battle_done = fire_sys;
+    }
+
+    auto apply_dmg_sys = builder.addToGraph<ParallelForNode<Engine,
+        applyDmgSystem,
+            Position,
+            AgentVelocity,
+            HP,
+            DamageDealt,
+            Alive,
+            CombatState
+        >>({battle_done});
+
+    if (cfg.task == Task::Turret) {
+        apply_dmg_sys = builder.addToGraph<ParallelForNode<Engine,
+            applyDmgToTurretSystem,
+                Position,
+                HP,
+                DamageDealt,
+                Alive
+            >>({apply_dmg_sys});
+    }
+
+    auto respawn_sys = builder.addToGraph<ParallelForNode<Engine,
+    respawnSystem,
+    LevelData
+        >>({apply_dmg_sys});
+
+    auto autoheal_sys = builder.addToGraph<ParallelForNode<Engine,
+        autoHealSystem,
+            HP,
+            Alive,
+            CombatState
+        >>({respawn_sys});
+
+    TaskGraphNodeID sim_done = autoheal_sys;
+
+    if (cfg.task == Task::Zone ||
+        cfg.task == Task::ZoneCaptureDefend) {
+        auto zone_sys = builder.addToGraph<ParallelForNode<Engine,
+            zoneSystem,
+                ZoneState
+            >>({sim_done});
+
+        sim_done = zone_sys;
+    }
+
+    if (cfg.recordLog != nullptr) {
+        sim_done = builder.addToGraph<ParallelForNode<Engine,
+            pvpRecordSystem,
+                MatchInfo
+            >>({sim_done});
+    }
+
+    sim_done = builder.addToGraph<ParallelForNode<Engine,
+        leaveBreadcrumbsSystem,
+            Position,
+            TeamInfo,
+            BreadcrumbAgentState
+    >>({sim_done});
+
+#ifdef MADRONA_GPU_MODE
+    sim_done = queueSortByWorld<BreadcrumbEntity>(
+        builder, {sim_done});
+#endif
+
+    sim_done = builder.addToGraph<ParallelForNode<Engine,
+        accumulateBreadcrumbPenaltiesSystem,
+            Entity,
+            Breadcrumb
+        >>({sim_done});
+
+
+    sim_done = builder.addToGraph<ParallelForNode<Engine,
+        deleteBreadcrumbsSystem,
+            BreadcrumbDelete 
+        >>({sim_done});
+
+    sim_done = builder.addToGraph<ClearTmpNode<BreadcrumbDeleteEntity>>({sim_done});
+
+#ifdef MADRONA_GPU_MODE
+    sim_done = queueSortByWorld<BreadcrumbEntity>(
+        builder, {sim_done});
+#endif
+
+    return sim_done;
+  };
+
+  auto pvpReplayLogic = [&](Span<const TaskGraphNodeID> deps) {
+      auto replay = builder.addToGraph<ParallelForNode<Engine,
+          pvpReplaySystem,
+              MatchInfo
+          >>(deps);
+
+
+      if (cfg.task == Task::Zone ||
+              cfg.task == Task::ZoneCaptureDefend) {
+          auto zone_sys = builder.addToGraph<ParallelForNode<Engine,
+              zoneSystem,
+                  ZoneState
+              >>({replay});
+
+          replay = zone_sys;
+      }
+
+      return replay;
+  };
+
+  TaskGraphNodeID sim_done;
+  if (cfg.task == Task::Explore) {
+#if 0
+    auto deaccelerate = builder.addToGraph<ParallelForNode<Engine,
+        deaccelerateSystem,
+            AgentVelocity
+        >>({});
+
+    auto move_sys = builder.addToGraph<ParallelForNode<Engine,
+        exploreMovementSystem,
+            ExploreAction,
+            Rotation,
+            Velocity
+        >>({deaccelerate});
+
+    auto fall = builder.addToGraph<ParallelForNode<Engine,
+        fallSystem,
+            Position,
+            Alive
+        >>({move_sys});
+
+    auto apply_velocity = builder.addToGraph<ParallelForNode<Engine,
+        applyVelocitySystem,
+            Position,
+            AgentVelocity
+        >>({fall});
+
+    auto collision_sys = builder.addToGraph<ParallelForNode<Engine,
+        exploreWorldCollisionSystem,
+            Position,
+            ExploreAction
+        >>({apply_velocity});
+
+    sim_done = collision_sys;
+#endif
+    assert(false);
+    MADRONA_UNREACHABLE();
+  } else if (cfg.task == Task::TDM ||
+             cfg.task == Task::Zone ||
+             cfg.task == Task::ZoneCaptureDefend ||
+             cfg.task == Task::Turret) {
+      if (cfg.replayLog != nullptr) {
+          sim_done = pvpReplayLogic({});
+      } else {
+          sim_done = pvpGameplayLogic({});
+      }
+
+      if (cfg.viz) {
+          auto cleanup_shot_viz_sys = builder.addToGraph<ParallelForNode<Engine,
+              cleanupShotVizSystem,
+                  Entity,
+                  ShotVizRemaining
+              >>({sim_done});
+
+          auto destroy_shot_viz_sys = builder.addToGraph<ParallelForNode<Engine,
+              destroyShotVizSystem,
+                  ShotVizCleanupTracker
+              >>({cleanup_shot_viz_sys});
+
+          auto destroy_trackers = builder.addToGraph<ClearTmpNode<ShotVizCleanup>>(
+              {destroy_shot_viz_sys});
+          sim_done = destroy_trackers;
+
+#ifdef MADRONA_GPU_MODE
+          auto sort_shot_viz = queueSortByWorld<ShotViz>(
+              builder, {destroy_trackers});
+
+          sim_done = sort_shot_viz;
+#endif
+        }
+  } else {
+      assert(false);
+  }
+
+  // Track if the match is finished
+  TaskGraphNodeID match_info_sys;
+
+  if (cfg.task == Task::TDM) {
+      match_info_sys = builder.addToGraph<ParallelForNode<Engine,
+          tdmMatchInfoSystem,
+              MatchInfo
+          >>({sim_done});
+
+      match_info_sys = builder.addToGraph<ParallelForNode<Engine,
+          updateTDMMatchResultsSystem,
+              MatchResult
+          >>({match_info_sys});
+  } else if (cfg.task == Task::Zone ||
+             cfg.task == Task::ZoneCaptureDefend) {
+      match_info_sys = builder.addToGraph<ParallelForNode<Engine,
+          zoneMatchInfoSystem,
+              MatchInfo
+          >>({sim_done});
+  } else if (cfg.task == Task::Turret) {
+      match_info_sys = builder.addToGraph<ParallelForNode<Engine,
+          turretMatchInfoSystem,
+              MatchInfo
+          >>({sim_done});
+  } else {
+      assert(false);
+  }
+
+  auto goal_regions_eval = builder.addToGraph<ParallelForNode<Engine,
+      evaluateGoalRegionsSystem,
+          GoalRegionsState
+      >>({match_info_sys});
+
+  auto explore_visit = builder.addToGraph<ParallelForNode<Engine,
+      exploreVisitedSystem,
+          Position,
+          StartPos,
+          ExploreTracker
+      >>({goal_regions_eval});
+
+  // Compute initial reward now that physics has updated the world state
+  TaskGraphNodeID reward_sys;
+  if (cfg.task == Task::Explore) {
+      reward_sys = builder.addToGraph<ParallelForNode<Engine,
+          exploreRewardSystem,
+              Position,
+              ExploreTracker,
+              Reward
+          >>({explore_visit});
+  } else if (cfg.task == Task::TDM ||
+          cfg.task == Task::Zone ||
+          cfg.task == Task::ZoneCaptureDefend) {
+    if (cfg.task == Task::TDM) {
+        reward_sys = builder.addToGraph<ParallelForNode<Engine,
+            tdmRewardSystem,
+                Position,
+                AgentPolicy,
+                Aim,
+                Alive,
+                Opponents,
+                CombatState,
+                BreadcrumbAgentState,
+                ExploreTracker,
+                Reward 
+            >>({explore_visit});
+    } else if (cfg.task == Task::Zone) {
+        reward_sys = builder.addToGraph<ParallelForNode<Engine,
+            zoneRewardSystem,
+                Position,
+                AgentPolicy,
+                TeamInfo,
+                Aim,
+                Alive,
+                Teammates,
+                Opponents,
+                CombatState,
+                BreadcrumbAgentState,
+                ExploreTracker,
+                Reward 
+            >>({explore_visit});
+    } else if (cfg.task == Task::ZoneCaptureDefend) {
+        reward_sys = builder.addToGraph<ParallelForNode<Engine,
+            zoneCaptureDefendRewardSystem,
+                Position,
+                AgentPolicy,
+                TeamInfo,
+                Aim,
+                Alive,
+                Opponents,
+                CombatState,
+                ExploreTracker,
+                Reward 
+            >>({explore_visit});
+    } else {
+        assert(false);
+    }
+
+    reward_sys = builder.addToGraph<ParallelForNode<Engine,
+        pvpTeamRewardSystem,
+            TeamRewardState
+        >>({reward_sys});
+
+    reward_sys = builder.addToGraph<ParallelForNode<Engine,
+        pvpFinalRewardSystem,
+            TeamInfo,
+            AgentPolicy,
+            Reward
+        >>({reward_sys});
+  } else if (cfg.task == Task::Turret) {
+    reward_sys = builder.addToGraph<ParallelForNode<Engine,
+        turretRewardSystem,
+            Alive,
+            Teammates,
+            CombatState,
+            ExploreTracker,
+            Reward
+        >>({explore_visit});
+  } else {
+    assert(false);
+  }
+
+  // Set done values if match is finished
+  auto done_sys = builder.addToGraph<ParallelForNode<Engine,
+    doneSystem,
+        Done
+    >>({reward_sys});
+
+  builder.addToGraph<ParallelForNode<Engine,
+    fullTeamDoneRewardSystem,
+      FullTeamID,
+      FullTeamReward,
+      FullTeamDone
+    >>({});
+
+  resetAndObsTasks(builder, cfg, {done_sys});
+}
+
+void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
+{
+  setupInitTasks(taskgraph_mgr.init(TaskGraphID::Init), cfg);
+  setupStepTasks(taskgraph_mgr.init(TaskGraphID::Step), cfg);
 }
 
 Sim::Sim(Engine &ctx,

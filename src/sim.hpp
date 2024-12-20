@@ -59,8 +59,9 @@ enum class ExportID : uint32_t {
 };
 
 enum class TaskGraphID : uint32_t {
-    Step,
-    NumGraphs,
+  Init,
+  Step,
+  NumGraphs,
 };
 
 // The Sim class encapsulates the per-world state of the simulation.
@@ -152,6 +153,7 @@ struct Sim : public madrona::WorldBase {
 
     EventLogGlobalState *eventGlobalState;
     u32 eventLoggedInStep;
+    u32 eventMask;
 
     GoalRegion *goalRegions;
     int32_t numGoalRegions;

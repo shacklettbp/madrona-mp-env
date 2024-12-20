@@ -211,7 +211,7 @@ eval_cfg = EvalConfig(
     eval_competitive = True,
     use_deterministic_policy = False,
     reward_gamma = 0.998,
-    custom_policy_ids = [ -1 ],
+    #custom_policy_ids = [ -1 ],
 )
 
 print_elos(policy_states.mmr.elo)

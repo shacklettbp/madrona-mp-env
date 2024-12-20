@@ -529,10 +529,6 @@ struct StepLog {
     AgentLogData agentData[consts::maxTeamSize * 2];
 };
 
-enum class EventType : u32 {
-  Capture,
-};
-
 struct EventLogGlobalState {
   u32 numEvents;
   u32 numStepStates;
@@ -546,9 +542,20 @@ struct EventPlayerState {
   u16 isReloading;
 };
 
+enum class EventType : u32 {
+  None = 0,
+  Capture = 1 << 0,
+  Reload = 1 << 1,
+  Kill = 1 << 2,
+};
+
 struct EventStepState {
+  u32 numEvents;
+  u32 eventMask;
   u64 matchID;
   u32 step;
+  u8 curZone;
+  i8 curZoneController;
   EventPlayerState players[consts::maxTeamSize * 2];
 };
 
@@ -556,19 +563,41 @@ struct EventStepStateEntity : madrona::Archetype<
   EventStepState
 > {};
 
-struct GameEvent {
-    struct Capture {
-      u8 zoneIDX;
-      u8 captureTeam;
-      u16 inZoneMask;
-    };
+struct XYI16 {
+  i16 x;
+  i16 y;
+};
 
-    EventType type;
-    u64 matchID;
-    u32 step;
-    union {
-        Capture capture;
-    };
+struct TeamConvexHull {
+  i16 numVerts;
+  XYI16 verts[consts::maxTeamSize];
+};
+
+struct GameEvent {
+  struct Capture {
+    u8 zoneIDX;
+    u8 captureTeam;
+    u16 inZoneMask;
+  };
+
+  struct Reload {
+    u8 player;
+    u8 numBulletsAtReloadTime;
+  };
+
+  struct Kill {
+    u8 killer;
+    u8 killed;
+  };
+
+  EventType type;
+  u64 matchID;
+  u32 step;
+  union {
+    Capture capture;
+    Reload reload;
+    Kill kill;
+  };
 };
 
 struct GameEventEntity : madrona::Archetype<

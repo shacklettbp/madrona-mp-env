@@ -109,11 +109,8 @@ static void writeGameEvents(
   (void)num_worlds;
   (void)step_idx;
 
-  event_log_file.write((char *)&num_events, sizeof(uint32_t));
-  event_log_file.write((char *)events, sizeof(GameEvent) * num_events);
-
-  step_log_file.write((char *)&num_step_states, sizeof(u32));
   step_log_file.write((char *)step_states, sizeof(EventStepState) * num_step_states);
+  event_log_file.write((char *)events, sizeof(GameEvent) * num_events);
 }
     
 
@@ -355,7 +352,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                explore_action_buffer, pvp_action_buffer,
                train_ctrl),
         gpuExec(std::move(gpu_exec)),
-        stepGraph(gpuExec.buildLaunchGraphAllTaskGraphs()),
+        stepGraph(gpuExec.buildLaunchGraph(TaskGraphID::Step)),
         rewardHyperParams(reward_hyper_params),
         replayLogBuffer(replay_log_buffer),
         recordLogBuffer(record_log_buffer),
@@ -582,7 +579,8 @@ struct Manager::CUDAImpl final : Manager::Impl {
             cudaMemcpyAsync(worldResetBuffer, resets_staging.data(),
                             sizeof(WorldReset) * cfg.numWorlds,
                             cudaMemcpyHostToDevice, strm);
-            gpuExec.runAsync(stepGraph, strm);
+            auto init_graph = gpuExec.buildLaunchGraph(TaskGraphID::Init);
+            gpuExec.runAsync(init_graph, strm);
             REQ_CUDA(cudaStreamSynchronize(strm));
         };
 
@@ -1876,7 +1874,7 @@ void Manager::init()
     for (int32_t i = 0; i < (int32_t)cfg.numWorlds; i++) {
         triggerReset(i);
     }
-    step();
+    impl_->run(TaskGraphID::Init);
 
     if ((cfg.simFlags & SimFlags::StaggerStarts) ==
         SimFlags::StaggerStarts) {
@@ -1887,7 +1885,7 @@ void Manager::init()
 
 void Manager::step()
 {
-    impl_->run();
+    impl_->run(TaskGraphID::Step);
 }
 
 #ifdef MADRONA_CUDA_SUPPORT
