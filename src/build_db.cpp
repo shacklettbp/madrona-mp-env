@@ -192,6 +192,13 @@ CREATE TABLE kill_events (
   
   UNIQUE(step_id, killer_id, killed_id)
 );
+
+CREATE TABLE step_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  match_id INTEGER NOT NULL,
+  tick INTEGER NOT NULL,
+  token INTEGER NOT NULL
+);
 )");
 
   sqlite3_stmt *insert_match_step_stmt;
@@ -331,7 +338,7 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
       sqlite3_bind_int(insert_team_state_stmt, 3, (i16)centroid.x);
       sqlite3_bind_int(insert_team_state_stmt, 4, (i16)centroid.y);
       sqlite3_bind_int(insert_team_state_stmt, 5, (i32)max.x - (i32)min.x);
-      sqlite3_bind_int(insert_team_state_stmt, 6, (i32)max.y - (i32)max.y);
+      sqlite3_bind_int(insert_team_state_stmt, 6, (i32)max.y - (i32)min.y);
     };
 
     {

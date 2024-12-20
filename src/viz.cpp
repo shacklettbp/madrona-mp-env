@@ -961,7 +961,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     ImGui::BeginDisabled();
   }
 
-  ImGui::Text("Filter Capture Events");
+  ImGui::Text("Capture Events");
   ImGui::Separator();
 
   ImGui::PushItemWidth(box_width);
@@ -981,7 +981,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::CaptureEventsFilter);
   }
 
-  ImGui::Text("Filter Reload Events");
+  ImGui::Text("Reload Events");
   ImGui::Separator();
 
   ImGui::PushItemWidth(box_width);
@@ -1001,7 +1001,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::ReloadEventsFilter);
   }
 
-  ImGui::Text("Filter Kill Events");
+  ImGui::Text("Kill Events");
   ImGui::Separator();
 
   ImGui::PushItemWidth(box_width);
