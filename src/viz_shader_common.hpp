@@ -29,6 +29,7 @@ using shader::NonUniformScaleObjectTransform;
 using shader::GlobalPassData;
 using shader::OpaqueGeoPerDraw;
 using shader::GoalRegionPerDraw;
+using shader::AnalyticsTeamHullPerDraw;
 using shader::ShotVizLineData;
 using shader::AgentPerDraw;
 

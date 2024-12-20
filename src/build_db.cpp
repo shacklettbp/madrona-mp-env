@@ -66,6 +66,8 @@ static inline i32 convexHull(XYI16 *pts, i32 n, XYI16 *hull) {
   for (i32 i = 0; i < lower_size; i++) hull[hull_size++] = lower[i];
   for (i32 i = 0; i < upper_size; i++) hull[hull_size++] = upper[i];
 
+  assert(hull_size <= consts::maxTeamSize);
+
   return hull_size;
 }
 
@@ -326,10 +328,10 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
 
       centroid *= (1.f / consts::maxTeamSize);
 
-      sqlite3_bind_int(insert_team_state_stmt, 4, (i16)centroid.x);
-      sqlite3_bind_int(insert_team_state_stmt, 5, (i16)centroid.y);
-      sqlite3_bind_int(insert_team_state_stmt, 6, (i32)max.x - (i32)min.x);
-      sqlite3_bind_int(insert_team_state_stmt, 7, (i32)max.y - (i32)max.y);
+      sqlite3_bind_int(insert_team_state_stmt, 3, (i16)centroid.x);
+      sqlite3_bind_int(insert_team_state_stmt, 4, (i16)centroid.y);
+      sqlite3_bind_int(insert_team_state_stmt, 5, (i32)max.x - (i32)min.x);
+      sqlite3_bind_int(insert_team_state_stmt, 6, (i32)max.y - (i32)max.y);
     };
 
     {
@@ -339,10 +341,11 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
 
       sqlite3_bind_int64(insert_team_state_stmt, 1, step_id);
       sqlite3_bind_int(insert_team_state_stmt, 2, 0);
-      sqlite3_bind_blob(insert_team_state_stmt, 3,
-                        &hull, sizeof(TeamConvexHull), SQLITE_STATIC);
 
       computeAndBindTeamStateFeatures(convex_in);
+
+      sqlite3_bind_blob(insert_team_state_stmt, 7,
+                        &hull, sizeof(TeamConvexHull), SQLITE_STATIC);
 
       execResetStmt(db, insert_team_state_stmt);
     }
@@ -354,10 +357,11 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
 
       sqlite3_bind_int64(insert_team_state_stmt, 1, step_id);
       sqlite3_bind_int(insert_team_state_stmt, 2, 1);
-      sqlite3_bind_blob(insert_team_state_stmt, 3,
-                        &hull, sizeof(TeamConvexHull), SQLITE_STATIC);
 
       computeAndBindTeamStateFeatures(convex_in + consts::maxTeamSize);
+
+      sqlite3_bind_blob(insert_team_state_stmt, 7,
+                        &hull, sizeof(TeamConvexHull), SQLITE_STATIC);
 
       execResetStmt(db, insert_team_state_stmt);
     }

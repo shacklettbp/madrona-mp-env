@@ -32,6 +32,10 @@ struct GoalRegionPerDraw {
   float4 color;
 };
 
+struct AnalyticsTeamHullPerDraw {
+  float4 color;
+};
+
 struct ShotVizLineData {
   float3 start;
   uint pad;

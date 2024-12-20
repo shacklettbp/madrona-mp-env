@@ -312,6 +312,7 @@ struct AnalyticsDB {
   sqlite3 *hdl = nullptr;
   sqlite3_stmt *loadStepPlayerStates = nullptr;
   sqlite3_stmt *loadMatchSteps = nullptr;
+  sqlite3_stmt *loadTeamStates = nullptr;
   sqlite3_stmt *filterStepsByCaptureEventsFilter = nullptr;
   sqlite3_stmt *filterStepsByReloadEventsFilter = nullptr;
   sqlite3_stmt *filterStepsByKillEventsFilter = nullptr;
@@ -333,6 +334,8 @@ struct AnalyticsDB {
 
   int currentSelectedEvent = -1;
   int eventMatchViewedStep = -1;
+
+  std::array<TeamConvexHull, 2> eventTeamConvexHulls;
 
   bool playLoggedStep = false;
   std::chrono::time_point<std::chrono::steady_clock> lastMatchReplayTick = {};
@@ -368,6 +371,7 @@ struct VizState {
   RasterShader goalRegionsShader;
   RasterShader goalRegionsShaderWireframe;
   RasterShader goalRegionsShaderWireframeNoDepth;
+  RasterShader analyticsTeamHullShader;
 
   ParamBlockType shotVizParamBlockType;
 
@@ -800,6 +804,17 @@ ORDER BY ms.step_idx
 
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
+  ts.centroid_x, ts.centroid_y, ts.extent_x, ts.extent_y, ts.hull_data
+FROM
+  team_states AS ts
+WHERE
+  ts.step_id = ?
+ORDER BY
+  ts.team_idx
+)", -1, &db.loadTeamStates, nullptr));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
   capture_events.step_id, event_steps.match_id, event_steps.step_idx
 FROM capture_events
 INNER JOIN match_steps AS event_steps ON
@@ -849,9 +864,32 @@ static void unloadAnalyticsDB(AnalyticsDB &db)
   REQ_SQL(db.hdl, sqlite3_finalize(db.filterStepsByKillEventsFilter));
   REQ_SQL(db.hdl, sqlite3_finalize(db.filterStepsByReloadEventsFilter));
   REQ_SQL(db.hdl, sqlite3_finalize(db.filterStepsByCaptureEventsFilter));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadTeamStates));
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchSteps));
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadStepPlayerStates));
   REQ_SQL(db.hdl, sqlite3_close(db.hdl));
+}
+
+static std::array<TeamConvexHull, 2> loadTeamConvexHulls(
+    AnalyticsDB &db,
+    i64 step_id)
+{
+  std::array<TeamConvexHull, 2> hulls;
+
+  sqlite3_bind_int64(db.loadTeamStates, 1, step_id);
+
+  auto res = sqlite3_step(db.loadTeamStates);
+  assert(res == SQLITE_ROW);
+  const void *t1_blob = sqlite3_column_blob(db.loadTeamStates, 4);
+  memcpy(&hulls[0], t1_blob, sizeof(TeamConvexHull));
+
+  assert(sqlite3_step(db.loadTeamStates) == SQLITE_ROW);
+  const void *t2_blob = sqlite3_column_blob(db.loadTeamStates, 4);
+  memcpy(&hulls[1], t2_blob, sizeof(TeamConvexHull));
+
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadTeamStates));
+
+  return hulls;
 }
 
 static StepSnapshot loadStepSnapshot(AnalyticsDB &db, i64 step_id)
@@ -1169,7 +1207,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     ImGui::EndDisabled();
   }
 
-  if (event_step.stepID != -1) {
+  if (db.eventMatchViewedStep != -1) {
     i64 step_id = match_steps[db.eventMatchViewedStep].stepID;
 
     StepSnapshot step_snapshot = loadStepSnapshot(db, step_id);
@@ -1182,6 +1220,8 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
       ctx.get<Rotation>(agent) = Quat::angleAxis(
           player_snapshot.yaw, math::up);
     }
+
+    db.eventTeamConvexHulls = loadTeamConvexHulls(db, step_id);
   }
 
 
@@ -1480,6 +1520,26 @@ VizState * init(const VizConfig &cfg)
       },
     });
 
+  viz->analyticsTeamHullShader = loadShader(viz,
+    MADRONA_MP_ENV_SRC_DIR "analytics_team_hulls.slang", {
+      .byteCode = {},
+      .vertexEntry = "vertMain",
+      .fragmentEntry = "triFrag",
+      .rasterPass = viz->onscreenPassInterface,
+      .paramBlockTypes = { viz->globalParamBlockType },
+      .numPerDrawBytes = sizeof(AnalyticsTeamHullPerDraw),
+      .vertexBuffers = {{
+        .stride = sizeof(Vector3), .attributes = {
+          { .offset = 0, .format = VertexFormat::Vec3_F32 },
+        },
+      }},
+      .rasterConfig = {
+        .depthCompare = DepthCompare::Disabled,
+        .writeDepth = false,
+        .blending = { BlendingConfig::additiveDefault() },
+      },
+    });
+
   viz->shotVizParamBlockType = gpu->createParamBlockType({
     .uuid = "shot_vz_pb"_to_uuid,
     .buffers = {
@@ -1538,6 +1598,8 @@ void shutdown(VizState *viz)
 
   gpu->destroyRasterShader(viz->shotVizShader);
   gpu->destroyParamBlockType(viz->shotVizParamBlockType);
+
+  gpu->destroyRasterShader(viz->analyticsTeamHullShader);
 
   gpu->destroyRasterShader(viz->goalRegionsShaderWireframeNoDepth);
   gpu->destroyRasterShader(viz->goalRegionsShaderWireframe);
@@ -2790,6 +2852,80 @@ static void renderAgents(Engine &ctx, VizState *viz,
   });
 }
 
+static void renderAnalyticsViz(Engine &ctx, VizState *viz,
+                               RasterPassEncoder &raster_enc)
+{
+  (void)ctx;
+  AnalyticsDB &db = viz->db;
+
+  if (db.eventMatchViewedStep != -1) {
+    const auto &team_hulls = db.eventTeamConvexHulls;
+
+    i32 total_num_verts =
+      2 * (team_hulls[0].numVerts + team_hulls[1].numVerts);
+
+    u32 num_tmp_vert_bytes = total_num_verts * sizeof(Vector3);
+    MappedTmpBuffer tmp_verts = raster_enc.tmpBuffer(
+        num_tmp_vert_bytes, 256 * 3);
+
+    Vector3 *out_verts_ptr = (Vector3 *)tmp_verts.ptr;
+
+    i32 total_num_tris = total_num_verts - 2;
+    u32 num_tmp_tri_bytes = (u32)total_num_tris * 3 * sizeof(u32);
+
+    MappedTmpBuffer tmp_tri_idxs = raster_enc.tmpBuffer(
+        num_tmp_tri_bytes, sizeof(u32));
+
+    u32 *out_tri_idxs_ptr = (u32 *)tmp_tri_idxs.ptr;
+
+    i32 cur_vert_idx = 0;
+    for (i32 team_idx = 0; team_idx < 2; team_idx++) {
+      i32 hull_num_verts = team_hulls[team_idx].numVerts;
+      i32 hull_base_vert_idx = cur_vert_idx;
+      for (i32 i = 0; i < hull_num_verts; i++) {
+        out_verts_ptr[cur_vert_idx] = Vector3 {
+          .x = (f32)team_hulls[team_idx].verts[i].x,
+          .y = (f32)team_hulls[team_idx].verts[i].y,
+          .z = 0,
+        };
+
+        cur_vert_idx += 1;
+      }
+
+      for (i32 tri_fan_offset = 1; tri_fan_offset < hull_num_verts - 1;
+           tri_fan_offset++) {
+        *out_tri_idxs_ptr++ = hull_base_vert_idx;
+        *out_tri_idxs_ptr++ = hull_base_vert_idx + tri_fan_offset;
+        *out_tri_idxs_ptr++ = hull_base_vert_idx + tri_fan_offset + 1;
+      }
+    }
+
+    raster_enc.setShader(viz->analyticsTeamHullShader);
+    raster_enc.setParamBlock(0, viz->globalParamBlock);
+
+    raster_enc.drawData(AnalyticsTeamHullPerDraw {
+      .color = { 0, 0, 1, 0.3 },
+    });
+
+    raster_enc.setVertexBuffer(0, tmp_verts.buffer);
+    raster_enc.setIndexBufferU32(tmp_tri_idxs.buffer);
+    raster_enc.drawIndexed(tmp_verts.offset / sizeof(Vector3),
+                           tmp_tri_idxs.offset / sizeof(u32),
+                           team_hulls[0].numVerts - 2);
+
+    raster_enc.drawData(AnalyticsTeamHullPerDraw {
+      .color = { 1, 0, 0, 0.3 },
+    });
+
+    raster_enc.setVertexBuffer(0, tmp_verts.buffer);
+    raster_enc.setIndexBufferU32(tmp_tri_idxs.buffer);
+    raster_enc.drawIndexed(tmp_verts.offset / sizeof(Vector3),
+                           tmp_tri_idxs.offset / sizeof(u32) +
+                             3 * (team_hulls[0].numVerts - 2),
+                           team_hulls[1].numVerts - 2);
+  }
+}
+
 inline void renderSystem(Engine &ctx, VizState *viz)
 {
   GPURuntime *gpu = viz->gpu;
@@ -2824,6 +2960,8 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   renderShotViz(ctx, viz, raster_enc);
 
   renderZones(ctx, viz, raster_enc);
+
+  renderAnalyticsViz(ctx, viz, raster_enc);
 
 #if 0
   raster_enc.setShader(viz->opaqueGeoShader);
