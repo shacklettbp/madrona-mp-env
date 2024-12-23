@@ -402,8 +402,8 @@ struct VizState {
 	.fwd = {0.0f,-0.5f, -0.9f}
   };*/
   FlyCamera flyCam = {
-	.position = {300.0f, 400.0f, 1200.0f},
-	.fwd = {0.0f,-0.2f, -0.9f}
+	.position = {43000, 8500, 4500},
+	.fwd = {0.2f,0.0f, -0.9f}
   };
 
 #if 0
