@@ -81,11 +81,16 @@ static void writeEventStepState(Engine &ctx)
 
     Aim aim = ctx.get<Aim>(e);
     player_state.yaw = (i16)(aim.yaw * 32768 / math::pi);
+    player_state.pitch = (i16)(aim.pitch * 32768 / math::pi);
 
     Magazine mag = ctx.get<Magazine>(e);
 
-    player_state.magNumBullets = mag.numBullets;
-    player_state.isReloading = mag.isReloading;
+    player_state.magNumBullets = (u16)mag.numBullets;
+    player_state.isReloading = (u8)mag.isReloading;
+
+    const CombatState &combat_state = ctx.get<CombatState>(e);
+
+    player_state.firedShot = (u8)(combat_state.landedShotOn != Entity::none());
   }
 }
 
@@ -1428,6 +1433,19 @@ inline void fireSystem(Engine &ctx,
         return;
     }
 
+    logEvent(ctx, GameEvent {
+      .type = EventType::PlayerShot,
+      .matchID = ctx.data().matchID,
+      .step = (u32)ctx.singleton<MatchInfo>().curStep,
+      .playerShot = {
+        .attacker = 
+          u8(team_info.team * consts::maxTeamSize + team_info.offset),
+        .target =
+          u8(hit_teaminfo.value().team * consts::maxTeamSize +
+             hit_teaminfo.value().offset),
+      },
+    });
+
     combat_state.landedShotOn = hit_entity;
 
     HP hp = ctx.get<HP>(hit_entity);
@@ -1440,10 +1458,10 @@ inline void fireSystem(Engine &ctx,
         .step = (u32)ctx.singleton<MatchInfo>().curStep,
         .kill = {
           .killer =
+            u8(team_info.team * consts::maxTeamSize + team_info.offset),
+          .killed =
             u8(hit_teaminfo.value().team * consts::maxTeamSize +
                hit_teaminfo.value().offset),
-          .killed =
-            u8(team_info.team * consts::maxTeamSize + team_info.offset),
         },
       });
     }

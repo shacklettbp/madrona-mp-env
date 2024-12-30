@@ -406,7 +406,7 @@ static inline void standardSpawnPoint(
         uint32_t elapsed = consts::deltaT * 
             float((uint32_t)match_info.curStep - last_used);
 
-        float elapsed_threshold = 3.f;
+        //float elapsed_threshold = 3.f;
 
         constexpr float elapsed_weight = 0.1f;
         constexpr float dist_weight = 0.01f;

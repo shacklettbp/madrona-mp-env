@@ -253,11 +253,11 @@ struct StepSnapshot {
   PlayerSnapshot players[consts::maxTeamSize * 2];
 };
 
-static FlyCamera initCam(Vector3 pos, Quat rot)
+static FlyCamera initCam(Vector3 pos, Vector3 fwd)
 {
-  Vector3 fwd = normalize(rot.rotateVec(math::fwd));
-  Vector3 up = normalize(rot.rotateVec(math::up));
-  Vector3 right = normalize(cross(fwd, up));
+  fwd = normalize(fwd);
+  Vector3 right = normalize(cross(fwd, math::up));
+  Vector3 up = cross(right, fwd);
 
   return FlyCamera {
     .position = pos,
@@ -397,14 +397,11 @@ struct VizState {
     .right = {0.155756, -0.987796, -0.000000},
   };*/
 
-  /*FlyCamera flyCam = {
-	.position = {0.0f, 1500.0f, 1800.0f},
-	.fwd = {0.0f,-0.5f, -0.9f}
-  };*/
-  FlyCamera flyCam = {
-	.position = {43000, 8500, 4500},
-	.fwd = {0.2f,0.0f, -0.9f}
-  };
+	  //.position = {43000, 8500, 4500},
+	  //.fwd = {0.2f,0.0f, -0.9f}
+
+  FlyCamera flyCam = initCam({0, 265, 4203},
+	                           {0.0f,-0.05f, -1.00f});
 
 #if 0
     initCam(
@@ -427,12 +424,6 @@ struct VizState {
   std::vector<AssetGroup> objectAssetGroups = {};
 
   AnalyticsDB db = {};
-
-  inline VizState() {
-      flyCam.fwd = normalize(flyCam.fwd);
-      flyCam.right = normalize(cross(flyCam.fwd, Vector3(0.0, 0.0, 1.0)));
-      flyCam.up = cross(flyCam.right, flyCam.fwd);
-  };
 };
 
 struct VizWorld {
@@ -2272,6 +2263,16 @@ static Engine & cfgUI(VizState *viz, Manager &mgr)
       ImGui::EndDisabled();
     }
   }
+
+  ImGui::Text("Current Free Camera");
+  ImGui::Text("    Position: (%d %d %d)",
+      (int)viz->flyCam.position.x,
+      (int)viz->flyCam.position.y,
+      (int)viz->flyCam.position.z);
+  ImGui::Text("    Forward: (%.2f %.2f %.2f)",
+      viz->flyCam.fwd.x,
+      viz->flyCam.fwd.y,
+      viz->flyCam.fwd.z);
 
   ImGui::Spacing();
   ImGui::TextUnformatted("Simulation Settings");

@@ -538,8 +538,10 @@ struct EventPlayerState {
   u16 playerID;
   i16 pos[3];
   i16 yaw;
+  i16 pitch;
   u16 magNumBullets;
-  u16 isReloading;
+  u8 isReloading;
+  u8 firedShot; 
 };
 
 enum class EventType : u32 {
@@ -547,6 +549,7 @@ enum class EventType : u32 {
   Capture = 1 << 0,
   Reload = 1 << 1,
   Kill = 1 << 2,
+  PlayerShot = 1 << 3,
 };
 
 struct EventStepState {
@@ -590,6 +593,11 @@ struct GameEvent {
     u8 killed;
   };
 
+  struct PlayerShot {
+    u8 attacker;
+    u8 target;
+  };
+
   EventType type;
   u64 matchID;
   u32 step;
@@ -597,6 +605,7 @@ struct GameEvent {
     Capture capture;
     Reload reload;
     Kill kill;
+    PlayerShot playerShot;
   };
 };
 

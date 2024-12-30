@@ -68,8 +68,6 @@ void createPersistentEntities(Engine &ctx, const TaskConfig &cfg)
         sizeof(bool) * ctx.singleton<LevelData>().navmesh.numTris);
 
     if (cfg.task == Task::Zone || cfg.task == Task::ZoneCaptureDefend) {
-        ZoneState &zone_state = ctx.singleton<ZoneState>();
-
         const Zones &src_zones = ctx.data().zones;
 
         assert(src_zones.numZones <= consts::maxZones);
@@ -148,8 +146,6 @@ void createPersistentEntities(Engine &ctx, const TaskConfig &cfg)
     // uninitialized, these will be set during world generation, which is
     // called for every episode.
     for (CountT i = 0; i < total_num_agents; ++i) {
-        CountT team_idx = i / cfg.pTeamSize;
-
         Entity agent;
         if (cfg.task == Task::Explore) {
             agent = ctx.makeEntity<ExploreAgent>();
@@ -349,6 +345,8 @@ void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
                .yawRotate = consts::numTurnBuckets / 2,
                .pitchRotate = consts::numTurnBuckets / 2,
                .fire = 0,
+               .reload = 0,
+               .stand = 0,
            };
            ctx.get<CoarsePvPAction>(agent_entity) = {
                .moveAmount = 0,

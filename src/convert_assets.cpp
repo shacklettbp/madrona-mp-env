@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
     
     imp::SourceObject &meter_src_obj = imported_assets->objects[0];
 
-    printf("%lu\n", meter_src_obj.meshes.size());
+    printf("%ld\n", (long)meter_src_obj.meshes.size());
 
     u64 num_meshes = meter_src_obj.meshes.size();
 

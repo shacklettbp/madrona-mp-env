@@ -159,8 +159,10 @@ CREATE TABLE player_states (
   pos_y INTEGER NOT NULL,
   pos_z INTEGER NOT NULL,
   yaw INTEGER NOT NULL,
+  pitch INTEGER NOT NULL,
   num_bullets INTEGER NOT NULL,
   is_reloading INTEGER NOT NULL,
+  fired_shot INTEGER NOT NULL,
   
   UNIQUE(step_id, player_idx)
 );
@@ -193,6 +195,15 @@ CREATE TABLE kill_events (
   UNIQUE(step_id, killer_id, killed_id)
 );
 
+CREATE TABLE player_shot_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  step_id INTEGER NON NULL,
+  attacker_id INTEGER NOT NULL,
+  target_id INTEGER NOT NULL,
+
+  UNIQUE(step_id, attacker_id, target_id)
+);
+
 CREATE TABLE step_tokens (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   match_id INTEGER NOT NULL,
@@ -223,7 +234,7 @@ VALUES
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO player_states (
   step_id, player_idx, pos_x, pos_y, pos_z,
-  yaw, num_bullets, is_reloading)
+  yaw, pitch, num_bullets, is_reloading, fired_shot)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_player_state_stmt, nullptr));
 
@@ -250,6 +261,14 @@ INSERT INTO kill_events (
 )
 VALUES (?, ?, ?);
 )", -1, &insert_kill_event_stmt, nullptr));
+
+  sqlite3_stmt *insert_player_shot_event_stmt;
+  REQ_SQL(db, sqlite3_prepare_v2(db, R"(
+INSERT INTO player_shot_events (
+  step_id, attacker_id, target_id
+)
+VALUES (?, ?, ?);
+)", -1, &insert_player_shot_event_stmt, nullptr));
 
   sqlite3_stmt *find_player_stmt;
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
@@ -295,8 +314,10 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
       sqlite3_bind_int(insert_player_state_stmt, 4, player_state.pos[1]);
       sqlite3_bind_int(insert_player_state_stmt, 5, player_state.pos[2]);
       sqlite3_bind_int(insert_player_state_stmt, 6, player_state.yaw);
-      sqlite3_bind_int(insert_player_state_stmt, 7, player_state.magNumBullets);
-      sqlite3_bind_int(insert_player_state_stmt, 8, player_state.isReloading);
+      sqlite3_bind_int(insert_player_state_stmt, 7, player_state.pitch);
+      sqlite3_bind_int(insert_player_state_stmt, 8, player_state.magNumBullets);
+      sqlite3_bind_int(insert_player_state_stmt, 9, player_state.isReloading);
+      sqlite3_bind_int(insert_player_state_stmt, 10, player_state.firedShot);
 
       execResetStmt(db, insert_player_state_stmt);
 
@@ -455,6 +476,14 @@ CREATE INDEX idx_find_player_by_pos ON player_states (pos_x, pos_y);
       sqlite3_bind_int64(insert_kill_event_stmt, 3, killed_id);
       execResetStmt(db, insert_kill_event_stmt);
     } break;
+    case EventType::PlayerShot: {
+      i16 attacker_id = lookupPlayerID(step_id, event.playerShot.attacker);
+      i16 target_id = lookupPlayerID(step_id, event.playerShot.target);
+
+      sqlite3_bind_int64(insert_player_shot_event_stmt, 1, step_id);
+      sqlite3_bind_int64(insert_player_shot_event_stmt, 2, attacker_id);
+      sqlite3_bind_int64(insert_player_shot_event_stmt, 3, target_id);
+    } break;
     default: {
       FATAL("Unknown event type");
     } break;
@@ -474,6 +503,7 @@ CREATE INDEX idx_find_captures ON capture_events (
   REQ_SQL(db, sqlite3_finalize(insert_player_state_stmt));
   REQ_SQL(db, sqlite3_finalize(insert_match_step_stmt));
   REQ_SQL(db, sqlite3_finalize(insert_capture_event_stmt));
+  REQ_SQL(db, sqlite3_finalize(insert_player_shot_event_stmt));
 
   REQ_SQL(db, sqlite3_finalize(insert_reload_event_stmt));
   REQ_SQL(db, sqlite3_finalize(insert_kill_event_stmt));

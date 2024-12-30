@@ -157,10 +157,10 @@ int main(int argc, char *argv[])
     float map_rotation = 0.f;
 
     VizState *viz = VizSystem::init(VizConfig {
-      //.windowWidth = 2730,
-      //.windowHeight = 1536,
-      .windowWidth = 3840,
-      .windowHeight = 2160,
+      .windowWidth = 2730,
+      .windowHeight = 1536,
+      //.windowWidth = 3840,
+      //.windowHeight = 2160,
 
       .numWorlds = (uint32_t)num_worlds,
       .numViews = (uint32_t)num_views,
