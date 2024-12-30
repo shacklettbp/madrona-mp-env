@@ -481,6 +481,8 @@ static void loadObjects(VizState *viz,
                         Span<const imp::SourceMaterial> materials,
                         Span<const imp::SourceTexture> imported_textures)
 {
+  (void)imported_textures;
+
   i32 new_materials_start_offset = (i32)viz->meshMaterials.size();
   for (const auto &mat : materials) {
     viz->meshMaterials.push_back({
@@ -497,8 +499,6 @@ static void loadObjects(VizState *viz,
     for (const auto &src_obj : objs) {
       for (const auto &src_mesh : src_obj.meshes) {
         assert(src_mesh.faceCounts == nullptr);
-
-        const u32 num_indices = 3 * src_mesh.numFaces;
 
         cur_num_bytes = utils::roundUp(cur_num_bytes, (u32)sizeof(OpaqueGeoVertex));
         cur_num_bytes += sizeof(OpaqueGeoVertex) * src_mesh.numVertices;
@@ -552,7 +552,7 @@ static void loadObjects(VizState *viz,
         .vertexOffset = vertex_offset,
         .indexOffset = index_offset, 
         .numTriangles = src_mesh.numFaces,
-        .materialIndex = src_mesh.materialIDX == -1 ? 0 :
+        .materialIndex = src_mesh.materialIDX == 0xFFFF'FFFF ? 0 :
              new_materials_start_offset + (i32)src_mesh.materialIDX,
       });
     }
@@ -1128,9 +1128,9 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     ImGui::Text("Event Match Step:");
   } else {
     ImGui::Text("Event Match ID:     %ld",
-                event_step.matchID);
+                (long)event_step.matchID);
     ImGui::Text("Event Match Step:   %ld",
-                event_step.stepIndex);
+                (long)event_step.stepIndex);
   }
 
   ImGui::Separator();
@@ -1326,7 +1326,7 @@ static void analyticsBGThread(AnalyticsDB &db)
     default: MADRONA_UNREACHABLE();
     }
 
-    printf("Returned results %ld\n", db.filteredResults->size());
+    printf("Returned results %ld\n", (long)db.filteredResults->size());
     db.resultsStatus.store_release(2);
   }
 }
@@ -1354,7 +1354,6 @@ VizState * init(const VizConfig &cfg)
   viz->mainQueue = gpu->getMainQueue();
 
   viz->shadercLib = InitSystem::loadShaderCompiler();
-  auto backend_bytecode_type = viz->gpuAPI->backendShaderByteCodeType();
 
   viz->shaderc = viz->shadercLib.createCompiler();
 
@@ -1725,10 +1724,7 @@ void planAI(Engine& ctx, VizState* viz, int world, int player)
   Position agent_pos = ctx.get<Position>(agent);
   Aim agent_aim = ctx.get<Aim>(agent);
   const OpponentsVisibility& enemies = ctx.get<OpponentsVisibility>(agent);
-  const HP& hp = ctx.get<HP>(agent);
-  const Reward& reward = ctx.get<Reward>(agent);
   const FwdLidar& fwd_lidar = ctx.get<FwdLidar>(agent);
-  const RearLidar& rear_lidar = ctx.get<RearLidar>(agent);
   const Zones& zones = ctx.data().zones;
   const ZoneState &zone_mode_state = ctx.singleton<ZoneState>();
 
@@ -1751,7 +1747,7 @@ void planAI(Engine& ctx, VizState* viz, int world, int player)
 
   // If there's an active zone, move to it.
   int zoneIdx = zone_mode_state.curZone;
-  assert(zoneIdx >= 0 && zoneIdx < zones.numZones);
+  assert(zoneIdx >= 0 && zoneIdx < (int)zones.numZones);
 
   // Get a target point in the zone.
   Vector3 center = zones.bboxes[zoneIdx].centroid();
@@ -1850,24 +1846,6 @@ void doAI(VizState* viz, Manager& mgr, int world, int player)
 void loop(VizState *viz, Manager &mgr)
 {
   auto action_tensor = mgr.pvpActionTensor();
-  auto self_obs_tensor = mgr.selfObservationTensor();
-  auto magazine_tensor = mgr.magazineTensor();
-  auto hp_tensor = mgr.hpTensor();
-
-  auto fwd_lidar_tensor = mgr.fwdLidarTensor();
-  auto rear_lidar_tensor = mgr.rearLidarTensor();
-
-  auto reward_tensor = mgr.rewardTensor();
-
-  auto match_result_tensor = mgr.matchResultTensor();
-
-  SelfObservation *self_obs_readback = nullptr;
-  HP *hp_readback = nullptr;
-  Magazine *magazine_readback = nullptr;
-  FwdLidar *fwd_lidar_readback = nullptr;
-  RearLidar *rear_lidar_readback = nullptr;
-  Reward *reward_readback = nullptr;
-  MatchResult *match_result_readback = nullptr;
 
   ExecMode exec_mode = mgr.execMode();
   if (exec_mode == ExecMode::CUDA) {
@@ -1892,8 +1870,6 @@ void loop(VizState *viz, Manager &mgr)
   }
 
   GPURuntime *gpu = viz->gpu;
-
-  UserInputEvents sim_event_state;
 
   auto last_sim_tick_time = std::chrono::steady_clock::now();
   auto last_frontend_tick_time = std::chrono::steady_clock::now();
@@ -1940,7 +1916,6 @@ void loop(VizState *viz, Manager &mgr)
         int32_t r_pitch = 2;
         int32_t f = 0;
         int32_t r = 0;
-        int32_t g = 0;
 
         int32_t stand;
         {
@@ -1980,10 +1955,6 @@ void loop(VizState *viz, Manager &mgr)
 
         if (input.isDown(InputID::F)) {
           f = 1;
-        }
-
-        if (input.isDown(InputID::G)) {
-          g = 1;
         }
 
         if (input.isDown(InputID::C)) {
@@ -2415,8 +2386,6 @@ static inline void playerInfoUI(Engine &ctx, VizState *viz)
         minimap = agent_map.data;
       }
 
-      const float rescale = 1.f / 150.f;
-
       ImVec2 row_start = ImGui::GetCursorScreenPos();
       row_start.x += 10.f;
       for (i32 y = 0; y < AgentMap::res; y++) {
@@ -2494,6 +2463,8 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
 
 static void setupViewData(Engine &ctx, VizState *viz, GlobalPassData *out)
 {
+  (void)ctx;
+
   const FlyCamera &cam = viz->flyCam;
 
   float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
@@ -2648,7 +2619,6 @@ static void renderGoalRegions(Engine &ctx, VizState *viz,
 static void renderShotViz(Engine &ctx, VizState *viz,
                           RasterPassEncoder &raster_enc)
 {
-  GPURuntime *gpu = viz->gpu;
   MappedTmpBuffer line_data_buf;
   int num_lines = 0;
 
@@ -2698,32 +2668,35 @@ static void renderShotViz(Engine &ctx, VizState *viz,
 
     ShotVizLineData* out_lines = (ShotVizLineData*)line_data_buf.ptr;
 
-    ctx.iterateQuery(query, [&](ShotVizState& state, ShotVizRemaining& remaining)
-        {
-            Vector3 a = state.from;
-            Vector3 b = state.from + state.dir * state.hitT;
+    ctx.iterateQuery(query,
+    [&](ShotVizState& state, ShotVizRemaining& remaining)
+    {
+      Vector3 a = state.from;
+      Vector3 b = state.from + state.dir * state.hitT;
 
-            float alpha = remaining.numStepsRemaining / 30.f;
-            alpha *= alpha;
+      float alpha = remaining.numStepsRemaining / 30.f;
+      alpha *= alpha;
 
-            Vector3 color;
-            if (state.team == 0) {
-                color = { 0, 0, 1 };
-            }
-            else {
-                color = { 1, 0, 0 };
-            }
+      Vector3 color;
+      if (state.team == 0) {
+        color = { 0, 0, 1 };
+      }
+      else {
+        color = { 1, 0, 0 };
+      }
 
-            if (!state.hit) {
-                color *= 0.5f;
-                alpha *= 0.25f;
-            }
+      if (!state.hit) {
+        color *= 0.5f;
+        alpha *= 0.25f;
+      }
 
-            *out_lines++ = {
-                .start = a,
-                .end = b,
-                .color = Vector4::fromVec3W(color, alpha),
-        };
+      *out_lines++ = {
+        .start = a,
+        .pad = {},
+        .end = b,
+        .pad2 = {},
+        .color = Vector4::fromVec3W(color, alpha),
+      };
     });
   }
 
@@ -2759,8 +2732,6 @@ static void renderZones(Engine &ctx, VizState *viz,
 
     raster_enc.draw(0, num_tris);
   };
-
-  ZoneState &zone_state = ctx.singleton<ZoneState>();
 
   auto renderZones =
     [&]
@@ -2805,8 +2776,6 @@ static void renderZones(Engine &ctx, VizState *viz,
 static void renderAgents(Engine &ctx, VizState *viz,
                          RasterPassEncoder &raster_enc)
 {
-  GPURuntime *gpu = viz->gpu;
-
   const auto &query = ctx.query<Position, Rotation, Scale, CombatState,
       Magazine, HP, TeamInfo>();
 
@@ -2818,6 +2787,8 @@ static void renderAgents(Engine &ctx, VizState *viz,
   (Vector3 pos, Quat rot, Diag3x3 scale,
    CombatState &combat_state, Magazine &mag, HP &hp, TeamInfo &team_info)
   {
+    (void)combat_state;
+
     Object obj = viz->objects[0];
 
     Vector3 agent_color;

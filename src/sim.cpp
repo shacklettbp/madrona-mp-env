@@ -101,6 +101,7 @@ static inline constexpr float discreteTurnDelta()
     return turn_max / f32(CountT(consts::numTurnBuckets / 2));
 }
 
+#if 0
 static float closestPointSegmentSegment(Vector3 p1, Vector3 q1,
                                         Vector3 p2, Vector3 q2,
                                         Vector3 *c1, Vector3 *c2)
@@ -278,6 +279,7 @@ static bool capsuleTriCollision(Vector3 a, Vector3 b, Vector3 c,
     *correction = (closest_midline - closest_tri) * (1.f / len) * (consts::agentRadius - len);
     return true;
 }
+#endif
 
 
 // Register all the ECS components and archetypes that will be
@@ -784,8 +786,9 @@ inline void updateMoveStateSystem(
     AgentVelocity &vel,
     const IntermediateMoveState &move_state)
 {
-    pos = move_state.newPosition;
-    vel = move_state.newVelocity;
+  (void)ctx;
+  pos = move_state.newPosition;
+  vel = move_state.newVelocity;
 }
 
 inline void fallSystem(Engine &ctx,
@@ -850,10 +853,11 @@ inline void updateMoveStatePostFallSystem(
     Position &pos,
     const IntermediateMoveState &move_state)
 {
-    pos = move_state.newPosition;
+  (void)ctx;
+  pos = move_state.newPosition;
 }
 
-
+#if 0
 inline void exploreWorldCollisionSystem(Engine &ctx,
                                         Position &pos,
                                         ExploreAction &)
@@ -946,7 +950,9 @@ inline void exploreWorldCollisionSystem(Engine &ctx,
 
     pos = agent_pos;
 }
+#endif
 
+#if 0
 inline void pvpWorldCollisionSystem(Engine &ctx,
                                     Position &pos,
                                     PvPAction &)
@@ -1039,6 +1045,7 @@ inline void pvpWorldCollisionSystem(Engine &ctx,
 
     pos = agent_pos;
 }
+#endif
 
 inline void updateCamEntitySystem(Engine &ctx,
                                   const Position &pos,
@@ -1080,7 +1087,6 @@ static inline void makeShotVizEntity(
 {
     Entity shot_viz = ctx.makeEntity<ShotViz>();
 
-    const float offset = 7.5f;
     ctx.get<ShotVizState>(shot_viz) = {
       .from = from,
       .dir = dir,
@@ -1102,6 +1108,9 @@ inline void hlBattleSystem(Engine &ctx,
                            Alive alive,
                            CombatState &combat_state)
 {
+    (void)rot;
+    (void)magazine;
+
     combat_state.landedShotOn = Entity::none();
     combat_state.successfulKill = false;
     combat_state.firedShotT = -FLT_MAX;
@@ -1746,7 +1755,7 @@ inline void autoHealSystem(Engine &,
 }
 
 inline void zoneSystem(Engine &ctx,
-                            ZoneState &zone_state)
+                       ZoneState &zone_state)
 {
     if (zone_state.curControllingTeam != -1) {
         zone_state.zoneStepsRemaining -= 1;
@@ -1754,7 +1763,7 @@ inline void zoneSystem(Engine &ctx,
 
     if (zone_state.zoneStepsRemaining == 0) {
         zone_state.curZone += 1;
-        if (zone_state.curZone == ctx.data().zones.numZones) {
+        if (zone_state.curZone == (i32)ctx.data().zones.numZones) {
             zone_state.curZone = 0;
         }
 
@@ -1855,6 +1864,7 @@ inline void applyBotActionsSystem(Engine &ctx,
                                   PvPAction &out,
                                   AgentPolicy policy)
 {
+  (void)ctx;
   if (policy.idx >= 0) {
     return;
   }
@@ -2021,6 +2031,7 @@ inline void pvpTurnSystem(Engine &,
     rot = Quat::angleAxis(aim.yaw, math::up).normalize();
 }
 
+#if 0
 static inline void computeRelativePositioning(
     const Aim &tgt_aim,
     const Aim &aim,
@@ -2070,7 +2081,9 @@ static inline void computeRelativePositioning(
     *out_yaw_to_other = yaw_delta;
     *out_pitch_to_other = pitch_delta;
 }
+#endif
 
+#if 0
 static inline float computeRightAngle(Quat q)
 {
     Vector3 right_vec = normalize(q.rotateVec(math::right));
@@ -2086,6 +2099,7 @@ static inline float computeZAngle(Quat q)
     float cosy_cosp = 1.f - 2.f * (q.y * q.y + q.z * q.z);
     return atan2f(siny_cosp, cosy_cosp);
 }
+#endif
 
 static inline StandObservation computeStandObs(StandState stand_state)
 {
@@ -2375,9 +2389,6 @@ inline void pvpObservationsSystem(
     HP hp = ctx.get<HP>(agent);
     Magazine mag = ctx.get<Magazine>(agent);
     const CombatState &combat_state = ctx.get<CombatState>(agent);
-
-    const WeaponStats &weapon_stats =
-        ctx.data().weaponTypeStats[combat_state.weaponType];
 
     ob.hp = (float)hp.hp / 100.f;
     ob.magazine = (float)mag.numBullets;
@@ -3147,6 +3158,9 @@ inline void tdmRewardSystem(Engine &ctx,
                             ExploreTracker &explore_tracker,
                             Reward &out_reward)
 {
+    (void)aim;
+    (void)opponents;
+
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
 
@@ -3254,6 +3268,9 @@ inline void zoneRewardSystem(Engine &ctx,
                                ExploreTracker &explore_tracker,
                                Reward &out_reward)
 {
+  (void)aim;
+  (void)opponents;
+
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
 
@@ -3472,6 +3489,9 @@ inline void zoneCaptureDefendRewardSystem(
     ExploreTracker &explore_tracker,
     Reward &out_reward)
 {
+    (void)aim;
+    (void)opponents;
+
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
 
@@ -4188,7 +4208,7 @@ inline void accumulateBreadcrumbPenaltiesSystem(Engine &ctx,
                                                 Breadcrumb &breadcrumb)
 {
     for (int team_idx = 0; team_idx < 2; team_idx++) {
-        for (int offset = 0; offset < ctx.data().pTeamSize; offset++) {
+        for (int offset = 0; offset < (int)ctx.data().pTeamSize; offset++) {
             if (breadcrumb.teamInfo.team != team_idx) {
                 continue;
             }
@@ -4348,6 +4368,9 @@ inline void planAStarAISystem(Engine &ctx,
     return;
   }
 
+  (void)hp;
+  (void)rear_lidar;
+
   const LevelData &lvl_data = ctx.singleton<LevelData>();
   const Zones& zones = ctx.data().zones;
   const ZoneState &zone_mode_state = ctx.singleton<ZoneState>();
@@ -4372,7 +4395,7 @@ inline void planAStarAISystem(Engine &ctx,
 
   // If there's an active zone, move to it.
   int zoneIdx = zone_mode_state.curZone;
-  assert(zoneIdx >= 0 && zoneIdx < zones.numZones);
+  assert(zoneIdx >= 0 && zoneIdx < (int)zones.numZones);
 
   // Get a target point in the zone.
   Vector3 center = zones.bboxes[zoneIdx].centroid();
@@ -4752,7 +4775,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 
     TaskGraphNodeID battle_done;
     if (cfg.highlevelMove) {
-      auto battle_sys = builder.addToGraph<ParallelForNode<Engine,
+      builder.addToGraph<ParallelForNode<Engine,
           hlBattleSystem,
               Position,
               Rotation,
@@ -5118,7 +5141,7 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
 
 Sim::Sim(Engine &ctx,
          const TaskConfig &cfg,
-         const WorldInit &init)
+         const WorldInit &)
     : WorldBase(ctx),
       worldBounds(cfg.worldBounds),
       maxDist((cfg.worldBounds.pMax - cfg.worldBounds.pMin).length()),
