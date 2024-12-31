@@ -275,6 +275,7 @@ enum class AnalyticsThreadCtrl : u32 {
   CaptureEventsFilter,
   ReloadEventsFilter,
   KillEventsFilter,
+  PlayerShotEventsFilter,
   Exit,
 };
 
@@ -305,6 +306,18 @@ struct KillEventsFilter {
   };
 };
 
+struct PlayerShotEventsFilter {
+  AABB2D16 attackerRegion = {
+    .min = { -32768, -32768 },
+    .max = { 32767, 32767 },
+  };
+
+  AABB2D16 targetRegion = {
+    .min = { -32768, -32768 },
+    .max = { 32767, 32767 },
+  };
+};
+
 struct LoggedStep {
   i64 stepID;
   i64 matchID;
@@ -319,10 +332,12 @@ struct AnalyticsDB {
   sqlite3_stmt *filterStepsByCaptureEventsFilter = nullptr;
   sqlite3_stmt *filterStepsByReloadEventsFilter = nullptr;
   sqlite3_stmt *filterStepsByKillEventsFilter = nullptr;
+  sqlite3_stmt *filterStepsByPlayerShotEventsFilter = nullptr;
 
   CaptureEventsFilter captureEventsFilter = {};
   ReloadEventsFilter reloadEventsFilter = {};
   KillEventsFilter killEventsFilter = {};
+  PlayerShotEventsFilter playerShotEventsFilter = {};
 
   alignas(MADRONA_CACHE_LINE) AtomicU32 threadCtrl =
       (u32)AnalyticsThreadCtrl::Idle;
@@ -851,6 +866,23 @@ WHERE (killers.pos_x >= ? AND killers.pos_x <= ?)
 ORDER BY event_steps.match_id, event_steps.step_idx
 )", -1, &db.filterStepsByKillEventsFilter, nullptr));
 
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
+  player_shot_events.step_id, event_steps.match_id, event_steps.step_idx
+FROM player_shot_events
+INNER JOIN player_states AS attackers ON
+  player_shot_events.attacker_id = attackers.id
+INNER JOIN player_states AS targets ON
+  player_shot_events.target_id = targets.id
+INNER JOIN match_steps AS event_steps ON
+  event_steps.id = player_shot_events.step_id
+WHERE (attackers.pos_x >= ? AND attackers.pos_x <= ?)
+  AND (attackers.pos_y >= ? AND attackers.pos_y <= ?)
+  AND (targets.pos_x >= ?  AND targets.pos_x <= ?)
+  AND (targets.pos_y >= ?  AND targets.pos_y <= ?)
+ORDER BY event_steps.match_id, event_steps.step_idx
+)", -1, &db.filterStepsByPlayerShotEventsFilter, nullptr));
+
   db.bgThread = std::thread(analyticsBGThread, std::ref(db));
 }
 
@@ -859,6 +891,7 @@ static void unloadAnalyticsDB(AnalyticsDB &db)
   sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::Exit);
   db.bgThread.join();
 
+  REQ_SQL(db.hdl, sqlite3_finalize(db.filterStepsByPlayerShotEventsFilter));
   REQ_SQL(db.hdl, sqlite3_finalize(db.filterStepsByKillEventsFilter));
   REQ_SQL(db.hdl, sqlite3_finalize(db.filterStepsByReloadEventsFilter));
   REQ_SQL(db.hdl, sqlite3_finalize(db.filterStepsByCaptureEventsFilter));
@@ -1065,6 +1098,70 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     db.resultsStatus.store_relaxed(1);
     sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::KillEventsFilter);
   }
+
+  ImGui::Text("Player Shot Events");
+  ImGui::Separator();
+
+  ImGui::PushItemWidth(box_width);
+
+  int attacker_min_x = db.playerShotEventsFilter.attackerRegion.min.x;
+  int attacker_min_y = db.playerShotEventsFilter.attackerRegion.min.y;
+  int attacker_max_x = db.playerShotEventsFilter.attackerRegion.max.x;
+  int attacker_max_y = db.playerShotEventsFilter.attackerRegion.max.y;
+
+  int target_min_x = db.playerShotEventsFilter.targetRegion.min.x;
+  int target_min_y = db.playerShotEventsFilter.targetRegion.min.y;
+  int target_max_x = db.playerShotEventsFilter.targetRegion.max.x;
+  int target_max_y = db.playerShotEventsFilter.targetRegion.max.y;
+
+  ImGui::DragInt("##Attacker Pos Min X",
+                 &attacker_min_x, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+  ImGui::SameLine();
+  ImGui::DragInt("Attacker Pos Min",
+                 &attacker_min_y, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  ImGui::DragInt("##Attacker Pos Max X",
+                 &attacker_max_x, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+  ImGui::SameLine();
+  ImGui::DragInt("Attacker Pos Max",
+                 &attacker_max_y, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  ImGui::DragInt("##Target Pos Min X",
+                 &target_min_x, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+  ImGui::SameLine();
+  ImGui::DragInt("Target Pos Min",
+                 &target_min_y, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  ImGui::DragInt("##Target Pos Max X",
+                 &target_max_x, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+  ImGui::SameLine();
+  ImGui::DragInt("Target Pos Max",
+                 &target_max_y, 1,
+                 -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  db.playerShotEventsFilter.attackerRegion.min.x = (i16)attacker_min_x;
+  db.playerShotEventsFilter.attackerRegion.min.y = (i16)attacker_min_y;
+  db.playerShotEventsFilter.attackerRegion.max.x = (i16)attacker_max_x;
+  db.playerShotEventsFilter.attackerRegion.max.y = (i16)attacker_max_y;
+  db.playerShotEventsFilter.targetRegion.min.x = (i16)target_min_x;
+  db.playerShotEventsFilter.targetRegion.min.y = (i16)target_min_y;
+  db.playerShotEventsFilter.targetRegion.max.x = (i16)target_max_x;
+  db.playerShotEventsFilter.targetRegion.max.y = (i16)target_max_y;
+
+  ImGui::PopItemWidth();
+
+  if (ImGui::Button("Filter on Player Shot Events")) {
+    db.resultsStatus.store_relaxed(1);
+    sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::PlayerShotEventsFilter);
+  }
+
 
   if (filter_results_status != 0) {
     ImGui::EndDisabled();
@@ -1334,6 +1431,34 @@ static void analyticsBGThread(AnalyticsDB &db)
 
       db.filteredResults = filterSteps(
           db.hdl, db.filterStepsByKillEventsFilter);
+    } break;
+    case AnalyticsThreadCtrl::PlayerShotEventsFilter: {
+      printf("Player shot events filter\n");
+
+      PlayerShotEventsFilter filter = db.playerShotEventsFilter;
+
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 1,
+                       filter.attackerRegion.min.x);
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 2,
+                       filter.attackerRegion.max.x);
+
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 3,
+                       filter.attackerRegion.min.y);
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 4,
+                       filter.attackerRegion.max.y);
+
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 5,
+                       filter.targetRegion.min.x);
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 6,
+                       filter.targetRegion.max.x);
+
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 7,
+                       filter.targetRegion.min.y);
+      sqlite3_bind_int(db.filterStepsByPlayerShotEventsFilter, 8,
+                       filter.targetRegion.max.y);
+
+      db.filteredResults = filterSteps(
+          db.hdl, db.filterStepsByPlayerShotEventsFilter);
     } break;
 
     default: MADRONA_UNREACHABLE();

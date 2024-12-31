@@ -483,6 +483,7 @@ CREATE INDEX idx_find_player_by_pos ON player_states (pos_x, pos_y);
       sqlite3_bind_int64(insert_player_shot_event_stmt, 1, step_id);
       sqlite3_bind_int64(insert_player_shot_event_stmt, 2, attacker_id);
       sqlite3_bind_int64(insert_player_shot_event_stmt, 3, target_id);
+      execResetStmt(db, insert_player_shot_event_stmt);
     } break;
     default: {
       FATAL("Unknown event type");
