@@ -350,8 +350,11 @@ struct AnalyticsDB {
   Optional<DynArray<LoggedStep>> displayResults =
       Optional<DynArray<LoggedStep>>::none();
 
+  int currentVizMatch = -1;
   int currentSelectedEvent = -1;
   int eventMatchViewedStep = -1;
+
+  int numMatches = 0;
 
   std::array<TeamConvexHull, 2> eventTeamConvexHulls = {};
 
@@ -883,6 +886,19 @@ WHERE (attackers.pos_x >= ? AND attackers.pos_x <= ?)
 ORDER BY event_steps.match_id, event_steps.step_idx
 )", -1, &db.filterStepsByPlayerShotEventsFilter, nullptr));
 
+  {
+    sqlite3_stmt *num_matches_stmt;
+    REQ_SQL(db.hdl, sqlite3_prepare_v2(
+        db.hdl, "SELECT COUNT(id) FROM matches",
+        -1, &num_matches_stmt, nullptr));
+
+    sqlite3_step(num_matches_stmt);
+    db.numMatches = sqlite3_column_int(num_matches_stmt, 0);
+
+    REQ_SQL(db.hdl, sqlite3_reset(num_matches_stmt));
+    REQ_SQL(db.hdl, sqlite3_finalize(num_matches_stmt));
+  }
+
   db.bgThread = std::thread(analyticsBGThread, std::ref(db));
 }
 
@@ -1176,21 +1192,36 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     db.currentSelectedEvent = 0;
   }
 
+  ImGui::Spacing();
+  ImGui::Spacing();
+  ImGui::PushItemWidth(box_width);
+  if (ImGui::Button("Clear Filters")) {
+    db.displayResults.reset();
+    db.currentVizMatch = -1;
+    db.currentSelectedEvent = -1;
+    db.eventMatchViewedStep = -1;
+    db.playLoggedStep = false;
+  }
+  ImGui::PopItemWidth();
+  ImGui::Spacing();
+
   u32 num_filter_results = 0;
   if (filter_results_status == 0 && db.displayResults.has_value()) {
     num_filter_results = db.displayResults->size();
+
+    if (num_filter_results == 0) {
+      db.currentVizMatch = -1;
+      db.currentSelectedEvent = -1;
+      db.eventMatchViewedStep = -1;
+      db.playLoggedStep = false;
+    }
   }
 
-  ImGui::Spacing();
-  ImGui::Spacing();
   ImGui::Text("Event Visualization");
   ImGui::Separator();
 
   if (num_filter_results == 0) {
     ImGui::BeginDisabled();
-    db.currentSelectedEvent = -1;
-    db.eventMatchViewedStep = -1;
-    db.playLoggedStep = false;
   } 
 
   ImGui::PushItemWidth(box_width);
@@ -1207,6 +1238,10 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
   ImGui::PopItemWidth();
 
+  if (num_filter_results == 0) {
+    ImGui::EndDisabled();
+  }
+
   LoggedStep event_step {
     .stepID = -1,
     .matchID = -1,
@@ -1215,18 +1250,6 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
   if (num_filter_results > 0 && db.currentSelectedEvent != -1) {
     event_step = (*db.displayResults)[db.currentSelectedEvent];
-  }
-
-  DynArray<LoggedStep> match_steps = event_step.stepID == -1 ?
-    DynArray<LoggedStep>(0) : loadMatchSteps(db, event_step.matchID);
-
-  if (db.eventMatchViewedStep == -1 && match_steps.size() > 0) {
-    for (i32 i = 0; i < (i32)match_steps.size(); i++) {
-      if (event_step.stepID == match_steps[i].stepID) {
-        db.eventMatchViewedStep = i;
-      }
-    }
-    assert(db.eventMatchViewedStep != -1);
   }
 
   ImGui::Spacing();
@@ -1244,10 +1267,52 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   ImGui::Separator();
 
   ImGui::PushItemWidth(box_width);
+
+  if (db.currentSelectedEvent != -1) {
+    db.currentVizMatch = event_step.matchID;
+    ImGui::BeginDisabled();
+  }
+
+  {
+    int viz_match = db.currentVizMatch;
+    ImGui::DragInt("Visualized Match", &viz_match,
+                   1, 0, db.numMatches - 1,
+                   db.currentVizMatch == -1 ? "" : "%d",
+                   ImGuiSliderFlags_AlwaysClamp);
+
+    if (viz_match != db.currentVizMatch) {
+      db.currentVizMatch = viz_match;
+      db.eventMatchViewedStep = 0;
+    }
+  }
+
+  if (db.currentSelectedEvent != -1) {
+    ImGui::EndDisabled();
+  }
+
+  DynArray<LoggedStep> match_steps = db.currentVizMatch == -1 ?
+    DynArray<LoggedStep>(0) : loadMatchSteps(db, db.currentVizMatch);
+
+  if (db.currentSelectedEvent != -1 &&
+      db.eventMatchViewedStep == -1 &&
+      match_steps.size() > 0) {
+    for (i32 i = 0; i < (i32)match_steps.size(); i++) {
+      if (event_step.stepID == match_steps[i].stepID) {
+        db.eventMatchViewedStep = i;
+      }
+    }
+    assert(db.eventMatchViewedStep != -1);
+  }
+
+  ImGui::BeginDisabled(match_steps.size() == 0);
+
   ImGui::DragInt("Visualized Step", &db.eventMatchViewedStep,
                  1, 0, match_steps.size() - 1,
                  db.eventMatchViewedStep == -1 ? "" : "%d",
                  ImGuiSliderFlags_AlwaysClamp);
+
+  ImGui::EndDisabled();
+
   ImGui::PopItemWidth();
 
   if (!db.playLoggedStep) {
@@ -1302,11 +1367,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     }
   }
 
-  if (num_filter_results == 0) {
-    ImGui::EndDisabled();
-  }
-
-  if (db.eventMatchViewedStep != -1) {
+  if (db.eventMatchViewedStep != -1 && match_steps.size() > 0) {
     i64 step_id = match_steps[db.eventMatchViewedStep].stepID;
 
     db.curSnapshot = loadStepSnapshot(db, step_id);

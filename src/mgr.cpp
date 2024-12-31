@@ -35,7 +35,7 @@ using namespace madrona::py;
 
 namespace madronaMPEnv {
 
-static inline uint64_t numTensorBytes(const Tensor &t)
+[[maybe_unused]] static inline  uint64_t numTensorBytes(const Tensor &t)
 {
     uint64_t num_items = 1;
     uint64_t num_dims = t.numDims();
@@ -1165,8 +1165,8 @@ static AStarLookup buildAStarLookup(const Navmesh &navmesh)
 
     u32 *lookup_tbl = (u32 *)malloc(sizeof(u32) * num_tris * num_tris);
 
-    for (i32 start = 0; start < num_tris; start++) {
-        for (i32 goal = 0; goal < num_tris; goal++) {
+    for (u32 start = 0; start < num_tris; start++) {
+        for (u32 goal = 0; goal < num_tris; goal++) {
             //lookup_tbl[start * num_tris + goal] =
             //    NavUtils::AStarPathfindToTri(navmesh, start, goal);
         }
@@ -1798,6 +1798,8 @@ Manager::Impl * Manager::Impl::init(
 #endif
         } break;
         case ExecMode::CPU: {
+            (void)stagger_shuffle_key;
+
             HeapArray<Sim::WorldInit> world_inits(mgr_cfg.numWorlds);
 
             CPUImpl::TaskGraphT cpu_exec {
@@ -2478,7 +2480,7 @@ void Manager::setUniformAgentPolicy(AgentPolicy policy)
 
     AgentPolicy *policies_tmp = (AgentPolicy *)malloc(
         sizeof(AgentPolicy) * total_num_agents);
-    for (i32 i = 0; i < total_num_agents; i++) {
+    for (u32 i = 0; i < total_num_agents; i++) {
         policies_tmp[i] = policy;
     }
 

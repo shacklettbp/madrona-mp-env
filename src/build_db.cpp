@@ -126,6 +126,13 @@ int main(int argc, char *argv[])
   }
 
   execSQL(db, R"(
+CREATE TABLE matches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  orig_id INTEGER NOT NULL,
+  num_steps INTEGER NOT NULL
+);
+
+
 CREATE TABLE match_steps (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   match_id INTEGER NOT NULL,
@@ -212,6 +219,14 @@ CREATE TABLE step_tokens (
 );
 )");
 
+  sqlite3_stmt *insert_match_stmt;
+  REQ_SQL(db, sqlite3_prepare_v2(db, R"(
+INSERT INTO matches 
+  (orig_id, num_steps)
+VALUES
+  (?, ?);
+)", -1, &insert_match_stmt, nullptr));
+
   sqlite3_stmt *insert_match_step_stmt;
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO match_steps
@@ -280,6 +295,11 @@ SELECT id FROM player_states WHERE step_id = ? AND player_idx = ?
 SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
 )", -1, &find_step_stmt, nullptr));
 
+  sqlite3_stmt *find_match_stmt;
+  REQ_SQL(db, sqlite3_prepare_v2(db, R"(
+SELECT id FROM matches WHERE orig_id = ?
+)", -1, &find_match_stmt, nullptr));
+
   HeapArray<EventStepState> steps(num_steps);
   steps_file.read((char *)steps.data(), sizeof(EventStepState) * num_steps);
 
@@ -287,7 +307,21 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
   for (i64 i = 0; i < num_steps; i++) {
     EventStepState step = steps[i];
 
-    sqlite3_bind_int64(insert_match_step_stmt, 1, step.matchID);
+    i64 match_id = -1;
+    {
+      sqlite3_bind_int64(find_match_stmt, 1, step.matchID);
+      if (sqlite3_step(find_match_stmt) == SQLITE_ROW) {
+        match_id = sqlite3_column_int64(find_match_stmt, 0);
+      } else {
+        sqlite3_bind_int64(insert_match_stmt, 1, step.matchID);
+        sqlite3_bind_int(insert_match_stmt, 2, 0);
+        execResetStmt(db, insert_match_stmt);
+        match_id = sqlite3_last_insert_rowid(db);
+      }
+      REQ_SQL(db, sqlite3_reset(find_match_stmt));
+    }
+
+    sqlite3_bind_int64(insert_match_step_stmt, 1, match_id);
     sqlite3_bind_int(insert_match_step_stmt, 2, step.step);
     sqlite3_bind_int(insert_match_step_stmt, 3, step.curZone);
     sqlite3_bind_int(insert_match_step_stmt, 4, step.curZoneController);
@@ -297,12 +331,6 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
     execResetStmt(db, insert_match_step_stmt);
 
     int64_t step_id = sqlite3_last_insert_rowid(db);
-
-#if 0
-    if (step.matchID == ) {
-      printf("S %lld %u %lld\n", step.matchID, step.step, step_id);
-    }
-#endif
 
     XYI16 convex_in[consts::maxTeamSize * 2];
     for (int player = 0; player < consts::maxTeamSize * 2; player++) {
@@ -434,7 +462,15 @@ CREATE INDEX idx_find_player_by_pos ON player_states (pos_x, pos_y);
 
     i64 step_id;
     {
-      sqlite3_bind_int64(find_step_stmt, 1, event.matchID);
+      i64 match_id;
+      {
+        sqlite3_bind_int64(find_match_stmt, 1, event.matchID);
+        assert(sqlite3_step(find_match_stmt) == SQLITE_ROW);
+        match_id = sqlite3_column_int64(find_match_stmt, 0);
+        REQ_SQL(db, sqlite3_reset(find_match_stmt));
+      }
+
+      sqlite3_bind_int64(find_step_stmt, 1, match_id);
       sqlite3_bind_int(find_step_stmt, 2, event.step);
 
       assert(sqlite3_step(find_step_stmt) == SQLITE_ROW);
@@ -497,9 +533,11 @@ CREATE INDEX idx_find_captures ON capture_events (
   num_in_zone, zone_idx, capture_team_idx);
 )");
 
+  REQ_SQL(db, sqlite3_finalize(find_match_stmt));
   REQ_SQL(db, sqlite3_finalize(find_step_stmt));
   REQ_SQL(db, sqlite3_finalize(find_player_stmt));
 
+  REQ_SQL(db, sqlite3_finalize(insert_match_stmt));
   REQ_SQL(db, sqlite3_finalize(insert_team_state_stmt));
   REQ_SQL(db, sqlite3_finalize(insert_player_state_stmt));
   REQ_SQL(db, sqlite3_finalize(insert_match_step_stmt));
