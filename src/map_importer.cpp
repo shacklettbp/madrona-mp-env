@@ -238,7 +238,6 @@ MapCollisionAssets importCollisionData(const char *path,
         math::toRadians(rot_around_z), math::up).inv();
     
     for (Vector3 &v : mesh_data.vertices) {
-        Vector3 o_v = v;
         v = global_rotation.rotateVec(v - global_translation);
     }
 
@@ -269,7 +268,6 @@ static void convertToRenderMeshes(const MapCollisionAssets &assets,
         const uint32_t *mesh_indices = assets.indices.data() +
             mesh.triOffset * 3;
 
-        uint32_t num_out_indices = 0;
         for (uint32_t i = 0; i < mesh.numTris; i++) {
             uint32_t a_i = 3 * i;
             uint32_t b_i = 3 * i + 1;
@@ -279,8 +277,6 @@ static void convertToRenderMeshes(const MapCollisionAssets &assets,
             uint32_t b_read_idx = mesh_indices[b_i];
             uint32_t c_read_idx = mesh_indices[c_i];
 
-            uint32_t mat_idx = assets.triCollisionMaterials[i];
-            CollisionMaterialFlags content_flags = assets.materials[mat_idx];
 
             uint32_t a_write_idx = render_vert_offset + a_i;
             uint32_t b_write_idx = render_vert_offset + b_i;
@@ -389,6 +385,7 @@ MapRenderableCollisionData convertCollisionDataToRenderMeshes(
         .uvs = render_uvs.data(),
         .indices = render_indices.data(),
         .faceCounts = nullptr,
+        .faceMaterials = nullptr,
         .numVertices = (uint32_t)render_vert_offset,
         .numFaces = (uint32_t)render_vert_offset / 3,
         .materialIDX = (uint32_t)0,
@@ -431,6 +428,7 @@ void * buildMeshBVH(
             .faceMaterials = nullptr,
             .numVertices = mesh_info.numVertices,
             .numFaces = mesh_info.numTris,
+            .materialIDX = 0,
         };
     }
 
@@ -468,6 +466,8 @@ void * buildMeshBVH(
 
 MapNavmesh importNavmesh(const char *path, AABB world_bounds)
 {
+    (void)world_bounds;
+
     std::ifstream navmesh_file(path, std::ios::binary);
 
     uint32_t num_verts;
@@ -507,15 +507,17 @@ MapNavmesh importNavmesh(const char *path, AABB world_bounds)
         uint32_t num_face_verts = face_counts[i];
 
         bool valid = true;
+#if 0
         for (uint32_t j = 0; j < num_face_verts; j++) {
             uint32_t idx = indices[start_idx + j];
             Vector3 v = verts[idx];
 
-            /*if (world_bounds.contains(v)) {
+            if (world_bounds.contains(v)) {
                 valid = false;
                 break;
-            }*/
+            }
         }
+#endif
 
         if (valid) {
             new_face_starts.push_back((uint32_t)new_indices.size());

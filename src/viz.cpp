@@ -2854,9 +2854,9 @@ static void renderShotViz(Engine &ctx, VizState *viz,
     const auto& query = ctx.query<ShotVizState, ShotVizRemaining>();
 
     ctx.iterateQuery(query, [&](ShotVizState&, ShotVizRemaining&)
-        {
-          num_lines += 1;
-        });
+    {
+      num_lines += 1;
+    });
 
     if (num_lines == 0) {
         return;
@@ -3160,26 +3160,30 @@ static void renderAnalyticsViz(Engine &ctx, VizState *viz,
     raster_enc.setShader(viz->analyticsTeamHullShader);
     raster_enc.setParamBlock(0, viz->globalParamBlock);
 
-    raster_enc.drawData(AnalyticsTeamHullPerDraw {
-      .color = { 0, 0, 1, 0.3 },
-    });
+    if (team_hulls[0].numVerts > 0) {
+      raster_enc.drawData(AnalyticsTeamHullPerDraw {
+        .color = { 0, 0, 1, 0.3 },
+      });
 
-    raster_enc.setVertexBuffer(0, tmp_verts.buffer);
-    raster_enc.setIndexBufferU32(tmp_tri_idxs.buffer);
-    raster_enc.drawIndexed(tmp_verts.offset / sizeof(Vector3),
-                           tmp_tri_idxs.offset / sizeof(u32),
-                           team_hulls[0].numVerts - 2);
+      raster_enc.setVertexBuffer(0, tmp_verts.buffer);
+      raster_enc.setIndexBufferU32(tmp_tri_idxs.buffer);
+      raster_enc.drawIndexed(tmp_verts.offset / sizeof(Vector3),
+                             tmp_tri_idxs.offset / sizeof(u32),
+                             team_hulls[0].numVerts - 2);
+    }
 
-    raster_enc.drawData(AnalyticsTeamHullPerDraw {
-      .color = { 1, 0, 0, 0.3 },
-    });
+    if (team_hulls[1].numVerts > 0) {
+      raster_enc.drawData(AnalyticsTeamHullPerDraw {
+        .color = { 1, 0, 0, 0.3 },
+      });
 
-    raster_enc.setVertexBuffer(0, tmp_verts.buffer);
-    raster_enc.setIndexBufferU32(tmp_tri_idxs.buffer);
-    raster_enc.drawIndexed(tmp_verts.offset / sizeof(Vector3),
-                           tmp_tri_idxs.offset / sizeof(u32) +
-                             3 * (team_hulls[0].numVerts - 2),
-                           team_hulls[1].numVerts - 2);
+      raster_enc.setVertexBuffer(0, tmp_verts.buffer);
+      raster_enc.setIndexBufferU32(tmp_tri_idxs.buffer);
+      raster_enc.drawIndexed(tmp_verts.offset / sizeof(Vector3),
+                             tmp_tri_idxs.offset / sizeof(u32) +
+                               3 * (team_hulls[0].numVerts - 2),
+                             team_hulls[1].numVerts - 2);
+    }
   }
 }
 

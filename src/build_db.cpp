@@ -217,6 +217,8 @@ CREATE TABLE step_tokens (
   tick INTEGER NOT NULL,
   token INTEGER NOT NULL
 );
+
+CREATE UNIQUE INDEX idx_find_match_by_orig_id ON matches (orig_id);
 )");
 
   sqlite3_stmt *insert_match_stmt;

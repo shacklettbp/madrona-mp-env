@@ -34,9 +34,11 @@ static void writeEventStepState(Engine &ctx)
 
   u32 num_events = ctx.data().eventLoggedInStep;
 
+#if 0
   if (num_events == 0 && cur_step % 20 != 0) {
     return;
   }
+#endif
 
   u32 event_mask = ctx.data().eventMask;
 
