@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 
   i64 num_steps = fileNumElems.template operator()<EventStepState>(steps_file);
 
-  printf("%ld %ld\n", num_events, num_steps);
+  printf("%ld %ld\n", (long)num_events, (long)num_steps);
 
   remove(argv[2]);
 
@@ -235,7 +235,7 @@ VALUES
 INSERT INTO player_states (
   step_id, player_idx, pos_x, pos_y, pos_z,
   yaw, pitch, num_bullets, is_reloading, fired_shot)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_player_state_stmt, nullptr));
 
   sqlite3_stmt *insert_capture_event_stmt;
@@ -427,7 +427,7 @@ CREATE INDEX idx_find_player_by_pos ON player_states (pos_x, pos_y);
   execSQL(db, "BEGIN TRANSACTION");
   for (i64 i = 0; i < num_events; i++) {
     if (i % 10000 == 0) {
-      printf("E %ld\n", i);
+      printf("E %ld\n", (long)i);
     }
 
     GameEvent &event = events[i];

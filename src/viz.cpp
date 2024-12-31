@@ -10,6 +10,7 @@
 #include "sim.hpp"
 #include "map_importer.hpp"
 #include "mgr.hpp"
+#include "utils.hpp"
 
 #include "db.hpp"
 
@@ -246,7 +247,9 @@ struct FlyCamera {
 struct PlayerSnapshot {
   Vector3 pos;
   float yaw;
+  float pitch;
   Magazine mag;
+  bool firedShot;
 };
 
 struct StepSnapshot {
@@ -335,7 +338,9 @@ struct AnalyticsDB {
   int currentSelectedEvent = -1;
   int eventMatchViewedStep = -1;
 
-  std::array<TeamConvexHull, 2> eventTeamConvexHulls;
+  std::array<TeamConvexHull, 2> eventTeamConvexHulls = {};
+
+  StepSnapshot curSnapshot = {};
 
   bool playLoggedStep = false;
   std::chrono::time_point<std::chrono::steady_clock> lastMatchReplayTick = {};
@@ -773,12 +778,14 @@ static void loadAnalyticsDB(VizState *viz, const char *path)
 {
   AnalyticsDB &db = viz->db;
 
+  sqlite3_config(SQLITE_CONFIG_SERIALIZED);
+
   REQ_SQL(db.hdl, sqlite3_open(path, &db.hdl));
 
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
-  ps.pos_x, ps.pos_y, ps.pos_z, ps.yaw,
-  ps.num_bullets, ps.is_reloading
+  ps.pos_x, ps.pos_y, ps.pos_z, ps.yaw, ps.pitch,
+  ps.num_bullets, ps.is_reloading, ps.fired_shot
 FROM player_states AS ps
 WHERE
   ps.step_id = ?
@@ -895,18 +902,22 @@ static StepSnapshot loadStepSnapshot(AnalyticsDB &db, i64 step_id)
     i64 pos_y = sqlite3_column_int(db.loadStepPlayerStates, 1);
     i64 pos_z = sqlite3_column_int(db.loadStepPlayerStates, 2);
     i64 yaw = sqlite3_column_int(db.loadStepPlayerStates, 3);
+    i64 pitch = sqlite3_column_int(db.loadStepPlayerStates, 4);
 
-    i64 num_bullets = sqlite3_column_int(db.loadStepPlayerStates, 4);
-    i64 is_reloading = sqlite3_column_int(db.loadStepPlayerStates, 5);
+    i64 num_bullets = sqlite3_column_int(db.loadStepPlayerStates, 5);
+    i64 is_reloading = sqlite3_column_int(db.loadStepPlayerStates, 6);
+    i64 fired_shot = sqlite3_column_int(db.loadStepPlayerStates, 7);
 
     assert(cur_player_idx < consts::maxTeamSize * 2);
     snapshot.players[cur_player_idx++] = {
       .pos = { (float)pos_x, (float)pos_y, (float)pos_z },
       .yaw = (float)yaw * math::pi / 32768.f,
+      .pitch = (float)pitch * math::pi / 32768.f,
       .mag = {
         .numBullets = (i32)num_bullets,
         .isReloading = (i32)is_reloading,
       },
+      .firedShot = fired_shot > 0,
     };
   }
 
@@ -1201,15 +1212,17 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   if (db.eventMatchViewedStep != -1) {
     i64 step_id = match_steps[db.eventMatchViewedStep].stepID;
 
-    StepSnapshot step_snapshot = loadStepSnapshot(db, step_id);
+    db.curSnapshot = loadStepSnapshot(db, step_id);
 
     for (i32 i = 0; i < consts::maxTeamSize * 2; i++) {
-      auto &player_snapshot = step_snapshot.players[i];
+      auto &player_snapshot = db.curSnapshot.players[i];
 
       Entity agent = ctx.data().agents[i];
       ctx.get<Position>(agent) = player_snapshot.pos;
       ctx.get<Rotation>(agent) = Quat::angleAxis(
           player_snapshot.yaw, math::up);
+      ctx.get<Aim>(agent) = computeAim(
+          player_snapshot.yaw, player_snapshot.pitch);
     }
 
     db.eventTeamConvexHulls = loadTeamConvexHulls(db, step_id);
@@ -2656,7 +2669,7 @@ static void renderShotViz(Engine &ctx, VizState *viz,
 
     ctx.iterateQuery(query, [&](ShotVizState&, ShotVizRemaining&)
         {
-            num_lines += 1;
+          num_lines += 1;
         });
 
     if (num_lines == 0) {
@@ -2830,7 +2843,93 @@ static void renderAnalyticsViz(Engine &ctx, VizState *viz,
   (void)ctx;
   AnalyticsDB &db = viz->db;
 
-  if (db.eventMatchViewedStep != -1) {
+  if (db.eventMatchViewedStep == -1) {
+    return;
+  }
+
+  int num_shot_viz_lines = 0;
+  {
+    for (i32 i = 0; i < consts::maxTeamSize * 2; i++) {
+      PlayerSnapshot player = db.curSnapshot.players[i];
+      if (player.firedShot) {
+        num_shot_viz_lines += 1;
+      }
+    }
+  }
+
+  if (num_shot_viz_lines > 0) {
+    MappedTmpBuffer line_data_buf = raster_enc.tmpBuffer(
+          sizeof(ShotVizLineData) * num_shot_viz_lines, 256);
+
+    ShotVizLineData* out_lines = (ShotVizLineData*)line_data_buf.ptr;
+
+    for (i32 i = 0; i < consts::maxTeamSize * 2; i++) {
+      PlayerSnapshot player = db.curSnapshot.players[i];
+
+      if (!player.firedShot) {
+        continue;
+      }
+
+      Aim aim = computeAim(player.yaw, player.pitch);
+
+      Vector3 a = player.pos;
+
+      a.z += consts::standHeight;
+
+      Vector3 dir = aim.rot.rotateVec(math::fwd);
+
+      float hit_t = FLT_MAX;
+      Entity hit_entity = Entity::none();
+      traceRayAgainstWorld(ctx, a, dir, &hit_t, &hit_entity);
+
+      i32 team_id = i / consts::maxTeamSize;
+
+      float alpha = 0.75f;
+
+      Vector3 color;
+      if (team_id == 0) {
+        color = { 0, 0, 1 };
+      }
+      else {
+        color = { 1, 0, 0 };
+      }
+
+      if (hit_t == FLT_MAX) {
+        hit_t = 10000;
+      }
+
+      if (hit_entity == Entity::none()) {
+        color *= 0.5f;
+        alpha *= 0.25f;
+      }
+
+      Vector3 b = a + dir * hit_t;
+
+      *out_lines++ = {
+        .start = a,
+        .pad = {},
+        .end = b,
+        .pad2 = {},
+        .color = Vector4::fromVec3W(color, alpha),
+      };
+    }
+
+    ParamBlock tmp_geo_block = raster_enc.createTemporaryParamBlock({
+      .typeID = viz->shotVizParamBlockType,
+      .buffers = {{
+        .buffer = line_data_buf.buffer,
+        .offset = line_data_buf.offset,
+      }},
+    });
+
+    raster_enc.setShader(viz->shotVizShader);
+    raster_enc.setParamBlock(0, viz->globalParamBlock);
+    raster_enc.setParamBlock(1, tmp_geo_block);
+
+    raster_enc.draw(0, num_shot_viz_lines * 2);
+  }
+
+  {
     const auto &team_hulls = db.eventTeamConvexHulls;
 
     i32 total_num_verts =
@@ -2949,7 +3048,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 }
 
 
-void setupGameTasks(VizState *viz, TaskGraphBuilder &builder)
+void setupGameTasks(VizState *, TaskGraphBuilder &)
 {
 }
 
