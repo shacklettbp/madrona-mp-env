@@ -957,6 +957,7 @@ static DynArray<LoggedStep> loadMatchSteps(AnalyticsDB &db,
     results.push_back({
       .stepID = step_id,
       .matchID = match_id,
+      .teamID = -1,
       .stepIndex = match_step_idx,
     });
   }
@@ -1347,6 +1348,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   LoggedStep event_step {
     .stepID = -1,
     .matchID = -1,
+    .teamID = -1,
     .stepIndex = -1,
   };
 
@@ -1623,8 +1625,8 @@ static void analyticsBGThread(AnalyticsDB &db)
           filter_query = R"(
             SELECT
               player_states.step_id AS step_id,
-              match_steps.match_id AS match_id
-              match_steps.step_idx AS timestep
+              match_steps.match_id AS match_id,
+              match_steps.step_idx AS timestep,
               player_states.player_idx < 6 AS team_id
             FROM player_states
             INNER JOIN match_steps ON
@@ -1690,7 +1692,7 @@ SELECT DISTINCT
         query_str += ") AS window_end";
       }
 
-      query_str += "\nFROM results0\n";
+      query_str += "\nFROM results0";
 
         for (int filter_idx = 1; filter_idx < (int)filters.size();
              filter_idx++) {
@@ -1698,7 +1700,7 @@ SELECT DISTINCT
           query_str += "\nJOIN " + results_name + " ON (" +
             results_name + ".match_id = results0.match_id AND " + results_name + ".team_id = results0.team_id)";
         }
-      query_str += "WHERE window_end - window_start <= " +
+      query_str += "\nWHERE window_end - window_start <= " +
           std::to_string(window_size);
       query_str += "\nORDER BY match_id, window_start;";
       
