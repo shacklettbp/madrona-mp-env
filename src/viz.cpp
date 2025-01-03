@@ -256,11 +256,12 @@ struct StepSnapshot {
   PlayerSnapshot players[consts::maxTeamSize * 2];
 };
 
-static FlyCamera initCam(Vector3 pos, Vector3 fwd)
+static FlyCamera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
 {
   fwd = normalize(fwd);
-  Vector3 right = normalize(cross(fwd, math::up));
-  Vector3 up = cross(right, fwd);
+  up = normalize(up);
+  Vector3 right = normalize(cross(fwd, up));
+  up = normalize(cross(right, fwd));
 
   return FlyCamera {
     .position = pos,
@@ -347,7 +348,7 @@ struct AnalyticsFilter {
   {}
 };
 
-struct LoggedStep {
+struct FilterResult {
   i64 stepID;
   i64 matchID;
   i64 teamID;
@@ -365,6 +366,9 @@ struct AnalyticsDB {
   DynArray<AnalyticsFilter> currentFilters =
       DynArray<AnalyticsFilter>(0);
 
+  AABB2D16 *visualSelectRegion = nullptr;
+  bool visualSelectRegionSelectMin = true;
+
   int filterTimeWindow = 0;
 
   alignas(MADRONA_CACHE_LINE) AtomicU32 threadCtrl =
@@ -372,15 +376,15 @@ struct AnalyticsDB {
 
   AtomicU32 resultsStatus = 0;
 
-  Optional<DynArray<LoggedStep>> filteredResults =
-      Optional<DynArray<LoggedStep>>::none();
+  Optional<DynArray<FilterResult>> filteredResults =
+      Optional<DynArray<FilterResult>>::none();
 
-  Optional<DynArray<LoggedStep>> displayResults =
-      Optional<DynArray<LoggedStep>>::none();
+  Optional<DynArray<FilterResult>> displayResults =
+      Optional<DynArray<FilterResult>>::none();
 
+  int currentSelectedResult = -1;
   int currentVizMatch = -1;
-  int currentSelectedEvent = -1;
-  int eventMatchViewedStep = -1;
+  int currentVizMatchTimestep = -1;
 
   int numMatches = 0;
 
@@ -451,8 +455,9 @@ struct VizState {
 	  //.position = {43000, 8500, 4500},
 	  //.fwd = {0.2f,0.0f, -0.9f}
 
-  FlyCamera flyCam = initCam({0, 265, 4203},
-	                           {0.0f,-0.05f, -1.00f});
+  FlyCamera flyCam = initCam({79, 143, 4307},
+	                           {0.0f,-0.05f, -1.00f},
+                             {0, 1, -0.02f});
 
 #if 0
     initCam(
@@ -944,10 +949,10 @@ static StepSnapshot loadStepSnapshot(AnalyticsDB &db, i64 step_id)
   return snapshot;
 }
 
-static DynArray<LoggedStep> loadMatchSteps(AnalyticsDB &db,
+static DynArray<FilterResult> loadMatchSteps(AnalyticsDB &db,
                                            i64 match_id)
 {
-  DynArray<LoggedStep> results(10000);
+  DynArray<FilterResult> results(10000);
 
   sqlite3_bind_int64(db.loadMatchSteps, 1, match_id);
 
@@ -997,7 +1002,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
       return "Player Shot Event";
     } break;
     case AnalyticsFilterType::PlayerInRegion: {
-      return "Player At Location";
+      return "Player In Region";
     } break;
     default: MADRONA_UNREACHABLE();
     }
@@ -1053,7 +1058,12 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   ImGui::Spacing();
   ImGui::Separator();
 
-  for (AnalyticsFilter &filter : db.currentFilters) {
+  for (int filter_idx = 0;
+       filter_idx < (int)db.currentFilters.size();
+       filter_idx++) {
+    AnalyticsFilter &filter = db.currentFilters[filter_idx];
+
+    ImGui::PushID(filter_idx);
     switch (filter.type) {
     case AnalyticsFilterType::CaptureEvent: {
       CaptureEventFilter &capture = filter.captureEvent;
@@ -1227,19 +1237,29 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
       ImGui::DragInt("##Pos Min X",
                      &region_min_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+                     -32768, 32767, "%d, ", ImGuiSliderFlags_AlwaysClamp);
       ImGui::SameLine();
-      ImGui::DragInt("Pos Min",
+      ImGui::DragInt("##Pos Min Y",
                      &region_min_y, 1,
                      -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
 
+      ImGui::SameLine();
+      ImGui::Text("to");
+      ImGui::SameLine();
+
       ImGui::DragInt("##Pos Max X",
                      &region_max_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+                     -32768, 32767, "%d, ", ImGuiSliderFlags_AlwaysClamp);
       ImGui::SameLine();
-      ImGui::DragInt("Pos Max",
+      ImGui::DragInt("##Pos Max Y",
                      &region_max_y, 1,
                      -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::SameLine();
+      if (ImGui::SmallButton("^")) {
+        db.visualSelectRegion = &player_in_region.region;
+      }
+      ImGui::SameLine();
+      ImGui::Text("AABB");
 
       player_in_region.region.min.x = (i16)region_min_x;
       player_in_region.region.min.y = (i16)region_min_y;
@@ -1253,6 +1273,52 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     }
 
     ImGui::Spacing();
+
+    ImGui::PopID();
+  }
+
+  if (db.visualSelectRegion != nullptr) {
+    const UserInput &input = viz->ui->inputState();
+    const UserInputEvents &input_events = viz->ui->inputEvents();
+
+    if (input_events.downEvent(InputID::MouseLeft)) {
+      FlyCamera cam = viz->flyCam;
+      Vector2 mouse_pos = input.mousePosition();
+
+      float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
+
+      float tan_fov = tanf(math::toRadians(cam.fov * 0.5f));
+
+      Vector2 screen = {
+        (2.f * mouse_pos.x) / viz->window->pixelWidth - 1.f,
+        (2.f * mouse_pos.y) / viz->window->pixelHeight - 1.f,
+      };
+
+      float x_scale = tan_fov * aspect_ratio;
+      float y_scale = -tan_fov;
+
+      Vector3 dir = screen.x * x_scale * cam.right +
+                    screen.y * y_scale * cam.up +
+                    cam.fwd;
+      dir = normalize(dir);
+
+      if (dir.z != 0.f) {
+        float t = -cam.position.z / dir.z;
+
+        Vector3 z_plane_intersection = cam.position + t * dir;
+
+        if (db.visualSelectRegionSelectMin) {
+          db.visualSelectRegion->min.x = z_plane_intersection.x;
+          db.visualSelectRegion->min.y = z_plane_intersection.y;
+          db.visualSelectRegionSelectMin = false;
+        } else {
+          db.visualSelectRegion->max.x = z_plane_intersection.x;
+          db.visualSelectRegion->max.y = z_plane_intersection.y;
+          db.visualSelectRegionSelectMin = true;
+          db.visualSelectRegion = nullptr;
+        }
+      }
+    }
   }
 
   if (db.currentFilters.size() == 0) {
@@ -1282,9 +1348,9 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     db.addFilterType = AnalyticsFilterType::CaptureEvent;
 
     db.displayResults.reset();
+    db.currentSelectedResult = -1;
     db.currentVizMatch = -1;
-    db.currentSelectedEvent = -1;
-    db.eventMatchViewedStep = -1;
+    db.currentVizMatchTimestep = -1;
     db.playLoggedStep = false;
   }
 
@@ -1298,8 +1364,10 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     db.displayResults = std::move(db.filteredResults);
     db.resultsStatus.store_relaxed(0);
     filter_results_status = 0;
-    db.currentSelectedEvent = 0;
-    db.eventMatchViewedStep = -1;
+    db.currentSelectedResult = 0;
+    db.currentVizMatch = -1;
+    db.currentVizMatchTimestep = -1;
+    db.playLoggedStep = false;
   }
 
   ImGui::Spacing();
@@ -1313,14 +1381,14 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     num_filter_results = db.displayResults->size();
 
     if (num_filter_results == 0) {
+      db.currentSelectedResult = -1;
       db.currentVizMatch = -1;
-      db.currentSelectedEvent = -1;
-      db.eventMatchViewedStep = -1;
+      db.currentVizMatchTimestep = -1;
       db.playLoggedStep = false;
     }
   }
 
-  ImGui::Text("Event Visualization");
+  ImGui::Text("Results");
   ImGui::Separator();
 
   if (num_filter_results == 0) {
@@ -1328,15 +1396,15 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   } 
 
   ImGui::PushItemWidth(box_width);
-  int selected_event = db.currentSelectedEvent;
-  ImGui::DragInt("Event Index", &selected_event,
+  int result_idx = db.currentSelectedResult;
+  ImGui::DragInt("Result Trajectory", &result_idx,
                  1, 0, num_filter_results - 1,
                  num_filter_results == 0 ? "" :
-                   (selected_event == -1 ? "" : "%d"),
+                   (result_idx == -1 ? "" : "%d"),
                  ImGuiSliderFlags_AlwaysClamp);
-  if (selected_event != db.currentSelectedEvent) {
-    db.currentSelectedEvent = selected_event;
-    db.eventMatchViewedStep = -1;
+  if (result_idx != db.currentSelectedResult) {
+    db.currentSelectedResult = result_idx;
+    db.currentVizMatchTimestep = -1;
   }
 
   ImGui::PopItemWidth();
@@ -1345,35 +1413,38 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     ImGui::EndDisabled();
   }
 
-  LoggedStep event_step {
+  FilterResult result_step {
     .stepID = -1,
     .matchID = -1,
     .teamID = -1,
     .stepIndex = -1,
   };
 
-  if (num_filter_results > 0 && db.currentSelectedEvent != -1) {
-    event_step = (*db.displayResults)[db.currentSelectedEvent];
+  if (num_filter_results > 0 && db.currentSelectedResult != -1) {
+    result_step = (*db.displayResults)[db.currentSelectedResult];
   }
 
   ImGui::Spacing();
 
-  if (event_step.stepID == -1) {
-    ImGui::Text("Event Match ID:");
-    ImGui::Text("Event Match Step:");
+  if (result_step.stepID == -1) {
+    ImGui::Text("Trajectory Match ID:");
+    ImGui::Text("Trajectory Start Step:");
+    ImGui::Text("Trajectory End Step:");
   } else {
-    ImGui::Text("Event Match ID:     %ld",
-                (long)event_step.matchID);
-    ImGui::Text("Event Match Step:   %ld",
-                (long)event_step.stepIndex);
+    ImGui::Text("Trajectory Match ID:     %ld",
+                (long)result_step.matchID);
+    ImGui::Text("Trajectory Start Step:   %ld",
+                (long)result_step.stepIndex);
+    ImGui::Text("Trajectory End Step:   %ld",
+                (long)result_step.stepIndex);
   }
 
   ImGui::Separator();
 
   ImGui::PushItemWidth(box_width);
 
-  if (db.currentSelectedEvent != -1) {
-    db.currentVizMatch = event_step.matchID;
+  if (db.currentSelectedResult != -1) {
+    db.currentVizMatch = result_step.matchID;
     ImGui::BeginDisabled();
   }
 
@@ -1386,28 +1457,28 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
     if (viz_match != db.currentVizMatch) {
       db.currentVizMatch = viz_match;
-      db.eventMatchViewedStep = 0;
+      db.currentVizMatchTimestep = 0;
     }
   }
 
-  if (db.currentSelectedEvent != -1) {
+  if (db.currentSelectedResult != -1) {
     ImGui::EndDisabled();
   }
 
-  DynArray<LoggedStep> match_steps = db.currentVizMatch == -1 ?
-    DynArray<LoggedStep>(0) : loadMatchSteps(db, db.currentVizMatch);
+  DynArray<FilterResult> match_steps = db.currentVizMatch == -1 ?
+    DynArray<FilterResult>(0) : loadMatchSteps(db, db.currentVizMatch);
 
-  if (db.currentSelectedEvent != -1 &&
-      db.eventMatchViewedStep == -1 &&
+  if (db.currentSelectedResult != -1 &&
+      db.currentVizMatchTimestep == -1 &&
       match_steps.size() > 0) {
-    db.eventMatchViewedStep = event_step.stepIndex;
+    db.currentVizMatchTimestep = result_step.stepIndex;
   }
 
   ImGui::BeginDisabled(match_steps.size() == 0);
 
-  ImGui::DragInt("Visualized Step", &db.eventMatchViewedStep,
+  ImGui::DragInt("Visualized Timestep", &db.currentVizMatchTimestep,
                  1, 0, match_steps.size() - 1,
-                 db.eventMatchViewedStep == -1 ? "" : "%d",
+                 db.currentVizMatchTimestep == -1 ? "" : "%d",
                  ImGuiSliderFlags_AlwaysClamp);
 
   ImGui::EndDisabled();
@@ -1441,17 +1512,17 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     u64 microseconds_per_step =
       (1000000 + db.matchReplayHz / 2) / db.matchReplayHz;
 
-    LoggedStep cur_viewed_step_info =
-      match_steps[db.eventMatchViewedStep];
+    FilterResult cur_viewed_step_info =
+      match_steps[db.currentVizMatchTimestep];
 
-    int next_viewed_step_idx = db.eventMatchViewedStep + 1;
+    int next_viewed_step_idx = db.currentVizMatchTimestep + 1;
     next_viewed_step_idx %= match_steps.size();
 
-    LoggedStep next_viewed_step_info =
+    FilterResult next_viewed_step_info =
       match_steps[next_viewed_step_idx];
 
-    int steps_to_next
-      = next_viewed_step_info.stepIndex - cur_viewed_step_info.stepIndex;
+    int steps_to_next =
+      next_viewed_step_info.stepIndex - cur_viewed_step_info.stepIndex;
 
     if (steps_to_next < 0) {
       steps_to_next = 1;
@@ -1460,14 +1531,14 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     u64 microseconds_to_next = (u64)steps_to_next * microseconds_per_step;
 
     if (microseconds_elapsed >= microseconds_to_next) {
-      db.eventMatchViewedStep = next_viewed_step_idx;
+      db.currentVizMatchTimestep = next_viewed_step_idx;
 
       db.lastMatchReplayTick = now;
     }
   }
 
-  if (db.eventMatchViewedStep != -1 && match_steps.size() > 0) {
-    i64 step_id = match_steps[db.eventMatchViewedStep].stepID;
+  if (db.currentVizMatchTimestep != -1 && match_steps.size() > 0) {
+    i64 step_id = match_steps[db.currentVizMatchTimestep].stepID;
 
     db.curSnapshot = loadStepSnapshot(db, step_id);
 
@@ -1495,7 +1566,7 @@ static void analyticsBGThread(AnalyticsDB &db)
     [&db]
   (DynArray<AnalyticsFilter> &filters, int window_size)
   {
-      DynArray<LoggedStep> results(1000);
+      DynArray<FilterResult> results(1000);
 
       std::string withs = "WITH ";
 
@@ -2666,6 +2737,10 @@ static Engine & cfgUI(VizState *viz, Manager &mgr)
       viz->flyCam.fwd.x,
       viz->flyCam.fwd.y,
       viz->flyCam.fwd.z);
+  ImGui::Text("    Up:      (%.2f %.2f %.2f)",
+      viz->flyCam.up.x,
+      viz->flyCam.up.y,
+      viz->flyCam.up.z);
 
   ImGui::Spacing();
   ImGui::TextUnformatted("Simulation Settings");
@@ -3252,7 +3327,7 @@ static void renderAnalyticsViz(Engine &ctx, VizState *viz,
   (void)ctx;
   AnalyticsDB &db = viz->db;
 
-  if (db.eventMatchViewedStep == -1) {
+  if (db.currentVizMatchTimestep == -1) {
     return;
   }
 
