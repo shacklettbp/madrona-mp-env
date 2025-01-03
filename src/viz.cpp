@@ -396,6 +396,8 @@ struct AnalyticsDB {
   std::chrono::time_point<std::chrono::steady_clock> lastMatchReplayTick = {};
   int matchReplayHz = 100;
 
+  std::ofstream trajectoriesOutFile {};
+
   std::thread bgThread = {};
 };
 
@@ -825,13 +827,14 @@ static void sendAnalyticsThreadCmd(AnalyticsDB &db, AnalyticsThreadCtrl ctrl)
 
 static void analyticsBGThread(AnalyticsDB &db);
 
-static void loadAnalyticsDB(VizState *viz, const char *path)
+static void loadAnalyticsDB(VizState *viz,
+                            const VizConfig &cfg)
 {
   AnalyticsDB &db = viz->db;
 
   sqlite3_config(SQLITE_CONFIG_SERIALIZED);
 
-  REQ_SQL(db.hdl, sqlite3_open(path, &db.hdl));
+  REQ_SQL(db.hdl, sqlite3_open(cfg.analyticsDBPath, &db.hdl));
 
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
@@ -874,6 +877,9 @@ ORDER BY
     REQ_SQL(db.hdl, sqlite3_reset(num_matches_stmt));
     REQ_SQL(db.hdl, sqlite3_finalize(num_matches_stmt));
   }
+
+  db.trajectoriesOutFile = std::ofstream(
+      cfg.trajectoriesDBPath, std::ios::binary);
 
   db.bgThread = std::thread(analyticsBGThread, std::ref(db));
 }
@@ -964,6 +970,52 @@ static DynArray<i64> loadMatchSteps(AnalyticsDB &db,
   REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchSteps));
 
   return results;
+}
+
+static void dumpTrajectories(AnalyticsDB &db)
+{
+  const int traj_len = 100;
+  const int slide_len = traj_len / 2;
+
+  assert(db.displayResults.has_value());
+
+  for (i32 result_idx = 0;
+       result_idx < db.displayResults->size();
+       result_idx++) {
+    FilterResult result = (*db.displayResults)[result_idx];
+
+    DynArray<i64> match_steps = loadMatchSteps(db, result.matchID);
+
+    int window_start = result.windowStart;
+    int window_end = result.windowEnd;
+
+    int traj_start_border =
+        std::max(window_start - slide_len, 0);
+    int traj_end_border =
+        std::min(window_end + slide_len, (int)match_steps.size());
+
+    for (int cur_traj_start = traj_start_border;
+         cur_traj_start < traj_end_border;
+         cur_traj_start += slide_len) {
+      int cur_end = cur_traj_start + traj_len;
+
+      int past_end = cur_end - (int)match_steps.size();
+      if (past_end > 0) {
+        cur_traj_start -= past_end;
+        cur_end = match_steps.size();
+      }
+      
+      assert(cur_end - cur_traj_start == traj_len);
+
+      db.trajectoriesOutFile.write(
+          (char *)(match_steps.data() + cur_traj_start),
+          traj_len * sizeof(i64));
+
+      if (past_end > 0) {
+        break;
+      }
+    }
+  }
 }
 
 static void analyticsDBUI(Engine &ctx, VizState *viz)
@@ -1375,6 +1427,18 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   }
 
   if (db.currentSelectedResult != -1) {
+    ImGui::EndDisabled();
+  }
+
+  if (num_filter_results == 0 || !db.trajectoriesOutFile.is_open()) {
+    ImGui::BeginDisabled();
+  }
+
+  if (ImGui::Button("Dump Trajectories")) {
+    dumpTrajectories(db);
+  }
+
+  if (num_filter_results == 0 || !db.trajectoriesOutFile.is_open()) {
     ImGui::EndDisabled();
   }
 
@@ -1984,7 +2048,7 @@ VizState * init(const VizConfig &cfg)
   loadAssets(viz, cfg);
 
   if (cfg.analyticsDBPath != nullptr) {
-    loadAnalyticsDB(viz, cfg.analyticsDBPath);
+    loadAnalyticsDB(viz, cfg);
   }
 
   return viz;

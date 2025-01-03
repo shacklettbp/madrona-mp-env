@@ -31,6 +31,7 @@ struct VizConfig {
   bool doAITeam2;
 
   const char *analyticsDBPath;
+  const char *trajectoriesDBPath;
 };
 
 struct VizCamera {};

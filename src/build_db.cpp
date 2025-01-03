@@ -339,7 +339,7 @@ SELECT id FROM matches WHERE orig_id = ?
       EventPlayerState player_state = step.players[player];
 
       sqlite3_bind_int64(insert_player_state_stmt, 1, step_id);
-      sqlite3_bind_int(insert_player_state_stmt, 2, player_state.playerID);
+      sqlite3_bind_int(insert_player_state_stmt, 2, i);
       sqlite3_bind_int(insert_player_state_stmt, 3, player_state.pos[0]);
       sqlite3_bind_int(insert_player_state_stmt, 4, player_state.pos[1]);
       sqlite3_bind_int(insert_player_state_stmt, 5, player_state.pos[2]);

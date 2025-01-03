@@ -58,6 +58,7 @@ int main(int argc, char *argv[])
     bool doAITeam2 = false;
 
     char *analytics_db_path = nullptr;
+    char *trajectories_db_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
       char *arg = argv[i];
@@ -132,6 +133,20 @@ int main(int argc, char *argv[])
           }
 
           analytics_db_path = argv[i];
+        } else if (!strcmp("trajectories-db", arg)) {
+          if (trajectories_db_path != nullptr) {
+            printf("err\n");
+            usageErr();
+          }
+          
+          i += 1;
+
+          if (i == argc) {
+            printf("err2\n");
+            usageErr();
+          }
+
+          trajectories_db_path = argv[i];
         }
       } else {
         if (num_worlds_set) {
@@ -172,6 +187,7 @@ int main(int argc, char *argv[])
       .doAITeam1 = doAITeam1,
       .doAITeam2 = doAITeam2,
       .analyticsDBPath = analytics_db_path,
+      .trajectoriesDBPath = trajectories_db_path,
     });
 
     const bool highlevel_move = false;

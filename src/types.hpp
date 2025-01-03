@@ -535,7 +535,6 @@ struct EventLogGlobalState {
 };
 
 struct EventPlayerState {
-  u16 playerID;
   i16 pos[3];
   i16 yaw;
   i16 pitch;
