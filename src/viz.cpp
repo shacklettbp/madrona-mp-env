@@ -349,10 +349,10 @@ struct AnalyticsFilter {
 };
 
 struct FilterResult {
-  i64 stepID;
   i64 matchID;
   i64 teamID;
-  i64 stepIndex;
+  i64 windowStart;
+  i64 windowEnd;
 };
 
 struct AnalyticsDB {
@@ -844,7 +844,7 @@ WHERE
 
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
-  ms.id, ms.step_idx
+  ms.id
 FROM match_steps AS ms
 WHERE
   ms.match_id = ?
@@ -949,22 +949,16 @@ static StepSnapshot loadStepSnapshot(AnalyticsDB &db, i64 step_id)
   return snapshot;
 }
 
-static DynArray<FilterResult> loadMatchSteps(AnalyticsDB &db,
-                                           i64 match_id)
+static DynArray<i64> loadMatchSteps(AnalyticsDB &db,
+                                    i64 match_id)
 {
-  DynArray<FilterResult> results(10000);
+  DynArray<i64> results(5000);
 
   sqlite3_bind_int64(db.loadMatchSteps, 1, match_id);
 
   while (sqlite3_step(db.loadMatchSteps) == SQLITE_ROW) {
     i64 step_id = sqlite3_column_int(db.loadMatchSteps, 0);
-    i64 match_step_idx = sqlite3_column_int(db.loadMatchSteps, 1);
-    results.push_back({
-      .stepID = step_id,
-      .matchID = match_id,
-      .teamID = -1,
-      .stepIndex = match_step_idx,
-    });
+    results.push_back(step_id);
   }
 
   REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchSteps));
@@ -1058,6 +1052,52 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   ImGui::Spacing();
   ImGui::Separator();
 
+  auto aabbRegionSelector =
+    [&]
+  (AABB2D16 *region, const char *label)
+  {
+    ImGui::PushItemWidth(box_width);
+
+    int region_min_x = region->min.x;
+    int region_min_y = region->min.y;
+    int region_max_x = region->max.x;
+    int region_max_y = region->max.y;
+
+    ImGui::DragInt("##Pos Min X",
+                   &region_min_x, 1,
+                   -32768, 32767, "%d, ", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::SameLine();
+    ImGui::DragInt("##Pos Min Y",
+                   &region_min_y, 1,
+                   -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+
+    ImGui::SameLine();
+    ImGui::Text("to");
+    ImGui::SameLine();
+
+    ImGui::DragInt("##Pos Max X",
+                   &region_max_x, 1,
+                   -32768, 32767, "%d, ", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::SameLine();
+    ImGui::DragInt("##Pos Max Y",
+                   &region_max_y, 1,
+                   -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("^")) {
+      db.visualSelectRegion = region;
+    }
+    ImGui::SameLine();
+    ImGui::Text("%s", label);
+
+    region->min.x = (i16)region_min_x;
+    region->min.y = (i16)region_min_y;
+    region->max.x = (i16)region_max_x;
+    region->max.y = (i16)region_max_y;
+
+    ImGui::PopItemWidth();
+
+  };
+
   for (int filter_idx = 0;
        filter_idx < (int)db.currentFilters.size();
        filter_idx++) {
@@ -1108,56 +1148,10 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
       ImGui::PushItemWidth(box_width);
 
-      int killer_min_x = kill.killerRegion.min.x;
-      int killer_min_y = kill.killerRegion.min.y;
-      int killer_max_x = kill.killerRegion.max.x;
-      int killer_max_y = kill.killerRegion.max.y;
-
-      int killed_min_x = kill.killedRegion.min.x;
-      int killed_min_y = kill.killedRegion.min.y;
-      int killed_max_x = kill.killedRegion.max.x;
-      int killed_max_y = kill.killedRegion.max.y;
-
-      ImGui::DragInt("##Killer Pos Min X",
-                     &killer_min_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Killer Pos Min",
-                     &killer_min_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      ImGui::DragInt("##Killer Pos Max X",
-                     &killer_max_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Killer Pos Max",
-                     &killer_max_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      ImGui::DragInt("##Killed Pos Min X",
-                     &killed_min_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Killed Pos Min",
-                     &killed_min_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      ImGui::DragInt("##Killed Pos Max X",
-                     &killed_max_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Killed Pos Max",
-                     &killed_max_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      kill.killerRegion.min.x = (i16)killer_min_x;
-      kill.killerRegion.min.y = (i16)killer_min_y;
-      kill.killerRegion.max.x = (i16)killer_max_x;
-      kill.killerRegion.max.y = (i16)killer_max_y;
-      kill.killedRegion.min.x = (i16)killed_min_x;
-      kill.killedRegion.min.y = (i16)killed_min_y;
-      kill.killedRegion.max.x = (i16)killed_max_x;
-      kill.killedRegion.max.y = (i16)killed_max_y;
+      aabbRegionSelector(&kill.killerRegion,
+                         "Attacker");
+      aabbRegionSelector(&kill.killedRegion,
+                         "Target");
 
       ImGui::PopItemWidth();
     } break;
@@ -1169,56 +1163,10 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
       ImGui::PushItemWidth(box_width);
 
-      int attacker_min_x = player_shot.attackerRegion.min.x;
-      int attacker_min_y = player_shot.attackerRegion.min.y;
-      int attacker_max_x = player_shot.attackerRegion.max.x;
-      int attacker_max_y = player_shot.attackerRegion.max.y;
-
-      int target_min_x = player_shot.targetRegion.min.x;
-      int target_min_y = player_shot.targetRegion.min.y;
-      int target_max_x = player_shot.targetRegion.max.x;
-      int target_max_y = player_shot.targetRegion.max.y;
-
-      ImGui::DragInt("##Attacker Pos Min X",
-                     &attacker_min_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Attacker Pos Min",
-                     &attacker_min_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      ImGui::DragInt("##Attacker Pos Max X",
-                     &attacker_max_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Attacker Pos Max",
-                     &attacker_max_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      ImGui::DragInt("##Target Pos Min X",
-                     &target_min_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Target Pos Min",
-                     &target_min_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      ImGui::DragInt("##Target Pos Max X",
-                     &target_max_x, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("Target Pos Max",
-                     &target_max_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      player_shot.attackerRegion.min.x = (i16)attacker_min_x;
-      player_shot.attackerRegion.min.y = (i16)attacker_min_y;
-      player_shot.attackerRegion.max.x = (i16)attacker_max_x;
-      player_shot.attackerRegion.max.y = (i16)attacker_max_y;
-      player_shot.targetRegion.min.x = (i16)target_min_x;
-      player_shot.targetRegion.min.y = (i16)target_min_y;
-      player_shot.targetRegion.max.x = (i16)target_max_x;
-      player_shot.targetRegion.max.y = (i16)target_max_y;
+      aabbRegionSelector(&player_shot.attackerRegion,
+                         "Attacker");
+      aabbRegionSelector(&player_shot.targetRegion,
+                         "Target");
 
       ImGui::PopItemWidth();
     } break;
@@ -1228,45 +1176,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
       ImGui::Text("Player In Region");
       ImGui::Separator();
 
-      ImGui::PushItemWidth(box_width);
-
-      int region_min_x = player_in_region.region.min.x;
-      int region_min_y = player_in_region.region.min.y;
-      int region_max_x = player_in_region.region.max.x;
-      int region_max_y = player_in_region.region.max.y;
-
-      ImGui::DragInt("##Pos Min X",
-                     &region_min_x, 1,
-                     -32768, 32767, "%d, ", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("##Pos Min Y",
-                     &region_min_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-
-      ImGui::SameLine();
-      ImGui::Text("to");
-      ImGui::SameLine();
-
-      ImGui::DragInt("##Pos Max X",
-                     &region_max_x, 1,
-                     -32768, 32767, "%d, ", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      ImGui::DragInt("##Pos Max Y",
-                     &region_max_y, 1,
-                     -32768, 32767, "%d", ImGuiSliderFlags_AlwaysClamp);
-      ImGui::SameLine();
-      if (ImGui::SmallButton("^")) {
-        db.visualSelectRegion = &player_in_region.region;
-      }
-      ImGui::SameLine();
-      ImGui::Text("AABB");
-
-      player_in_region.region.min.x = (i16)region_min_x;
-      player_in_region.region.min.y = (i16)region_min_y;
-      player_in_region.region.max.x = (i16)region_max_x;
-      player_in_region.region.max.y = (i16)region_max_y;
-
-      ImGui::PopItemWidth();
+      aabbRegionSelector(&player_in_region.region, "Region");
 
     } break;
     default: MADRONA_UNREACHABLE(); break;
@@ -1413,30 +1323,33 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     ImGui::EndDisabled();
   }
 
-  FilterResult result_step {
-    .stepID = -1,
+  FilterResult cur_viz_result {
     .matchID = -1,
     .teamID = -1,
-    .stepIndex = -1,
+    .windowStart = -1,
+    .windowEnd = -1,
   };
 
   if (num_filter_results > 0 && db.currentSelectedResult != -1) {
-    result_step = (*db.displayResults)[db.currentSelectedResult];
+    cur_viz_result = (*db.displayResults)[db.currentSelectedResult];
   }
 
   ImGui::Spacing();
 
-  if (result_step.stepID == -1) {
+  if (cur_viz_result.matchID == -1) {
     ImGui::Text("Trajectory Match ID:");
+    ImGui::Text("Trajectory Team:");
     ImGui::Text("Trajectory Start Step:");
     ImGui::Text("Trajectory End Step:");
   } else {
-    ImGui::Text("Trajectory Match ID:     %ld",
-                (long)result_step.matchID);
-    ImGui::Text("Trajectory Start Step:   %ld",
-                (long)result_step.stepIndex);
+    ImGui::Text("Trajectory Match ID:   %ld",
+                (long)cur_viz_result.matchID);
+    ImGui::Text("Trajectory Team:       %s",
+                cur_viz_result.teamID == 0 ? "Blue" : "Red");
+    ImGui::Text("Trajectory Start Step: %ld",
+                (long)cur_viz_result.windowStart);
     ImGui::Text("Trajectory End Step:   %ld",
-                (long)result_step.stepIndex);
+                (long)cur_viz_result.windowEnd);
   }
 
   ImGui::Separator();
@@ -1444,7 +1357,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   ImGui::PushItemWidth(box_width);
 
   if (db.currentSelectedResult != -1) {
-    db.currentVizMatch = result_step.matchID;
+    db.currentVizMatch = cur_viz_result.matchID;
     ImGui::BeginDisabled();
   }
 
@@ -1465,13 +1378,13 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     ImGui::EndDisabled();
   }
 
-  DynArray<FilterResult> match_steps = db.currentVizMatch == -1 ?
-    DynArray<FilterResult>(0) : loadMatchSteps(db, db.currentVizMatch);
+  DynArray<i64> match_steps = db.currentVizMatch == -1 ?
+    DynArray<i64>(0) : loadMatchSteps(db, db.currentVizMatch);
 
   if (db.currentSelectedResult != -1 &&
       db.currentVizMatchTimestep == -1 &&
       match_steps.size() > 0) {
-    db.currentVizMatchTimestep = result_step.stepIndex;
+    db.currentVizMatchTimestep = cur_viz_result.windowStart;
   }
 
   ImGui::BeginDisabled(match_steps.size() == 0);
@@ -1512,33 +1425,16 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     u64 microseconds_per_step =
       (1000000 + db.matchReplayHz / 2) / db.matchReplayHz;
 
-    FilterResult cur_viewed_step_info =
-      match_steps[db.currentVizMatchTimestep];
-
-    int next_viewed_step_idx = db.currentVizMatchTimestep + 1;
-    next_viewed_step_idx %= match_steps.size();
-
-    FilterResult next_viewed_step_info =
-      match_steps[next_viewed_step_idx];
-
-    int steps_to_next =
-      next_viewed_step_info.stepIndex - cur_viewed_step_info.stepIndex;
-
-    if (steps_to_next < 0) {
-      steps_to_next = 1;
-    }
-
-    u64 microseconds_to_next = (u64)steps_to_next * microseconds_per_step;
-
-    if (microseconds_elapsed >= microseconds_to_next) {
-      db.currentVizMatchTimestep = next_viewed_step_idx;
+    if (microseconds_elapsed >= microseconds_per_step) {
+      db.currentVizMatchTimestep += 1;
+      db.currentVizMatchTimestep %= match_steps.size();
 
       db.lastMatchReplayTick = now;
     }
   }
 
   if (db.currentVizMatchTimestep != -1 && match_steps.size() > 0) {
-    i64 step_id = match_steps[db.currentVizMatchTimestep].stepID;
+    i64 step_id = match_steps[db.currentVizMatchTimestep];
 
     db.curSnapshot = loadStepSnapshot(db, step_id);
 
@@ -1566,237 +1462,269 @@ static void analyticsBGThread(AnalyticsDB &db)
     [&db]
   (DynArray<AnalyticsFilter> &filters, int window_size)
   {
-      DynArray<FilterResult> results(1000);
+    DynArray<FilterResult> results(1000);
 
-      std::string withs = "WITH ";
+    std::string withs = "WITH ";
 
-      for (int filter_idx = 0; filter_idx < (int)filters.size();
-           filter_idx += 1) {
-        AnalyticsFilter &filter = db.currentFilters[filter_idx];
+    for (int filter_idx = 0; filter_idx < (int)filters.size();
+         filter_idx += 1) {
+      AnalyticsFilter &filter = db.currentFilters[filter_idx];
 
-        std::string filter_query;
+      std::string filter_query;
 
-        switch (filter.type) {
-        case AnalyticsFilterType::CaptureEvent: {
-          auto &capture = filter.captureEvent;
+      switch (filter.type) {
+      case AnalyticsFilterType::CaptureEvent: {
+        auto &capture = filter.captureEvent;
 
-          filter_query = R"(
-            SELECT
-              capture_events.step_id AS step_id,
-              event_steps.match_id AS match_id,
-              event_steps.step_idx AS timestep,
-              capture_events.capture_team_idx AS team_id
-            FROM capture_events
-            INNER JOIN match_steps AS event_steps ON
-              event_steps.id = capture_events.step_id
-            WHERE capture_events.num_in_zone >= )";
+        filter_query = R"(
+          SELECT
+            capture_events.step_id AS step_id,
+            event_steps.match_id AS match_id,
+            event_steps.step_idx AS timestep,
+            capture_events.capture_team_idx AS team_id
+          FROM capture_events
+          INNER JOIN match_steps AS event_steps ON
+            event_steps.id = capture_events.step_id
+          WHERE capture_events.num_in_zone >= )";
 
-          filter_query += std::to_string(capture.minNumInZone);
+        filter_query += std::to_string(capture.minNumInZone);
 
-          if (capture.zoneIDX != -1) {
-            filter_query += "AND (capture_events.zone_idx = ";
-            filter_query += std::to_string(capture.zoneIDX);
-            filter_query += ")";
-          }
-        } break;
-        case AnalyticsFilterType::ReloadEvent: {
-          auto &reload = filter.reloadEvent;
-          filter_query = R"(
-            SELECT
-              reload_events.step_id AS step_id,
-              event_steps.match_id AS match_id,
-              event_steps.step_idx AS timestep,
-              player_states.player_idx < 6 AS team_id
-            FROM reload_events
-            INNER JOIN match_steps AS event_steps ON
-              event_steps.id = reload_events.step_id
-            INNER JOIN player_states ON 
-              player_states.id = reload_events.player_state_id
-            WHERE (reload_events.num_bullets >= )";
-
-          filter_query += std::to_string(reload.minNumBulletsAtReloadTime);
+        if (capture.zoneIDX != -1) {
+          filter_query += "AND (capture_events.zone_idx = ";
+          filter_query += std::to_string(capture.zoneIDX);
           filter_query += ")";
-
-          filter_query += "AND (reload_events.num_bullets <=";
-          filter_query += std::to_string(reload.maxNumBulletsAtReloadTime);
-          filter_query += ")";
-        } break;
-        case AnalyticsFilterType::KillEvent: {
-          auto &kill = filter.killEvent;
-
-          filter_query = R"(
-            SELECT
-              kill_events.step_id AS step_id,
-              event_steps.match_id AS match_id,
-              event_steps.step_idx AS timestep,
-              killers.player_idx < 6 AS team_id
-            FROM kill_events
-            INNER JOIN player_states AS killers ON
-              kill_events.killer_id = killers.id
-            INNER JOIN player_states AS killed ON
-              kill_events.killed_id = killed.id
-            INNER JOIN match_steps AS event_steps ON
-              event_steps.id = kill_events.step_id
-            WHERE (killers.pos_x >= )";
-
-          filter_query += std::to_string(kill.killerRegion.min.x);
-          filter_query +=
-            " AND killers.pos_x <= " + std::to_string(kill.killerRegion.max.x);
-          filter_query += ") AND (killers.pos_y >= " +
-            std::to_string(kill.killerRegion.min.y) +
-            " AND killers.pos_y <= " + std::to_string(kill.killerRegion.max.y);
-
-          filter_query += ") AND (killed.pos_x >= " +
-            std::to_string(kill.killedRegion.min.x) +
-            " AND killed.pos_x <= " + std::to_string(kill.killedRegion.max.x);
-
-          filter_query += ") AND (killed.pos_y >= " +
-            std::to_string(kill.killedRegion.min.y) +
-            " AND killed.pos_y <= " + std::to_string(kill.killedRegion.max.y);
-
-          filter_query += ")";
-        } break;
-        case AnalyticsFilterType::PlayerShotEvent: {
-          auto &shot = filter.playerShotEvent;
-
-          filter_query = R"(
-            SELECT
-              player_shot_events.step_id AS step_id,
-              event_steps.match_id AS match_id,
-              event_steps.step_idx AS timestep,
-              attackers.player_idx < 6 AS team_id
-            FROM player_shot_events
-            INNER JOIN player_states AS attackers ON
-              player_shot_events.attacker_id = attackers.id
-            INNER JOIN player_states AS targets ON
-              player_shot_events.target_id = targets.id
-            INNER JOIN match_steps AS event_steps ON
-              event_steps.id = player_shot_events.step_id
-            WHERE (attackers.pos_x >= )";
-
-          filter_query += std::to_string(shot.attackerRegion.min.x);
-          filter_query +=
-            " AND attackers.pos_x <= " + std::to_string(shot.attackerRegion.max.x);
-          filter_query += ") AND (attackers.pos_y >= " +
-            std::to_string(shot.attackerRegion.min.y) +
-            " AND attackers.pos_y <= " + std::to_string(shot.attackerRegion.max.y);
-
-          filter_query += ") AND (targets.pos_x >= " +
-            std::to_string(shot.targetRegion.min.x) +
-            " AND targets.pos_x <= " + std::to_string(shot.targetRegion.max.x);
-
-          filter_query += ") AND (targets.pos_y >= " +
-            std::to_string(shot.targetRegion.min.y) +
-            " AND targets.pos_y <= " + std::to_string(shot.targetRegion.max.y);
-          filter_query += ")";
-        } break;
-        case AnalyticsFilterType::PlayerInRegion: {
-          auto &in_region = filter.playerInRegion;
-
-          filter_query = R"(
-            SELECT
-              player_states.step_id AS step_id,
-              match_steps.match_id AS match_id,
-              match_steps.step_idx AS timestep,
-              player_states.player_idx < 6 AS team_id
-            FROM player_states
-            INNER JOIN match_steps ON
-              match_steps.id = player_states.step_id
-            WHERE (player_states.pos_x >= )";
-
-          filter_query += std::to_string(in_region.region.min.x);
-          filter_query +=
-            " AND player_states.pos_x <= " + std::to_string(in_region.region.max.x);
-          filter_query += ") AND (player_states.pos_y >= " +
-            std::to_string(in_region.region.min.y) +
-            " AND player_states.pos_y <= " + std::to_string(in_region.region.max.y);
-          filter_query += ")";
-        } break;
-        default: MADRONA_UNREACHABLE(); break;
         }
+      } break;
+      case AnalyticsFilterType::ReloadEvent: {
+        auto &reload = filter.reloadEvent;
+        filter_query = R"(
+          SELECT
+            reload_events.step_id AS step_id,
+            event_steps.match_id AS match_id,
+            event_steps.step_idx AS timestep,
+            player_states.player_idx / 6 AS team_id
+          FROM reload_events
+          INNER JOIN match_steps AS event_steps ON
+            event_steps.id = reload_events.step_id
+          INNER JOIN player_states ON 
+            player_states.id = reload_events.player_state_id
+          WHERE (reload_events.num_bullets >= )";
 
-        withs += "\n  results" + std::to_string(filter_idx);
-        withs += " AS (" + filter_query + "\n  )";
+        filter_query += std::to_string(reload.minNumBulletsAtReloadTime);
+        filter_query += ")";
 
-        if (filter_idx < (int)filters.size() - 1) {
-          withs += ",";
-        }
+        filter_query += "AND (reload_events.num_bullets <=";
+        filter_query += std::to_string(reload.maxNumBulletsAtReloadTime);
+        filter_query += ")";
+      } break;
+      case AnalyticsFilterType::KillEvent: {
+        auto &kill = filter.killEvent;
+
+        filter_query = R"(
+          SELECT
+            kill_events.step_id AS step_id,
+            event_steps.match_id AS match_id,
+            event_steps.step_idx AS timestep,
+            killers.player_idx / 6 AS team_id
+          FROM kill_events
+          INNER JOIN player_states AS killers ON
+            kill_events.killer_id = killers.id
+          INNER JOIN player_states AS killed ON
+            kill_events.killed_id = killed.id
+          INNER JOIN match_steps AS event_steps ON
+            event_steps.id = kill_events.step_id
+          WHERE (killers.pos_x >= )";
+
+        filter_query += std::to_string(kill.killerRegion.min.x);
+        filter_query +=
+          " AND killers.pos_x <= " + std::to_string(kill.killerRegion.max.x);
+        filter_query += ") AND (killers.pos_y >= " +
+          std::to_string(kill.killerRegion.min.y) +
+          " AND killers.pos_y <= " + std::to_string(kill.killerRegion.max.y);
+
+        filter_query += ") AND (killed.pos_x >= " +
+          std::to_string(kill.killedRegion.min.x) +
+          " AND killed.pos_x <= " + std::to_string(kill.killedRegion.max.x);
+
+        filter_query += ") AND (killed.pos_y >= " +
+          std::to_string(kill.killedRegion.min.y) +
+          " AND killed.pos_y <= " + std::to_string(kill.killedRegion.max.y);
+
+        filter_query += ")";
+      } break;
+      case AnalyticsFilterType::PlayerShotEvent: {
+        auto &shot = filter.playerShotEvent;
+
+        filter_query = R"(
+          SELECT
+            player_shot_events.step_id AS step_id,
+            event_steps.match_id AS match_id,
+            event_steps.step_idx AS timestep,
+            attackers.player_idx / 6 AS team_id
+          FROM player_shot_events
+          INNER JOIN player_states AS attackers ON
+            player_shot_events.attacker_id = attackers.id
+          INNER JOIN player_states AS targets ON
+            player_shot_events.target_id = targets.id
+          INNER JOIN match_steps AS event_steps ON
+            event_steps.id = player_shot_events.step_id
+          WHERE (attackers.pos_x >= )";
+
+        filter_query += std::to_string(shot.attackerRegion.min.x);
+        filter_query +=
+          " AND attackers.pos_x <= " + std::to_string(shot.attackerRegion.max.x);
+        filter_query += ") AND (attackers.pos_y >= " +
+          std::to_string(shot.attackerRegion.min.y) +
+          " AND attackers.pos_y <= " + std::to_string(shot.attackerRegion.max.y);
+
+        filter_query += ") AND (targets.pos_x >= " +
+          std::to_string(shot.targetRegion.min.x) +
+          " AND targets.pos_x <= " + std::to_string(shot.targetRegion.max.x);
+
+        filter_query += ") AND (targets.pos_y >= " +
+          std::to_string(shot.targetRegion.min.y) +
+          " AND targets.pos_y <= " + std::to_string(shot.targetRegion.max.y);
+        filter_query += ")";
+      } break;
+      case AnalyticsFilterType::PlayerInRegion: {
+        auto &in_region = filter.playerInRegion;
+
+        filter_query = R"(
+          SELECT
+            player_states.step_id AS step_id,
+            match_steps.match_id AS match_id,
+            match_steps.step_idx AS timestep,
+            player_states.player_idx / 6 AS team_id
+          FROM player_states
+          INNER JOIN match_steps ON
+            match_steps.id = player_states.step_id
+          WHERE (player_states.pos_x >= )";
+
+        filter_query += std::to_string(in_region.region.min.x);
+        filter_query +=
+          " AND player_states.pos_x <= " + std::to_string(in_region.region.max.x);
+        filter_query += ") AND (player_states.pos_y >= " +
+          std::to_string(in_region.region.min.y) +
+          " AND player_states.pos_y <= " + std::to_string(in_region.region.max.y);
+        filter_query += ")";
+      } break;
+      default: MADRONA_UNREACHABLE(); break;
       }
 
-      std::string query_str = withs + R"(
+      withs += "\n  results" + std::to_string(filter_idx);
+      withs += " AS (" + filter_query + "\n  )";
+
+      if (filter_idx < (int)filters.size() - 1) {
+        withs += ",";
+      }
+    }
+
+    std::string query_str = withs + R"(
 SELECT DISTINCT
   results0.step_id AS step_id,
   results0.match_id AS match_id,
   results0.team_id AS team_id,
 )";
 
-      if (filters.size() == 1) {
-        query_str += R"(
+    if (filters.size() == 1) {
+      query_str += R"(
   results0.timestep AS window_start,
   results0.timestep AS window_end
 )";
-      } else {
-        query_str += "  MIN(";
+    } else {
+      query_str += "  MIN(";
 
-        for (int filter_idx = 0; filter_idx < (int)filters.size();
-             filter_idx++) {
-          std::string results_name = "results" + std::to_string(filter_idx);
-          query_str += results_name + ".timestep";
-          if (filter_idx < (int)filters.size() - 1) {
-            query_str += ",";
-          }
+      for (int filter_idx = 0; filter_idx < (int)filters.size();
+           filter_idx++) {
+        std::string results_name = "results" + std::to_string(filter_idx);
+        query_str += results_name + ".timestep";
+        if (filter_idx < (int)filters.size() - 1) {
+          query_str += ",";
         }
-
-        query_str += ") AS window_start,\n";
-
-        query_str += "  MAX(";
-
-        for (int filter_idx = 0; filter_idx < (int)filters.size();
-             filter_idx++) {
-          std::string results_name = "results" + std::to_string(filter_idx);
-          query_str += results_name + ".timestep";
-          if (filter_idx < (int)filters.size() - 1) {
-            query_str += ",";
-          }
-        }
-
-        query_str += ") AS window_end";
       }
 
-      query_str += "\nFROM results0";
+      query_str += ") AS window_start,\n";
 
-        for (int filter_idx = 1; filter_idx < (int)filters.size();
-             filter_idx++) {
-          std::string results_name = "results" + std::to_string(filter_idx);
-          query_str += "\nJOIN " + results_name + " ON (" +
-            results_name + ".match_id = results0.match_id AND " + results_name + ".team_id = results0.team_id)";
+      query_str += "  MAX(";
+
+      for (int filter_idx = 0; filter_idx < (int)filters.size();
+           filter_idx++) {
+        std::string results_name = "results" + std::to_string(filter_idx);
+        query_str += results_name + ".timestep";
+        if (filter_idx < (int)filters.size() - 1) {
+          query_str += ",";
         }
-      query_str += "\nWHERE window_end - window_start <= " +
-          std::to_string(window_size);
-      query_str += "\nORDER BY match_id, window_start;";
-      
-      printf("%s\n", query_str.c_str());
+      }
 
+      query_str += ") AS window_end";
+    }
+
+    query_str += "\nFROM results0";
+
+      for (int filter_idx = 1; filter_idx < (int)filters.size();
+           filter_idx++) {
+        std::string results_name = "results" + std::to_string(filter_idx);
+        query_str += "\nJOIN " + results_name + " ON (" +
+          results_name + ".match_id = results0.match_id AND " + results_name + ".team_id = results0.team_id)";
+      }
+    query_str += "\nWHERE window_end - window_start <= " +
+        std::to_string(window_size);
+    query_str += "\nORDER BY match_id, team_id, window_start;";
+    
+    printf("%s\n", query_str.c_str());
+
+    {
       sqlite3_stmt *filter_stmt;
       REQ_SQL(db.hdl, sqlite3_prepare_v2(
           db.hdl, query_str.c_str(), -1, &filter_stmt, nullptr));
+
+      FilterResult cur_result {
+        .matchID = -1,
+        .teamID = -1,
+        .windowStart = -1,
+        .windowEnd = -1,
+      };
 
       while (sqlite3_step(filter_stmt) == SQLITE_ROW) {
         i64 step_id = sqlite3_column_int64(filter_stmt, 0);
         i64 match_id = sqlite3_column_int64(filter_stmt, 1);
         i64 team_id = sqlite3_column_int64(filter_stmt, 2);
-        i64 match_step_idx = sqlite3_column_int64(filter_stmt, 3);
+        i64 window_start = sqlite3_column_int64(filter_stmt, 3);
+        i64 window_end = sqlite3_column_int64(filter_stmt, 4);
 
-        results.push_back({
-          .stepID = step_id,
-          .matchID = match_id,
-          .teamID = team_id,
-          .stepIndex = match_step_idx,
-        });
+        (void)step_id;
+
+        bool window_overlaps = window_start <= cur_result.windowEnd + 1 &&
+          cur_result.windowStart <= window_end + 1;
+
+        if (match_id != cur_result.matchID || team_id != cur_result.teamID ||
+            !window_overlaps) {
+          if (cur_result.matchID != -1) {
+            results.push_back(cur_result);
+          }
+
+          cur_result.matchID = match_id;
+          cur_result.teamID = team_id;
+          cur_result.windowStart = window_start;
+          cur_result.windowEnd = window_end;
+        } else {
+          if (window_start < cur_result.windowStart) {
+            cur_result.windowStart = window_start;
+          }
+
+          if (window_end > cur_result.windowEnd) {
+            cur_result.windowEnd = window_end;
+          }
+        }
       }
 
-    REQ_SQL(db.hdl, sqlite3_reset(filter_stmt));
-    REQ_SQL(db.hdl, sqlite3_finalize(filter_stmt));
+      if (cur_result.matchID != -1) {
+        results.push_back(cur_result);
+      }
+
+      REQ_SQL(db.hdl, sqlite3_reset(filter_stmt));
+      REQ_SQL(db.hdl, sqlite3_finalize(filter_stmt));
+    }
 
     return results;
   };
