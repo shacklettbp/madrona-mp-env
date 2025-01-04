@@ -48,7 +48,8 @@ NB_MODULE(madrona_mp_env, m) {
                             const char *scene_path,
                             nb::handle replay_log_path,
                             nb::handle record_log_path,
-                            nb::handle event_log_path) {
+                            nb::handle event_log_path,
+                            nb::handle curriculum_data_path) {
             std::filesystem::path scene_path_dir(scene_path);
 
             new (self) Manager(Manager::Config {
@@ -82,6 +83,8 @@ NB_MODULE(madrona_mp_env, m) {
                     nb::cast<const char*>(record_log_path),
                 .eventLogPath = event_log_path.is_none() ? nullptr :
                     nb::cast<const char*>(event_log_path),
+                .curriculumDataPath = curriculum_data_path.is_none() ?
+                    nullptr : nb::cast<const char*>(curriculum_data_path),
             });
         }, nb::arg("exec_mode"),
            nb::arg("gpu_id"),
@@ -96,7 +99,8 @@ NB_MODULE(madrona_mp_env, m) {
            nb::arg("scene_path"),
            nb::arg("replay_log_path") = nb::none(),
            nb::arg("record_log_path") = nb::none(),
-           nb::arg("event_log_path") = nb::none())
+           nb::arg("event_log_path") = nb::none(),
+           nb::arg("curriculum_data_path") = nb::none())
         .def("step", &Manager::step)
         .def("reset_tensor", &Manager::resetTensor)
         .def("explore_action_tensor", &Manager::exploreActionTensor)

@@ -63,6 +63,8 @@ arg_parser.add_argument('--static-flip-teams', action='store_true')
 arg_parser.add_argument('--full-team-policy', action='store_true')
 arg_parser.add_argument('--eval-frequency', type=int, default=500)
 
+arg_parser.add_argument('--curriculum-data', type=str)
+
 args = arg_parser.parse_args()
 
 if args.full_team_policy:
@@ -114,6 +116,7 @@ sim = madrona_mp_env.SimManager(
     num_pbt_policies = args.pbt_ensemble_size + args.pbt_past_policies,
     policy_history_size = args.pbt_past_policies,
     scene_path = args.scene,
+    curriculum_data_path = args.curriculum_data,
 )
 
 jax_gpu = jax.devices()[0].platform == 'gpu'
