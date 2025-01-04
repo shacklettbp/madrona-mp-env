@@ -45,32 +45,39 @@ static void writeEventStepState(Engine &ctx)
   ctx.data().eventLoggedInStep = 0;
   ctx.data().eventMask = 0;
 
-  AtomicU32Ref num_step_states_atomic(ctx.data().eventGlobalState->numStepStates);
-  num_step_states_atomic.fetch_add_relaxed(1);
+  AtomicU32Ref num_match_states_atomic(ctx.data().eventGlobalState->numStepStates);
+  num_match_states_atomic.fetch_add_relaxed(1);
 
   EventStepState &state_out =
     ctx.getDirect<EventStepState>(2, ctx.makeTemporary<EventStepStateEntity>());
+
+  PackedMatchState &match_state = state_out.matchState;
   
   state_out.numEvents = num_events;
   state_out.eventMask = event_mask;
 
   state_out.matchID = ctx.data().matchID;
-  state_out.step = cur_step;
+  match_state.step = (u16)cur_step;
 
   {
     ZoneState &zone_state = ctx.singleton<ZoneState>();
-    state_out.curZone = (u8)zone_state.curZone;
-    state_out.curZoneController = (i8)(
+    match_state.curZone = (u8)zone_state.curZone;
+    match_state.curZoneController = (i8)(
         zone_state.isCaptured ? zone_state.curControllingTeam : -1);
+
+    match_state.zoneStepsRemaining = u16(zone_state.zoneStepsRemaining);
+    match_state.stepsUntilPoint = u16(zone_state.stepsUntilPoint);
   }
 
   for (CountT i = 0; i < consts::maxTeamSize * 2; i++) {
-    EventPlayerState &player_state = state_out.players[i];
+    PackedPlayerSnapshot &player_state = state_out.players[i];
 
     if (i >= (CountT)ctx.data().numAgents) {
       player_state = {};
       break;
     }
+
+    player_state.flags = (u8)PackedPlayerStateFlags::None;
 
     Entity e = ctx.data().agents[i];
 
@@ -90,7 +97,21 @@ static void writeEventStepState(Engine &ctx)
 
     const CombatState &combat_state = ctx.get<CombatState>(e);
 
-    player_state.firedShot = (u8)(combat_state.landedShotOn != Entity::none());
+    if ((u8)(combat_state.landedShotOn != Entity::none())) {
+      player_state.flags |= u8(PackedPlayerStateFlags::FiredShot);
+    }
+
+    HP hp = ctx.get<HP>(e);
+
+    player_state.hp = (u8)hp.hp;
+
+    StandState stand_state = ctx.get<StandState>(e);
+    
+    if (stand_state.curPose == Pose::Crouch) {
+      player_state.flags |= u8(PackedPlayerStateFlags::Crouch);
+    } else if (stand_state.curPose == Pose::Prone) {
+      player_state.flags |= u8(PackedPlayerStateFlags::Prone);
+    }
   }
 }
 

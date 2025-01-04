@@ -534,31 +534,45 @@ struct EventLogGlobalState {
   u32 numStepStates;
 };
 
-struct EventPlayerState {
+enum class PackedPlayerStateFlags : u8 {
+  None        = 0,
+  FiredShot   = 1 << 1,
+  Crouch      = 1 << 2,
+  Prone       = 1 << 3,
+};
+
+struct PackedPlayerSnapshot {
   i16 pos[3];
   i16 yaw;
   i16 pitch;
-  u16 magNumBullets;
+  u8 magNumBullets;
   u8 isReloading;
-  u8 firedShot; 
+  u8 hp;
+  u8 flags;
 };
 
 enum class EventType : u32 {
-  None = 0,
-  Capture = 1 << 0,
-  Reload = 1 << 1,
-  Kill = 1 << 2,
+  None       = 0,
+  Capture    = 1 << 0,
+  Reload     = 1 << 1,
+  Kill       = 1 << 2,
   PlayerShot = 1 << 3,
+};
+
+struct PackedMatchState {
+  u16 step;
+  u8 curZone;
+  i8 curZoneController;
+  u16 zoneStepsRemaining;
+  u16 stepsUntilPoint;
 };
 
 struct EventStepState {
   u32 numEvents;
   u32 eventMask;
   u64 matchID;
-  u32 step;
-  u8 curZone;
-  i8 curZoneController;
-  EventPlayerState players[consts::maxTeamSize * 2];
+  PackedMatchState matchState;
+  PackedPlayerSnapshot players[consts::maxTeamSize * 2];
 };
 
 struct EventStepStateEntity : madrona::Archetype<
@@ -662,6 +676,15 @@ struct GoalRegionsState {
     bool regionsActive[maxRegions];
     float minDistToRegions[maxRegions];
     float teamStepRewards[2];
+};
+
+struct CurriculumSnapshot {
+  PackedMatchState matchState;
+  PackedPlayerSnapshot players[consts::maxTeamSize * 2];
+};
+
+struct TrajectoryCurriculum {
+  CurriculumSnapshot *steps;
 };
 
 struct TaskConfig {

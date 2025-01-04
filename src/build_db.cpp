@@ -139,6 +139,8 @@ CREATE TABLE match_steps (
   step_idx INTEGER NOT NULL,
   cur_zone INTEGER NOT NULL,
   cur_zone_controller INTEGER NOT NULL,
+  zone_steps_remaining INTEGER NOT NULL,
+  zone_steps_until_point INTEGER NOT NULL,
   num_events INTEGER NOT NULL,
   event_mask INTEGER NOT NULL,
   
@@ -170,6 +172,8 @@ CREATE TABLE player_states (
   num_bullets INTEGER NOT NULL,
   is_reloading INTEGER NOT NULL,
   fired_shot INTEGER NOT NULL,
+  hp INTEGER NOT NULL,
+  stand_state INTEGER NOT NULL,
   
   UNIQUE(step_id, player_idx)
 );
@@ -232,10 +236,11 @@ VALUES
   sqlite3_stmt *insert_match_step_stmt;
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO match_steps
-  (match_id, step_idx, cur_zone, cur_zone_controller,
+  (match_id, step_idx,
+   cur_zone, cur_zone_controller, zone_steps_remaining, steps_until_point,
    event_mask, num_events)
 VALUES
-  (?, ?, ?, ?, ?, ?);
+  (?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_match_step_stmt, nullptr));
 
   sqlite3_stmt *insert_team_state_stmt;
@@ -251,8 +256,8 @@ VALUES
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO player_states (
   step_id, player_idx, pos_x, pos_y, pos_z,
-  yaw, pitch, num_bullets, is_reloading, fired_shot)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  yaw, pitch, num_bullets, is_reloading, fired_shot, stand_state, hp)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_player_state_stmt, nullptr));
 
   sqlite3_stmt *insert_capture_event_stmt;
@@ -324,11 +329,13 @@ SELECT id FROM matches WHERE orig_id = ?
     }
 
     sqlite3_bind_int64(insert_match_step_stmt, 1, match_id);
-    sqlite3_bind_int(insert_match_step_stmt, 2, step.step);
-    sqlite3_bind_int(insert_match_step_stmt, 3, step.curZone);
-    sqlite3_bind_int(insert_match_step_stmt, 4, step.curZoneController);
-    sqlite3_bind_int(insert_match_step_stmt, 5, step.eventMask);
-    sqlite3_bind_int(insert_match_step_stmt, 6, step.numEvents);
+    sqlite3_bind_int(insert_match_step_stmt, 2, step.matchState.step);
+    sqlite3_bind_int(insert_match_step_stmt, 3, step.matchState.curZone);
+    sqlite3_bind_int(insert_match_step_stmt, 4, step.matchState.curZoneController);
+    sqlite3_bind_int(insert_match_step_stmt, 5, step.matchState.zoneStepsRemaining);
+    sqlite3_bind_int(insert_match_step_stmt, 6, step.matchState.stepsUntilPoint);
+    sqlite3_bind_int(insert_match_step_stmt, 7, step.eventMask);
+    sqlite3_bind_int(insert_match_step_stmt, 8, step.numEvents);
 
     execResetStmt(db, insert_match_step_stmt);
 
@@ -336,18 +343,31 @@ SELECT id FROM matches WHERE orig_id = ?
 
     XYI16 convex_in[consts::maxTeamSize * 2];
     for (int player = 0; player < consts::maxTeamSize * 2; player++) {
-      EventPlayerState player_state = step.players[player];
+      PackedPlayerSnapshot player_state = step.players[player];
 
       sqlite3_bind_int64(insert_player_state_stmt, 1, step_id);
       sqlite3_bind_int(insert_player_state_stmt, 2, i);
-      sqlite3_bind_int(insert_player_state_stmt, 3, player_state.pos[0]);
-      sqlite3_bind_int(insert_player_state_stmt, 4, player_state.pos[1]);
-      sqlite3_bind_int(insert_player_state_stmt, 5, player_state.pos[2]);
-      sqlite3_bind_int(insert_player_state_stmt, 6, player_state.yaw);
-      sqlite3_bind_int(insert_player_state_stmt, 7, player_state.pitch);
+      sqlite3_bind_int(insert_player_state_stmt, 3, (i16)player_state.pos[0]);
+      sqlite3_bind_int(insert_player_state_stmt, 4, (i16)player_state.pos[1]);
+      sqlite3_bind_int(insert_player_state_stmt, 5, (i16)player_state.pos[2]);
+      sqlite3_bind_int(insert_player_state_stmt, 6,
+          (i16)(player_state.yaw * 32768 / math::pi));
+      sqlite3_bind_int(insert_player_state_stmt, 7,
+          (i16)(player_state.pitch * 32768 / math::pi));
       sqlite3_bind_int(insert_player_state_stmt, 8, player_state.magNumBullets);
       sqlite3_bind_int(insert_player_state_stmt, 9, player_state.isReloading);
-      sqlite3_bind_int(insert_player_state_stmt, 10, player_state.firedShot);
+      sqlite3_bind_int(insert_player_state_stmt, 10,
+          (player_state.flags & (u8)PackedPlayerStateFlags::FiredShot) != 0);
+      sqlite3_bind_int(insert_player_state_stmt, 11, player_state.hp);
+
+      u8 stand_state = 0;
+      if ((player_state.flags & (u8)PackedPlayerStateFlags::Crouch) != 0) {
+        stand_state = 1;
+      } else if ((player_state.flags & (u8)PackedPlayerStateFlags::Prone) != 0) {
+        stand_state = 2;
+      }
+
+      sqlite3_bind_int(insert_player_state_stmt, 12, stand_state);
 
       execResetStmt(db, insert_player_state_stmt);
 

@@ -454,12 +454,16 @@ struct VizState {
     .right = {0.155756, -0.987796, -0.000000},
   };*/
 
-	  //.position = {43000, 8500, 4500},
-	  //.fwd = {0.2f,0.0f, -0.9f}
+	  //.position = {},
+	  //.fwd = {}
 
   FlyCamera flyCam = initCam({79, 143, 4307},
 	                           {0.0f,-0.05f, -1.00f},
                              {0, 1, -0.02f});
+  
+  //FlyCamera flyCam = initCam({43000, 8500, 4500},
+	//                           {0.2f,0.0f, -0.9f},
+  //                           {0, 1, -0.02f});
 
 #if 0
     initCam(
