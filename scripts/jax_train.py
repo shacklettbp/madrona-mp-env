@@ -358,7 +358,7 @@ def train():
     global last_time 
 
     training_mgr = madrona_learn.init_training(dev, cfg, sim_fns, policy,
-        init_sim_ctrl=jnp.array([1, 1], jnp.int32),
+        init_sim_ctrl=jnp.array([0, 1, 1], jnp.int32),
         restore_ckpt=restore_ckpt,
         profile_port=args.profile_port)
 
