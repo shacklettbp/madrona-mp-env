@@ -1635,7 +1635,8 @@ Manager::Impl * Manager::Impl::init(
                 CurriculumSnapshot *gpu_snapshots = (CurriculumSnapshot *)cu::allocGPU(
                   sizeof(CurriculumSnapshot) * trajectory_curriculum.numSnapshots);
                 cudaMemcpy(gpu_snapshots, trajectory_curriculum.snapshots,
-                  sizeof(CurriculumSnapshot) * trajectory_curriculum.numSnapshots);
+                  sizeof(CurriculumSnapshot) * trajectory_curriculum.numSnapshots,
+                  cudaMemcpyHostToDevice);
 
                 free(trajectory_curriculum.snapshots);
                 trajectory_curriculum.snapshots = gpu_snapshots;
