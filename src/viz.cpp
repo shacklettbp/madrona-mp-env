@@ -969,6 +969,10 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 {
   AnalyticsDB &db = viz->db;
 
+  if (db.hdl == nullptr) {
+    return;
+  }
+
   ImGui::Begin("Analytics");
 
   float box_width = ImGui::CalcTextSize(" ").x * 7_i32;

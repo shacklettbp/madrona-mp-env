@@ -59,6 +59,7 @@ int main(int argc, char *argv[])
 
     char *analytics_db_path = nullptr;
     char *trajectories_db_path = nullptr;
+    char *curriculum_data_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
       char *arg = argv[i];
@@ -135,18 +136,28 @@ int main(int argc, char *argv[])
           analytics_db_path = argv[i];
         } else if (!strcmp("trajectories-db", arg)) {
           if (trajectories_db_path != nullptr) {
-            printf("err\n");
             usageErr();
           }
           
           i += 1;
 
           if (i == argc) {
-            printf("err2\n");
             usageErr();
           }
 
           trajectories_db_path = argv[i];
+        } else if (!strcmp("curriculum-data", arg)) {
+          if (curriculum_data_path != nullptr) {
+            usageErr();
+          }
+          
+          i += 1;
+
+          if (i == argc) {
+            usageErr();
+          }
+
+          curriculum_data_path = argv[i];
         }
       } else {
         if (num_worlds_set) {
@@ -221,6 +232,7 @@ int main(int argc, char *argv[])
         .highlevelMove = highlevel_move,
         .replayLogPath = replay_log_path,
         .recordLogPath = record_log_path,
+        .curriculumDataPath = curriculum_data_path,
     }, viz);
     mgr.init();
 

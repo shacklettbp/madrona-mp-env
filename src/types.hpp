@@ -152,6 +152,7 @@ struct WorldReset {
 };
 
 struct TrainControl {
+    int32_t evalMode;
     int32_t randomizeEpisodeLengthAfterReset;
     int32_t randomizeTeamSides;
 };

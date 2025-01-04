@@ -16,6 +16,7 @@ enum class SimFlags : uint32_t {
     RandomFlipTeams        = 1 << 7,
     StaticFlipTeams        = 1 << 8,
     FullTeamPolicy         = 1 << 9,
+    SimEvalMode            = 1 << 10,
 };
 
 inline SimFlags & operator|=(SimFlags &a, SimFlags b);

@@ -264,150 +264,235 @@ void createPersistentEntities(Engine &ctx, const TaskConfig &cfg)
 
 void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
 {
-    Navmesh &navmesh = ctx.singleton<LevelData>().navmesh;
+  Navmesh &navmesh = ctx.singleton<LevelData>().navmesh;
 
-    RNG &base_rng = ctx.data().baseRNG;
+  RNG &base_rng = ctx.data().baseRNG;
 
-    for (int32_t i = 0; i < (int32_t)ctx.data().numAgents; i++) {
-        Entity agent_entity = ctx.data().agents[i];
-        ctx.get<Position>(agent_entity) = Vector3 {
-            .x = FLT_MAX,
-            .y = FLT_MAX,
-            .z = FLT_MAX,
+  for (int32_t i = 0; i < (int32_t)ctx.data().numAgents; i++) {
+    Entity agent_entity = ctx.data().agents[i];
+    ctx.get<Position>(agent_entity) = Vector3 {
+      .x = FLT_MAX,
+      .y = FLT_MAX,
+      .z = FLT_MAX,
+    };
+
+    CombatState combat_state;
+    combat_state.rng = RNG(rand::split_i(episode_rand_key, i + 1));
+    combat_state.landedShotOn = Entity::none();
+    combat_state.remainingRespawnSteps = 0;
+    combat_state.remainingStepsBeforeAutoheal = 0;
+    for (int32_t j = 0; j < consts::maxFireQueueSize; j++) {
+      combat_state.fireQueue[j] = false;
+    }
+    combat_state.successfulKill = false;
+    combat_state.wasShotCount = 0;
+    combat_state.wasKilled = false;
+    combat_state.firedShotT = -FLT_MAX;
+    combat_state.hasDiedDuringEpisode = false;
+
+    ctx.get<CombatState>(agent_entity) = std::move(combat_state);
+
+    // Set agents to "dead" so the spawnAgents call below "respawns" them
+    ctx.get<Alive>(agent_entity).mask = 0.f;
+
+    auto &last_obs = ctx.get<OpponentLastKnownObservations>(agent_entity);
+    auto &last_pos_obs = ctx.get<OpponentLastKnownPositionObservations>(
+        agent_entity);
+    for (int32_t j = 0; j < consts::maxTeamSize; j++) {
+      last_obs.obs[j] = {};
+      last_pos_obs.obs[j] = {};
+    }
+
+    ctx.get<BreadcrumbAgentState>(agent_entity) = BreadcrumbAgentState {
+      .totalPenalty = 0.f,
+      .lastBreadcrumb = Entity::none(),
+      .stepsSinceLastNewBreadcrumb = 0,
+    };
+  }
+
+  {
+    assert(ctx.singleton<StandardSpawns>().numCommonRespawns <
+           SpawnUsageCounter::maxNumSpawns);
+    SpawnUsageCounter &spawn_usage = ctx.singleton<SpawnUsageCounter>();
+    for (int32_t i = 0; i < SpawnUsageCounter::maxNumSpawns; i++) {
+      spawn_usage.initASpawnsLastUsedTick[i] = 0xFFFF'FFFF;
+      spawn_usage.initBSpawnsLastUsedTick[i] = 0xFFFF'FFFF;
+      spawn_usage.respawnLastUsedTick[i] = 0xFFFF'FFFF;
+    }
+  }
+  spawnAgents(ctx, false);
+
+  for (int32_t i = 0; i < (int32_t)ctx.data().numAgents; i++) {
+    Entity agent_entity = ctx.data().agents[i];
+    
+    Vector3 pos = ctx.get<Position>(agent_entity);
+    ctx.get<StartPos>(agent_entity) = pos;
+
+    if (ctx.data().taskType == Task::Explore) {
+      ctx.get<ExploreAction>(agent_entity) = {
+        .moveAmount = 0,
+        .moveAngle = 0,
+        .rotate = consts::numTurnBuckets / 2,
+        .mantle = 0,
+      };
+    } else if (ctx.data().taskType == Task::TDM ||
+               ctx.data().taskType == Task::Zone ||
+               ctx.data().taskType == Task::ZoneCaptureDefend ||
+               ctx.data().taskType == Task::Turret) {
+      ctx.get<PvPAction>(agent_entity) = {
+        .moveAmount = 0,
+        .moveAngle = 0,
+        .yawRotate = consts::numTurnBuckets / 2,
+        .pitchRotate = consts::numTurnBuckets / 2,
+        .fire = 0,
+        .reload = 0,
+        .stand = 0,
+      };
+      ctx.get<CoarsePvPAction>(agent_entity) = {
+        .moveAmount = 0,
+        .moveAngle = 0,
+        .facing = 0,
+      };
+    }
+
+    ExploreTracker &explore_tracker = 
+        ctx.get<ExploreTracker>(agent_entity);
+    explore_tracker.numNewCellsVisited = 0;
+  }
+
+  for (int32_t i = 0; i < (int32_t)ctx.data().numTurrets; i++) {
+    Entity turret = ctx.data().turrets[i];
+    ctx.get<HP>(turret).hp = 100.f;
+    ctx.get<Magazine>(turret) = Magazine {
+      .numBullets = 30,
+      .isReloading = 0,
+    };
+    ctx.get<Alive>(turret).mask = 1.f;
+
+    ctx.get<TurretState>(turret) = TurretState {
+      .rng = RNG(1 + ctx.data().numAgents + i),
+      .offset = (int32_t)i,
+    };
+
+    float yaw_rnd = base_rng.sampleUniform();
+
+    ctx.get<Position>(turret) = navmesh.samplePoint(base_rng.randKey());
+
+    float yaw = yaw_rnd * 2.f * math::pi;
+    ctx.get<Rotation>(turret) = Quat::angleAxis(yaw, math::up).normalize();
+    ctx.get<Aim>(turret) = computeAim(yaw, 0.f);
+  }
+
+  {
+    GoalRegionsState &goal_regions_state = ctx.singleton<GoalRegionsState>();
+
+    int32_t num_goal_regions = ctx.data().numGoalRegions;
+    assert(num_goal_regions <= GoalRegionsState::maxRegions);
+
+    for (int32_t i = 0; i < num_goal_regions; i++) {
+      goal_regions_state.regionsActive[i] = true;
+      goal_regions_state.minDistToRegions[i] = FLT_MAX;
+    }
+
+    goal_regions_state.teamStepRewards[0] = 0.f;
+    goal_regions_state.teamStepRewards[1] = 0.f;
+  }
+
+  for (i32 i = 0; i < consts::numTeams; i++) {
+    Entity team_iface = ctx.data().teamInterfaces[i];
+    assert(ctx.get<FullTeamID>(team_iface).id == i);
+
+    auto &enemies_last_known =
+        ctx.get<FullTeamLastKnownEnemyObservations>(team_iface);
+    for (i32 j = 0; j < consts::maxTeamSize; j++) {
+      enemies_last_known.obs[j] = {};
+    }
+  }
+
+  if (ctx.data().trajectoryCurriculum.numSnapshots > 0 &&
+      base_rng.sampleUniform() < 0.9f &&
+      !ctx.data().trainControl->evalMode) {
+    i32 snapshot_idx = base_rng.sampleI32(
+        0, ctx.data().trajectoryCurriculum.numSnapshots);
+
+    CurriculumSnapshot snapshot =
+        ctx.data().trajectoryCurriculum.snapshots[snapshot_idx];
+
+    ZoneState &zone_state = ctx.singleton<ZoneState>();
+
+    zone_state.curZone = snapshot.matchState.curZone;
+
+    if (snapshot.matchState.curZoneController == -1) {
+      zone_state.curControllingTeam = -1;
+      zone_state.isCaptured = false;
+    } else {
+      zone_state.isCaptured = true;
+      zone_state.curControllingTeam = snapshot.matchState.curZoneController;
+
+      zone_state.stepsUntilPoint = snapshot.matchState.stepsUntilPoint;
+      zone_state.zoneStepsRemaining = snapshot.matchState.zoneStepsRemaining;
+    }
+
+    MatchInfo &match_info = ctx.singleton<MatchInfo>();
+    i32 team_a = match_info.teamA;
+
+    match_info.curStep = snapshot.matchState.step;
+
+    for (i32 i = 0; i < (i32)ctx.data().numAgents; i++) {
+      Entity agent_entity;
+      if (team_a == 0) {
+        agent_entity = ctx.data().agents[i];
+      } else {
+        if (i < (i32)ctx.data().numAgents / 2) {
+          agent_entity =
+              ctx.data().agents[ctx.data().numAgents / 2 + i];
+        } else {
+          agent_entity =
+              ctx.data().agents[i - ctx.data().numAgents / 2];
+        }
+      }
+
+      PackedPlayerSnapshot player_snapshot = snapshot.players[i];
+
+      ctx.get<Position>(agent_entity) = Vector3 {
+        .x = (float)player_snapshot.pos[0],
+        .y = (float)player_snapshot.pos[1],
+        .z = (float)player_snapshot.pos[2],
+      };
+
+      ctx.get<Aim>(agent_entity) = computeAim(
+          (float)player_snapshot.yaw * math::pi / 32768.f,
+          (float)player_snapshot.pitch * math::pi / 32768.f);
+
+      ctx.get<Rotation>(agent_entity) =
+        Quat::angleAxis(ctx.get<Aim>(agent_entity).yaw, math::up).normalize();
+
+      ctx.get<HP>(agent_entity) = {
+        .hp = (float)player_snapshot.hp,
+      };
+
+      ctx.get<Magazine>(agent_entity) = {
+        .numBullets = player_snapshot.magNumBullets,
+        .isReloading = player_snapshot.isReloading,
+      };
+
+      if ((player_snapshot.flags & (u8)PackedPlayerStateFlags::Crouch) != 0) {
+        ctx.get<StandState>(agent_entity) = {
+          .curPose = Pose::Crouch,
+          .tgtPose = Pose::Crouch,
+          .transitionRemaining = 0,
         };
+      }
 
-        CombatState combat_state;
-        combat_state.rng = RNG(rand::split_i(episode_rand_key, i + 1));
-        combat_state.landedShotOn = Entity::none();
-        combat_state.remainingRespawnSteps = 0;
-        combat_state.remainingStepsBeforeAutoheal = 0;
-        for (int32_t j = 0; j < consts::maxFireQueueSize; j++) {
-            combat_state.fireQueue[j] = false;
-        }
-        combat_state.successfulKill = false;
-        combat_state.wasShotCount = 0;
-        combat_state.wasKilled = false;
-        combat_state.firedShotT = -FLT_MAX;
-        combat_state.hasDiedDuringEpisode = false;
-
-        ctx.get<CombatState>(agent_entity) = std::move(combat_state);
-
-        // Set agents to "dead" so the spawnAgents call below "respawns" them
-        ctx.get<Alive>(agent_entity).mask = 0.f;
-
-        auto &last_obs = ctx.get<OpponentLastKnownObservations>(agent_entity);
-        auto &last_pos_obs = ctx.get<OpponentLastKnownPositionObservations>(
-            agent_entity);
-        for (int32_t j = 0; j < consts::maxTeamSize; j++) {
-            last_obs.obs[j] = {};
-            last_pos_obs.obs[j] = {};
-        }
-
-        ctx.get<BreadcrumbAgentState>(agent_entity) = BreadcrumbAgentState {
-            .totalPenalty = 0.f,
-            .lastBreadcrumb = Entity::none(),
-            .stepsSinceLastNewBreadcrumb = 0,
+      if ((player_snapshot.flags & (u8)PackedPlayerStateFlags::Prone) != 0) {
+        ctx.get<StandState>(agent_entity) = {
+          .curPose = Pose::Prone,
+          .tgtPose = Pose::Prone,
+          .transitionRemaining = 0,
         };
-    }
-
-    {
-        assert(ctx.singleton<StandardSpawns>().numCommonRespawns <
-               SpawnUsageCounter::maxNumSpawns);
-        SpawnUsageCounter &spawn_usage = ctx.singleton<SpawnUsageCounter>();
-        for (int32_t i = 0; i < SpawnUsageCounter::maxNumSpawns; i++) {
-            spawn_usage.initASpawnsLastUsedTick[i] = 0xFFFF'FFFF;
-            spawn_usage.initBSpawnsLastUsedTick[i] = 0xFFFF'FFFF;
-            spawn_usage.respawnLastUsedTick[i] = 0xFFFF'FFFF;
-        }
-    }
-    spawnAgents(ctx, false);
-
-    for (int32_t i = 0; i < (int32_t)ctx.data().numAgents; i++) {
-        Entity agent_entity = ctx.data().agents[i];
-        
-        Vector3 pos = ctx.get<Position>(agent_entity);
-        ctx.get<StartPos>(agent_entity) = pos;
-
-        if (ctx.data().taskType == Task::Explore) {
-           ctx.get<ExploreAction>(agent_entity) = {
-               .moveAmount = 0,
-               .moveAngle = 0,
-               .rotate = consts::numTurnBuckets / 2,
-               .mantle = 0,
-           };
-        } else if (ctx.data().taskType == Task::TDM ||
-                   ctx.data().taskType == Task::Zone ||
-                   ctx.data().taskType == Task::ZoneCaptureDefend ||
-                   ctx.data().taskType == Task::Turret) {
-           ctx.get<PvPAction>(agent_entity) = {
-               .moveAmount = 0,
-               .moveAngle = 0,
-               .yawRotate = consts::numTurnBuckets / 2,
-               .pitchRotate = consts::numTurnBuckets / 2,
-               .fire = 0,
-               .reload = 0,
-               .stand = 0,
-           };
-           ctx.get<CoarsePvPAction>(agent_entity) = {
-               .moveAmount = 0,
-               .moveAngle = 0,
-               .facing = 0,
-           };
-        }
-
-        ExploreTracker &explore_tracker = 
-            ctx.get<ExploreTracker>(agent_entity);
-        explore_tracker.numNewCellsVisited = 0;
-    }
-
-    for (int32_t i = 0; i < (int32_t)ctx.data().numTurrets; i++) {
-        Entity turret = ctx.data().turrets[i];
-        ctx.get<HP>(turret).hp = 100.f;
-        ctx.get<Magazine>(turret) = Magazine {
-            .numBullets = 30,
-            .isReloading = 0,
-        };
-        ctx.get<Alive>(turret).mask = 1.f;
-
-        ctx.get<TurretState>(turret) = TurretState {
-            .rng = RNG(1 + ctx.data().numAgents + i),
-            .offset = (int32_t)i,
-        };
-
-        float yaw_rnd = base_rng.sampleUniform();
-
-        ctx.get<Position>(turret) = navmesh.samplePoint(base_rng.randKey());
-
-        float yaw = yaw_rnd * 2.f * math::pi;
-        ctx.get<Rotation>(turret) = Quat::angleAxis(yaw, math::up).normalize();
-        ctx.get<Aim>(turret) = computeAim(yaw, 0.f);
-    }
-
-    {
-        GoalRegionsState &goal_regions_state = ctx.singleton<GoalRegionsState>();
-
-        int32_t num_goal_regions = ctx.data().numGoalRegions;
-        assert(num_goal_regions <= GoalRegionsState::maxRegions);
-
-        for (int32_t i = 0; i < num_goal_regions; i++) {
-            goal_regions_state.regionsActive[i] = true;
-            goal_regions_state.minDistToRegions[i] = FLT_MAX;
-        }
-
-        goal_regions_state.teamStepRewards[0] = 0.f;
-        goal_regions_state.teamStepRewards[1] = 0.f;
-    }
-
-    for (i32 i = 0; i < consts::numTeams; i++) {
-      Entity team_iface = ctx.data().teamInterfaces[i];
-      assert(ctx.get<FullTeamID>(team_iface).id == i);
-
-      auto &enemies_last_known =
-          ctx.get<FullTeamLastKnownEnemyObservations>(team_iface);
-      for (i32 j = 0; j < consts::maxTeamSize; j++) {
-        enemies_last_known.obs[j] = {};
       }
     }
+  }
 }
 
 }

@@ -1376,6 +1376,9 @@ Manager::Impl * Manager::Impl::init(
             sizeof(TrainControl));
 
         *train_ctrl = TrainControl {
+            .evalMode =
+                (mgr_cfg.simFlags & SimFlags::SimEvalMode) ==
+                SimFlags::SimEvalMode ? 1 : 0,
             .randomizeEpisodeLengthAfterReset =
                 (mgr_cfg.simFlags & SimFlags::StaggerStarts) ==
                 SimFlags::StaggerStarts ? 1 : 0,
@@ -1405,14 +1408,14 @@ Manager::Impl * Manager::Impl::init(
         curriculum_data_file.seekg(0, curriculum_data_file.beg);
 
         trajectory_curriculum.numSnapshots =
-            size / sizeof(TrajectoryCurriculum);
+            size / sizeof(CurriculumSnapshot);
       }
 
       trajectory_curriculum.snapshots = (CurriculumSnapshot *)malloc(
-          sizeof(TrajectoryCurriculum) * trajectory_curriculum.numSnapshots);
+          sizeof(CurriculumSnapshot) * trajectory_curriculum.numSnapshots);
 
       curriculum_data_file.read((char *)trajectory_curriculum.snapshots,
-          sizeof(TrajectoryCurriculum) * trajectory_curriculum.numSnapshots);
+          sizeof(CurriculumSnapshot) * trajectory_curriculum.numSnapshots);
     }
 
     switch (mgr_cfg.execMode) {

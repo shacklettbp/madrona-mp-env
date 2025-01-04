@@ -344,8 +344,8 @@ def update_loop(training_mgr):
 def update_population(training_mgr):
     training_mgr, elo_deltas = madrona_learn.eval_elo(
         training_mgr, 3600,
-        jnp.array([0, 0], jnp.int32),
-        jnp.array([1, 1], jnp.int32))
+        eval_sim_ctrl=jnp.array([1, 0, 0], jnp.int32),
+        train_sim_ctrl=jnp.array([0, 1, 1], jnp.int32))
 
     training_mgr = madrona_learn.update_population(training_mgr, elo_deltas)
 
