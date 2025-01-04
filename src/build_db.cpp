@@ -1,7 +1,6 @@
 #include "types.hpp"
 
 #include <fstream>
-#include <unordered_map>
 
 #include "db.hpp"
 
@@ -237,7 +236,7 @@ VALUES
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO match_steps
   (match_id, step_idx,
-   cur_zone, cur_zone_controller, zone_steps_remaining, steps_until_point,
+   cur_zone, cur_zone_controller, zone_steps_remaining, zone_steps_until_point,
    event_mask, num_events)
 VALUES
   (?, ?, ?, ?, ?, ?, ?, ?);
@@ -346,7 +345,7 @@ SELECT id FROM matches WHERE orig_id = ?
       PackedPlayerSnapshot player_state = step.players[player];
 
       sqlite3_bind_int64(insert_player_state_stmt, 1, step_id);
-      sqlite3_bind_int(insert_player_state_stmt, 2, i);
+      sqlite3_bind_int(insert_player_state_stmt, 2, player);
       sqlite3_bind_int(insert_player_state_stmt, 3, (i16)player_state.pos[0]);
       sqlite3_bind_int(insert_player_state_stmt, 4, (i16)player_state.pos[1]);
       sqlite3_bind_int(insert_player_state_stmt, 5, (i16)player_state.pos[2]);

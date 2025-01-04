@@ -244,33 +244,6 @@ struct FlyCamera {
   float orthoHeight = 5.f;
 };
 
-struct PlayerSnapshot {
-  Vector3 pos;
-  float yaw;
-  float pitch;
-  Magazine mag;
-  bool firedShot;
-};
-
-struct StepSnapshot {
-  PlayerSnapshot players[consts::maxTeamSize * 2];
-};
-
-static FlyCamera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
-{
-  fwd = normalize(fwd);
-  up = normalize(up);
-  Vector3 right = normalize(cross(fwd, up));
-  up = normalize(cross(right, fwd));
-
-  return FlyCamera {
-    .position = pos,
-    .fwd = fwd,
-    .up = up,
-    .right = right,
-  };
-}
-
 enum class AnalyticsThreadCtrl : u32 {
   Idle,
   Filter,
@@ -354,6 +327,21 @@ struct FilterResult {
   i64 windowStart;
   i64 windowEnd;
 };
+
+static FlyCamera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
+{
+  fwd = normalize(fwd);
+  up = normalize(up);
+  Vector3 right = normalize(cross(fwd, up));
+  up = normalize(cross(right, fwd));
+
+  return FlyCamera {
+    .position = pos,
+    .fwd = fwd,
+    .up = up,
+    .right = right,
+  };
+}
 
 struct AnalyticsDB {
   sqlite3 *hdl = nullptr;
@@ -840,14 +828,7 @@ static void loadAnalyticsDB(VizState *viz,
 
   REQ_SQL(db.hdl, sqlite3_open(cfg.analyticsDBPath, &db.hdl));
 
-  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
-SELECT
-  ps.pos_x, ps.pos_y, ps.pos_z, ps.yaw, ps.pitch,
-  ps.num_bullets, ps.is_reloading, ps.fired_shot
-FROM player_states AS ps
-WHERE
-  ps.step_id = ?
-)", -1, &db.loadStepPlayerStates, nullptr));
+  db.loadStepPlayerStates = initLoadStepSnapshotStatement(db.hdl);
 
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
@@ -919,44 +900,6 @@ static std::array<TeamConvexHull, 2> loadTeamConvexHulls(
   REQ_SQL(db.hdl, sqlite3_reset(db.loadTeamStates));
 
   return hulls;
-}
-
-static StepSnapshot loadStepSnapshot(AnalyticsDB &db, i64 step_id)
-{
-  StepSnapshot snapshot;
-
-  sqlite3_bind_int64(db.loadStepPlayerStates, 1, step_id);
-
-  i64 cur_player_idx = 0;
-  while (sqlite3_step(db.loadStepPlayerStates) == SQLITE_ROW) {
-    i64 pos_x = sqlite3_column_int(db.loadStepPlayerStates, 0);
-    i64 pos_y = sqlite3_column_int(db.loadStepPlayerStates, 1);
-    i64 pos_z = sqlite3_column_int(db.loadStepPlayerStates, 2);
-    i64 yaw = sqlite3_column_int(db.loadStepPlayerStates, 3);
-    i64 pitch = sqlite3_column_int(db.loadStepPlayerStates, 4);
-
-    i64 num_bullets = sqlite3_column_int(db.loadStepPlayerStates, 5);
-    i64 is_reloading = sqlite3_column_int(db.loadStepPlayerStates, 6);
-    i64 fired_shot = sqlite3_column_int(db.loadStepPlayerStates, 7);
-
-    assert(cur_player_idx < consts::maxTeamSize * 2);
-    snapshot.players[cur_player_idx++] = {
-      .pos = { (float)pos_x, (float)pos_y, (float)pos_z },
-      .yaw = (float)yaw * math::pi / 32768.f,
-      .pitch = (float)pitch * math::pi / 32768.f,
-      .mag = {
-        .numBullets = (i32)num_bullets,
-        .isReloading = (i32)is_reloading,
-      },
-      .firedShot = fired_shot > 0,
-    };
-  }
-
-  assert(cur_player_idx == consts::maxTeamSize * 2);
-
-  REQ_SQL(db.hdl, sqlite3_reset(db.loadStepPlayerStates));
-
-  return snapshot;
 }
 
 static DynArray<i64> loadMatchSteps(AnalyticsDB &db,
@@ -1504,7 +1447,8 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   if (db.currentVizMatchTimestep != -1 && match_steps.size() > 0) {
     i64 step_id = match_steps[db.currentVizMatchTimestep];
 
-    db.curSnapshot = loadStepSnapshot(db, step_id);
+    db.curSnapshot = loadStepSnapshot(
+        db.hdl, db.loadStepPlayerStates, step_id);
 
     for (i32 i = 0; i < consts::maxTeamSize * 2; i++) {
       auto &player_snapshot = db.curSnapshot.players[i];

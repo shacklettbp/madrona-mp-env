@@ -4,7 +4,29 @@
 
 #include <madrona/crash.hpp>
 
+#include "types.hpp"
+
 namespace madronaMPEnv {
+
+struct PlayerSnapshot {
+  Vector3 pos;
+  float yaw;
+  float pitch;
+  Magazine mag;
+  bool firedShot;
+  HP hp;
+  Pose standPose;
+};
+
+struct StepSnapshot {
+  PlayerSnapshot players[consts::maxTeamSize * 2];
+};
+
+sqlite3_stmt * initLoadStepSnapshotStatement(sqlite3 *db);
+
+StepSnapshot loadStepSnapshot(sqlite3 *db_hdl,
+                              sqlite3_stmt *stmt,
+                              i64 step_id);
 
 inline void checkSQL(sqlite3 *db, int res, const char *file, int line,
                      const char *funcname)

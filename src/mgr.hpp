@@ -46,6 +46,7 @@ public:
         const char *replayLogPath = nullptr;
         const char *recordLogPath = nullptr;
         const char *eventLogPath = nullptr;
+        const char *curriculumDataPath = nullptr;
     };
 
     Manager(

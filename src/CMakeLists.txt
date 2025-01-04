@@ -151,3 +151,11 @@ target_link_libraries(build_db
   madrona_mw_core madrona_mp_env_mgr
   madrona_mp_env_db
 )
+
+add_executable(build_trajectory_curriculum
+  build_trajectory_curriculum.cpp
+)
+target_link_libraries(build_trajectory_curriculum
+  madrona_mw_core madrona_mp_env_mgr
+  madrona_mp_env_db
+)
