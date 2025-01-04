@@ -255,7 +255,7 @@ VALUES
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO player_states (
   step_id, player_idx, pos_x, pos_y, pos_z,
-  yaw, pitch, num_bullets, is_reloading, fired_shot, stand_state, hp)
+  yaw, pitch, num_bullets, is_reloading, fired_shot, hp, stand_state)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_player_state_stmt, nullptr));
 
