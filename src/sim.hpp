@@ -168,7 +168,7 @@ struct Sim : public madrona::WorldBase {
 
     TrainControl *trainControl;
 
-    TrajectoryCurriculum *trajectoryCurriculum;
+    TrajectoryCurriculum trajectoryCurriculum;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

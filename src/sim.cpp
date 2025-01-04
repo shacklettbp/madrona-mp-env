@@ -5262,6 +5262,8 @@ Sim::Sim(Engine &ctx,
     numWeaponTypes = cfg.numWeaponTypes;
     weaponTypeStats = cfg.weaponTypeStats;
 
+    trajectoryCurriculum = cfg.trajectoryCurriculum;
+
     assert(numWeaponTypes <= consts::maxNumWeaponTypes);
 
     // Creates agents, walls, etc.

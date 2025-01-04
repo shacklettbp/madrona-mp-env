@@ -157,6 +157,7 @@ struct Manager::CPUImpl final : Manager::Impl {
     GameEvent *eventLogExported;
     EventStepState *eventLogStepStatesExported;
     EventLogGlobalState *eventLogGlobalState;
+    TrajectoryCurriculum trajectoryCurriculum;
 
     Optional<std::fstream> replayLog;
     Optional<std::fstream> recordLog;
@@ -175,6 +176,7 @@ struct Manager::CPUImpl final : Manager::Impl {
                    StepLog *replay_log_buffer,
                    StepLog *record_log_buffer,
                    EventLogGlobalState *event_log_global_state,
+                   TrajectoryCurriculum trajectory_curriculum,
                    const char *replay_log_path,
                    const char *record_log_path,
                    const char *event_log_path)
@@ -189,6 +191,7 @@ struct Manager::CPUImpl final : Manager::Impl {
         eventLogStepStatesExported(
           (EventStepState *)cpuExec.getExported((CountT)ExportID::EventStepState)),
         eventLogGlobalState(event_log_global_state),
+        trajectoryCurriculum(trajectory_curriculum),
         replayLog(Optional<std::fstream>::none()),
         recordLog(Optional<std::fstream>::none()),
         eventLog(Optional<std::fstream>::none()),
@@ -230,6 +233,7 @@ struct Manager::CPUImpl final : Manager::Impl {
     inline virtual ~CPUImpl() final
     {
         free(rewardHyperParams);
+        free(trajectoryCurriculum.snapshots);
     }
 
     inline virtual void run(TaskGraphID graph_id)
@@ -325,6 +329,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
     uint32_t eventLogStepStatesReadBackSize;
 
     EventLogGlobalState *eventLogGlobalStateReadback;
+    TrajectoryCurriculum trajectoryCurriculum;
 
     Optional<std::fstream> replayLog;
     Optional<std::fstream> recordLog;
@@ -344,6 +349,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                     StepLog *replay_log_buffer,
                     StepLog *record_log_buffer,
                     EventLogGlobalState *event_log_global_state,
+                    TrajectoryCurriculum trajectory_curriculum,
                     const char *replay_log_path,
                     const char *record_log_path,
                     const char *event_log_path,
@@ -368,6 +374,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
         eventLogReadBackSize(0),
         eventLogStepStatesReadBackSize(0),
         eventLogGlobalStateReadback(nullptr),
+        trajectoryCurriculum(trajectory_curriculum),
         replayLog(Optional<std::fstream>::none()),
         recordLog(Optional<std::fstream>::none()),
         eventLog(Optional<std::fstream>::none()),
@@ -414,6 +421,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
 
     inline virtual ~CUDAImpl() final
     {
+        REQ_CUDA(cudaFree(trajectoryCurriculum.snapshots));
         REQ_CUDA(cudaFree(rewardHyperParams));
     }
 
@@ -1383,6 +1391,30 @@ Manager::Impl * Manager::Impl::init(
     StepLog *replay_log = nullptr;
     EventLogGlobalState *event_log_global_state = nullptr;
 
+    TrajectoryCurriculum trajectory_curriculum {
+      .numSnapshots = 0,
+      .snapshots = nullptr,
+    };
+
+    if (mgr_cfg.curriculumDataPath != nullptr) {
+      std::ifstream curriculum_data_file(mgr_cfg.curriculumDataPath,
+                                         std::ios::binary);
+      {
+        curriculum_data_file.seekg(0, curriculum_data_file.end);
+        i64 size = curriculum_data_file.tellg();
+        curriculum_data_file.seekg(0, curriculum_data_file.beg);
+
+        trajectory_curriculum.numSnapshots =
+            size / sizeof(TrajectoryCurriculum);
+      }
+
+      trajectory_curriculum.snapshots = (CurriculumSnapshot *)malloc(
+          sizeof(TrajectoryCurriculum) * trajectory_curriculum.numSnapshots);
+
+      curriculum_data_file.read((char *)trajectory_curriculum.snapshots,
+          sizeof(TrajectoryCurriculum) * trajectory_curriculum.numSnapshots);
+    }
+
     switch (mgr_cfg.execMode) {
         case ExecMode::CUDA: {
 #if defined(MADRONA_CUDA_SUPPORT) && defined(ENABLE_MWGPU)
@@ -1595,6 +1627,16 @@ Manager::Impl * Manager::Impl::init(
                        sizeof(TrainControl), cudaMemcpyHostToDevice);
 
             train_ctrl = gpu_train_ctrl;
+
+            if (trajectory_curriculum.numSnapshots > 0) {
+                CurriculumSnapshot *gpu_snapshots = (CurriculumSnapshot *)cu::allocGPU(
+                  sizeof(CurriculumSnapshot) * trajectory_curriculum.numSnapshots);
+                cudaMemcpy(gpu_snapshots, trajectory_curriculum.snapshots,
+                  sizeof(CurriculumSnapshot) * trajectory_curriculum.numSnapshots);
+
+                free(trajectory_curriculum.snapshots);
+                trajectory_curriculum.snapshots = gpu_snapshots;
+            }
 #else
             FATAL("No CUDA");
 #endif
@@ -1724,6 +1766,7 @@ Manager::Impl * Manager::Impl::init(
         .numWeaponTypes = num_weapon_types,
         .weaponTypeStats = weapon_type_stats,
         .trainControl = train_ctrl,
+        .trajectoryCurriculum = trajectory_curriculum,
     };
 
     switch (mgr_cfg.execMode) {
@@ -1788,6 +1831,7 @@ Manager::Impl * Manager::Impl::init(
                 replay_log,
                 record_log,
                 event_log_global_state,
+                trajectory_curriculum,
                 mgr_cfg.replayLogPath,
                 mgr_cfg.recordLogPath,
                 mgr_cfg.eventLogPath,
@@ -1842,6 +1886,7 @@ Manager::Impl * Manager::Impl::init(
                 replay_log,
                 record_log,
                 event_log_global_state,
+                trajectory_curriculum,
                 mgr_cfg.replayLogPath,
                 mgr_cfg.recordLogPath,
                 mgr_cfg.eventLogPath,

@@ -684,7 +684,8 @@ struct CurriculumSnapshot {
 };
 
 struct TrajectoryCurriculum {
-  CurriculumSnapshot *steps;
+  i32 numSnapshots;
+  CurriculumSnapshot *snapshots;
 };
 
 struct TaskConfig {
@@ -731,6 +732,8 @@ struct TaskConfig {
     int32_t numWeaponTypes;
     WeaponStats * weaponTypeStats;
     TrainControl * trainControl;
+
+    TrajectoryCurriculum trajectoryCurriculum;
 };
 
 /* ECS Archetypes for the game */
