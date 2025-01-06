@@ -1175,8 +1175,8 @@ static AStarLookup buildAStarLookup(const Navmesh &navmesh)
 
     for (u32 start = 0; start < num_tris; start++) {
         for (u32 goal = 0; goal < num_tris; goal++) {
-            //lookup_tbl[start * num_tris + goal] =
-            //    NavUtils::AStarPathfindToTri(navmesh, start, goal);
+            lookup_tbl[start * num_tris + goal] =
+                NavUtils::AStarPathfindToTri(navmesh, start, goal);
         }
     }
 

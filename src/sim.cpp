@@ -16,16 +16,20 @@ namespace madronaMPEnv {
 
 static inline void logEvent(Engine &ctx, const GameEvent &event)
 {
-    ctx.getDirect<GameEvent>(2, ctx.makeTemporary<GameEventEntity>()) = event;
+  if (!ctx.data().eventGlobalState) {
+    return;
+  }
 
-    AtomicU32Ref num_events_atomic(ctx.data().eventGlobalState->numEvents);
-    num_events_atomic.fetch_add_relaxed(1);
+  ctx.getDirect<GameEvent>(2, ctx.makeTemporary<GameEventEntity>()) = event;
 
-    AtomicU32Ref event_logged_in_step_atomic(ctx.data().eventLoggedInStep);
-    event_logged_in_step_atomic.store<sync::relaxed>(1);
+  AtomicU32Ref num_events_atomic(ctx.data().eventGlobalState->numEvents);
+  num_events_atomic.fetch_add_relaxed(1);
 
-    AtomicU32Ref event_mask_atomic(ctx.data().eventMask);
-    event_mask_atomic.fetch_or<sync::relaxed>((u32)event.type);
+  AtomicU32Ref event_logged_in_step_atomic(ctx.data().eventLoggedInStep);
+  event_logged_in_step_atomic.store<sync::relaxed>(1);
+
+  AtomicU32Ref event_mask_atomic(ctx.data().eventMask);
+  event_mask_atomic.fetch_or<sync::relaxed>((u32)event.type);
 }
 
 static void writeEventStepState(Engine &ctx)
@@ -5208,6 +5212,7 @@ Sim::Sim(Engine &ctx,
         .navmesh = cfg.navmesh,
         .aStarLookup = cfg.aStarLookup,
     };
+
     ctx.singleton<StandardSpawns>() = cfg.standardSpawns;
     ctx.singleton<SpawnCurriculum>() = cfg.spawnCurriculum;
 
