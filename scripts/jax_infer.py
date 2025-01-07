@@ -217,7 +217,7 @@ eval_cfg = EvalConfig(
 print_elos(policy_states.mmr.elo)
 
 mmrs = eval_policies(dev, eval_cfg, sim_fns,
-    policy, jnp.array([0, 0], jnp.int32), policy_states, iter_cb)
+    policy, jnp.array([1, 0, 0], jnp.int32), policy_states, iter_cb)
 
 print_elos(mmrs.elo)
 

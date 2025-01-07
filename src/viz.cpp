@@ -346,6 +346,7 @@ static FlyCamera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
 struct AnalyticsDB {
   sqlite3 *hdl = nullptr;
   sqlite3_stmt *loadStepPlayerStates = nullptr;
+  sqlite3_stmt *loadMatchZoneState = nullptr;
   sqlite3_stmt *loadMatchSteps = nullptr;
   sqlite3_stmt *loadTeamStates = nullptr;
 
@@ -829,6 +830,7 @@ static void loadAnalyticsDB(VizState *viz,
   REQ_SQL(db.hdl, sqlite3_open(cfg.analyticsDBPath, &db.hdl));
 
   db.loadStepPlayerStates = initLoadStepSnapshotStatement(db.hdl);
+  db.loadMatchZoneState = initLoadMatchZoneStatement(db.hdl);
 
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
@@ -876,6 +878,7 @@ static void unloadAnalyticsDB(AnalyticsDB &db)
 
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadTeamStates));
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchSteps));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchZoneState));
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadStepPlayerStates));
   REQ_SQL(db.hdl, sqlite3_close(db.hdl));
 }
@@ -1452,7 +1455,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     i64 step_id = match_steps[db.currentVizMatchTimestep];
 
     db.curSnapshot = loadStepSnapshot(
-        db.hdl, db.loadStepPlayerStates, step_id);
+        db.hdl, db.loadMatchZoneState, db.loadStepPlayerStates, step_id);
 
     for (i32 i = 0; i < consts::maxTeamSize * 2; i++) {
       auto &player_snapshot = db.curSnapshot.players[i];
@@ -1466,8 +1469,17 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     }
 
     db.eventTeamConvexHulls = loadTeamConvexHulls(db, step_id);
-  }
 
+    auto &zone_state = ctx.singleton<ZoneState>();
+    zone_state.curZone = db.curSnapshot.curZone;
+    if (db.curSnapshot.curZoneController == -1) {
+      zone_state.isCaptured = false;
+      zone_state.curControllingTeam = -1;
+    } else {
+      zone_state.isCaptured = true;
+      zone_state.curControllingTeam = db.curSnapshot.curZoneController;
+    }
+  }
 
   ImGui::End();
 }
@@ -1548,7 +1560,8 @@ static void analyticsBGThread(AnalyticsDB &db)
           INNER JOIN player_states AS killed ON
             kill_events.killed_id = killed.id
           INNER JOIN match_steps AS event_steps ON
-            event_steps.id = kill_events.step_id
+            event_steps.id = kill_events.step_id AND
+            event_steps.step_idx % 10 == 0
           WHERE (killers.pos_x >= )";
 
         filter_query += std::to_string(kill.killerRegion.min.x);
@@ -1583,7 +1596,8 @@ static void analyticsBGThread(AnalyticsDB &db)
           INNER JOIN player_states AS targets ON
             player_shot_events.target_id = targets.id
           INNER JOIN match_steps AS event_steps ON
-            event_steps.id = player_shot_events.step_id
+            event_steps.id = player_shot_events.step_id AND
+            event_steps.step_idx % 10 == 0
           WHERE (attackers.pos_x >= )";
 
         filter_query += std::to_string(shot.attackerRegion.min.x);
@@ -1613,7 +1627,8 @@ static void analyticsBGThread(AnalyticsDB &db)
             player_states.player_idx / 6 AS team_id
           FROM player_states
           INNER JOIN match_steps ON
-            match_steps.id = player_states.step_id
+            match_steps.id = player_states.step_id AND
+            match_steps.step_idx % 10 == 0
           WHERE (player_states.pos_x >= )";
 
         filter_query += std::to_string(in_region.region.min.x);
@@ -1681,7 +1696,7 @@ SELECT DISTINCT
            filter_idx++) {
         std::string results_name = "results" + std::to_string(filter_idx);
         query_str += "\nJOIN " + results_name + " ON (" +
-          results_name + ".match_id = results0.match_id AND " + results_name + ".team_id = results0.team_id)";
+          results_name + ".match_id = results0.match_id AND " + results_name + ".team_id = results0.team_id AND ABS(" + results_name + ".timestep - results0.timestep) <= " + std::to_string(window_size) + ")";
       }
     query_str += "\nWHERE window_end - window_start <= " +
         std::to_string(window_size);
@@ -3159,51 +3174,42 @@ static void renderShotViz(Engine &ctx, VizState *viz,
 static void renderZones(Engine &ctx, VizState *viz,
                         RasterPassEncoder &raster_enc)
 {
-  auto renderZone = 
-    [&]
-  (Vector3 center, float rotation, Vector3 diag, Vector4 color,
-   u32 num_tris)
-  {
-    raster_enc.drawData(GoalRegionPerDraw {
-      .txfm = computeNonUniformScaleTxfm(
-          center, Quat::angleAxis(rotation, math::up),
-          Diag3x3 { diag.x, diag.y, diag.z }),
-      .color = color,
-    });
-
-    raster_enc.draw(0, num_tris);
-  };
-
   auto renderZones =
     [&]
   (u32 num_tris)
   {
+    ZoneState &zone_state = ctx.singleton<ZoneState>();
+
     for (CountT i = 0; i < ctx.data().zones.numZones; i++) {
-        AABB aabb = ctx.data().zones.bboxes[i];
-        float rotation = ctx.data().zones.rotations[i];
+      AABB aabb = ctx.data().zones.bboxes[i];
+      float rotation = ctx.data().zones.rotations[i];
 
-        Vector3 diag = aabb.pMax - aabb.pMin;
-        Vector3 center = 0.5f * (aabb.pMax + aabb.pMin);
+      Vector3 diag = aabb.pMax - aabb.pMin;
+      Vector3 center = 0.5f * (aabb.pMax + aabb.pMin);
 
-        Vector4 color = rgb8ToFloat(100, 230, 100, 1.f);
+      Vector4 color;
 
-#if 0
-        if (i != zone_state.curZone) {
+      if (i != zone_state.curZone) {
+        color = rgb8ToFloat(10, 175, 10, 1.f);
+      } else if (zone_state.curControllingTeam == -1 ||
+                 !zone_state.isCaptured) {
+        color = rgb8ToFloat(100, 230, 100, 1.f);
+      } else if (zone_state.curControllingTeam == 0) {
+        color = rgb8ToFloat(100, 100, 230, 1.f);
+      } else if (zone_state.curControllingTeam == 1) {
+        color = rgb8ToFloat(230, 100, 100, 1.f);
+      } else {
+        color = rgb8ToFloat(255, 0, 255, 1);
+      }
 
-            obj_id = 6;
-        } else if (zone_state.curControllingTeam == -1 ||
-                   !zone_state.isCaptured) {
-            obj_id = 7;
-        } else if (zone_state.curControllingTeam == 0) {
-            obj_id = 8;
-        } else if (zone_state.curControllingTeam == 1) {
-            obj_id = 9;
-        } else {
-            obj_id = 0;
-        }
-#endif
+      raster_enc.drawData(GoalRegionPerDraw {
+        .txfm = computeNonUniformScaleTxfm(
+            center, Quat::angleAxis(rotation, math::up),
+            Diag3x3 { diag.x, diag.y, diag.z }),
+        .color = color,
+      });
 
-        renderZone(center, rotation, diag, color, num_tris);
+      raster_enc.draw(0, num_tris);
     }
   };
 

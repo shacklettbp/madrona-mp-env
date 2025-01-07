@@ -39,28 +39,42 @@ WHERE
   return stmt;
 }
 
+sqlite3_stmt * initLoadMatchZoneStatement(sqlite3 *db)
+{
+  sqlite3_stmt *stmt;
+  REQ_SQL(db, sqlite3_prepare_v2(db, R"(
+SELECT ms.cur_zone, ms.cur_zone_controller
+FROM match_steps AS ms
+WHERE
+  ms.id = ?
+)", -1, &stmt, nullptr));
+
+  return stmt;
+}
+
 StepSnapshot loadStepSnapshot(sqlite3 *db_hdl, 
-                              sqlite3_stmt *stmt,
+                              sqlite3_stmt *step_stmt,
+                              sqlite3_stmt *players_stmt,
                               i64 step_id)
 {
   StepSnapshot snapshot;
 
-  sqlite3_bind_int64(stmt, 1, step_id);
+  sqlite3_bind_int64(players_stmt, 1, step_id);
 
   i64 cur_player_idx = 0;
-  while (sqlite3_step(stmt) == SQLITE_ROW) {
-    i64 pos_x = sqlite3_column_int(stmt, 0);
-    i64 pos_y = sqlite3_column_int(stmt, 1);
-    i64 pos_z = sqlite3_column_int(stmt, 2);
-    i64 yaw = sqlite3_column_int(stmt, 3);
-    i64 pitch = sqlite3_column_int(stmt, 4);
+  while (sqlite3_step(players_stmt) == SQLITE_ROW) {
+    i64 pos_x = sqlite3_column_int(players_stmt, 0);
+    i64 pos_y = sqlite3_column_int(players_stmt, 1);
+    i64 pos_z = sqlite3_column_int(players_stmt, 2);
+    i64 yaw = sqlite3_column_int(players_stmt, 3);
+    i64 pitch = sqlite3_column_int(players_stmt, 4);
 
-    i64 num_bullets = sqlite3_column_int(stmt, 5);
-    i64 is_reloading = sqlite3_column_int(stmt, 6);
-    i64 fired_shot = sqlite3_column_int(stmt, 7);
+    i64 num_bullets = sqlite3_column_int(players_stmt, 5);
+    i64 is_reloading = sqlite3_column_int(players_stmt, 6);
+    i64 fired_shot = sqlite3_column_int(players_stmt, 7);
 
-    i64 hp = sqlite3_column_int(stmt, 8);
-    i64 stand_state = sqlite3_column_int(stmt, 9);
+    i64 hp = sqlite3_column_int(players_stmt, 8);
+    i64 stand_state = sqlite3_column_int(players_stmt, 9);
 
     assert(cur_player_idx < consts::maxTeamSize * 2);
     snapshot.players[cur_player_idx++] = {
@@ -80,7 +94,16 @@ StepSnapshot loadStepSnapshot(sqlite3 *db_hdl,
 
   assert(cur_player_idx == consts::maxTeamSize * 2);
 
-  REQ_SQL(db_hdl, sqlite3_reset(stmt));
+  REQ_SQL(db_hdl, sqlite3_reset(players_stmt));
+
+  sqlite3_bind_int64(step_stmt, 1, step_id);
+
+  assert(sqlite3_step(step_stmt) == SQLITE_ROW);
+
+  snapshot.curZone = sqlite3_column_int(step_stmt, 0);
+  snapshot.curZoneController = sqlite3_column_int(step_stmt, 1);
+
+  REQ_SQL(db_hdl, sqlite3_reset(step_stmt));
 
   return snapshot;
 }

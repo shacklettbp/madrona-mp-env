@@ -410,7 +410,7 @@ void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
   }
 
   if (ctx.data().trajectoryCurriculum.numSnapshots > 0 &&
-      base_rng.sampleUniform() < 0.5f &&
+      //base_rng.sampleUniform() < 0.5f &&
       !ctx.data().trainControl->evalMode) {
     i32 snapshot_idx = base_rng.sampleI32(
         0, ctx.data().trajectoryCurriculum.numSnapshots);

@@ -20,12 +20,16 @@ struct PlayerSnapshot {
 
 struct StepSnapshot {
   PlayerSnapshot players[consts::maxTeamSize * 2];
+  int curZone;
+  int curZoneController;
 };
 
 sqlite3_stmt * initLoadStepSnapshotStatement(sqlite3 *db);
+sqlite3_stmt * initLoadMatchZoneStatement(sqlite3 *db);
 
 StepSnapshot loadStepSnapshot(sqlite3 *db_hdl,
-                              sqlite3_stmt *stmt,
+                              sqlite3_stmt *step_stmt,
+                              sqlite3_stmt *players_stmt,
                               i64 step_id);
 
 inline void checkSQL(sqlite3 *db, int res, const char *file, int line,

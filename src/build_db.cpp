@@ -349,10 +349,8 @@ SELECT id FROM matches WHERE orig_id = ?
       sqlite3_bind_int(insert_player_state_stmt, 3, (i16)player_state.pos[0]);
       sqlite3_bind_int(insert_player_state_stmt, 4, (i16)player_state.pos[1]);
       sqlite3_bind_int(insert_player_state_stmt, 5, (i16)player_state.pos[2]);
-      sqlite3_bind_int(insert_player_state_stmt, 6,
-          (i16)(player_state.yaw * 32768 / math::pi));
-      sqlite3_bind_int(insert_player_state_stmt, 7,
-          (i16)(player_state.pitch * 32768 / math::pi));
+      sqlite3_bind_int(insert_player_state_stmt, 6, player_state.yaw);
+      sqlite3_bind_int(insert_player_state_stmt, 7, player_state.pitch);
       sqlite3_bind_int(insert_player_state_stmt, 8, player_state.magNumBullets);
       sqlite3_bind_int(insert_player_state_stmt, 9, player_state.isReloading);
       sqlite3_bind_int(insert_player_state_stmt, 10,

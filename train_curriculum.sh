@@ -34,7 +34,7 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --entropy-loss-coef 0.01 \
     --value-loss-coef 1.0 \
     --num-channels 512 \
-    --pbt-ensemble-size 4 \
+    --pbt-ensemble-size 2 \
     --pbt-past-policies 4 \
     --profile-port 5000 \
     --curriculum-data ${REPO_DIR}/data/curriculum \

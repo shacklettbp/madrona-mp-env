@@ -9,7 +9,7 @@ if [ -z $2 ]; then
     exit
 fi
 
-rm -rf ${REPO_DIR}/ckpts/$1
+#rm -rf ${REPO_DIR}/ckpts/$1
 
 #
 #
@@ -30,12 +30,13 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --entropy-loss-coef 0.01 \
     --value-loss-coef 1.0 \
     --num-channels 512 \
-    --pbt-ensemble-size 4 \
+    --pbt-ensemble-size 2 \
     --pbt-past-policies 4 \
     --profile-port 5000 \
     --scene $2 \
     --bf16 \
     --eval-frequency 500 \
+    --restore 2000 \
     --gpu-sim
     #--restore 61000 \
     #--randomize-hp-mag \
