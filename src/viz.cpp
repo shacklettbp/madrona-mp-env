@@ -1560,8 +1560,7 @@ static void analyticsBGThread(AnalyticsDB &db)
           INNER JOIN player_states AS killed ON
             kill_events.killed_id = killed.id
           INNER JOIN match_steps AS event_steps ON
-            event_steps.id = kill_events.step_id AND
-            event_steps.step_idx % 10 == 0
+            event_steps.id = kill_events.step_id
           WHERE (killers.pos_x >= )";
 
         filter_query += std::to_string(kill.killerRegion.min.x);
@@ -1596,8 +1595,7 @@ static void analyticsBGThread(AnalyticsDB &db)
           INNER JOIN player_states AS targets ON
             player_shot_events.target_id = targets.id
           INNER JOIN match_steps AS event_steps ON
-            event_steps.id = player_shot_events.step_id AND
-            event_steps.step_idx % 10 == 0
+            event_steps.id = player_shot_events.step_id
           WHERE (attackers.pos_x >= )";
 
         filter_query += std::to_string(shot.attackerRegion.min.x);
