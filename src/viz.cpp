@@ -1877,16 +1877,130 @@ static void analyticsBGThread(AnalyticsDB &db)
             }
           } break;
           case AnalyticsFilterType::ReloadEvent: {
-            auto &reload = filter.reloadEvent;
+            auto &reload_filter = filter.reloadEvent;
+
+            for (int reload_event_offset = 0;
+                 reload_event_offset < (int)step_snapshot.numReloadEvents;
+                 reload_event_offset++) {
+              int reload_event_idx = step_snapshot.reloadEventsOffset +
+                reload_event_offset;
+              GameEvent::Reload reload_event =
+                  match_data.reloadEvents[reload_event_idx];
+
+              bool event_match =
+                  reload_event.numBulletsAtReloadTime <= reload_filter.maxNumBulletsAtReloadTime &&
+                  reload_event.numBulletsAtReloadTime >= reload_filter.minNumBulletsAtReloadTime;
+
+              int team = reload_event.player / consts::maxTeamSize;
+
+              if (event_match) {
+                FiltersMatchState &match_state = match_states[team];
+                match_state.active |= 1 << filter_idx;
+                match_state.lastMatches[filter_idx] = step_idx;
+              }
+            }
           } break;
           case AnalyticsFilterType::KillEvent: {
-            auto &kill = filter.killEvent;
+            auto &kill_filter = filter.killEvent;
+
+            for (int kill_event_offset = 0;
+                 kill_event_offset < (int)step_snapshot.numKillEvents;
+                 kill_event_offset++) {
+              int kill_event_idx = step_snapshot.killEventsOffset +
+                kill_event_offset;
+
+              GameEvent::Kill kill_event =
+                  match_data.killEvents[kill_event_idx];
+
+              PackedPlayerSnapshot attacker_state =
+                  step_snapshot.playerData[kill_event.killer];
+
+              PackedPlayerSnapshot target_state =
+                  step_snapshot.playerData[kill_event.killed];
+
+              bool event_match =
+                  attacker_state.pos[0] >= kill_filter.killerRegion.min.x &&
+                  attacker_state.pos[0] <= kill_filter.killerRegion.max.x &&
+                  attacker_state.pos[1] >= kill_filter.killerRegion.min.y &&
+                  attacker_state.pos[1] <= kill_filter.killerRegion.max.y &&
+
+                  target_state.pos[0] >= kill_filter.killedRegion.min.x &&
+                  target_state.pos[0] <= kill_filter.killedRegion.max.x &&
+                  target_state.pos[1] >= kill_filter.killedRegion.min.y &&
+                  target_state.pos[1] <= kill_filter.killedRegion.max.y;
+
+              int team = kill_event.killer / consts::maxTeamSize;
+
+              if (event_match) {
+                FiltersMatchState &match_state = match_states[team];
+                match_state.active |= 1 << filter_idx;
+                match_state.lastMatches[filter_idx] = step_idx;
+              }
+            }
           } break;
           case AnalyticsFilterType::PlayerShotEvent: {
-            auto &shot = filter.playerShotEvent;
+            auto &shot_filter = filter.playerShotEvent;
+
+            for (int shot_event_offset = 0;
+                 shot_event_offset < (int)step_snapshot.numPlayerShotEvents;
+                 shot_event_offset++) {
+              int shot_event_idx = step_snapshot.killEventsOffset +
+                shot_event_offset;
+
+              GameEvent::PlayerShot shot_event =
+                  match_data.playerShotEvents[shot_event_idx];
+
+              PackedPlayerSnapshot attacker_state =
+                  step_snapshot.playerData[shot_event.attacker];
+
+              PackedPlayerSnapshot target_state =
+                  step_snapshot.playerData[shot_event.attacker];
+
+              bool event_match =
+                  attacker_state.pos[0] >= shot_filter.attackerRegion.min.x &&
+                  attacker_state.pos[0] <= shot_filter.attackerRegion.max.x &&
+                  attacker_state.pos[1] >= shot_filter.attackerRegion.min.y &&
+                  attacker_state.pos[1] <= shot_filter.attackerRegion.max.y &&
+
+                  target_state.pos[0] >= shot_filter.targetRegion.min.x &&
+                  target_state.pos[0] <= shot_filter.targetRegion.max.x &&
+                  target_state.pos[1] >= shot_filter.targetRegion.min.y &&
+                  target_state.pos[1] <= shot_filter.targetRegion.max.y;
+
+              int team = shot_event.attacker / consts::maxTeamSize;
+
+              if (event_match) {
+                FiltersMatchState &match_state = match_states[team];
+                match_state.active |= 1 << filter_idx;
+                match_state.lastMatches[filter_idx] = step_idx;
+              }
+            }
           } break;
           case AnalyticsFilterType::PlayerInRegion: {
-            auto &in_region = filter.playerInRegion;
+            auto &in_region_filter = filter.playerInRegion;
+
+            for (int team = 0; team < 2; team++) {
+              for (int team_offset = 0; team_offset < consts::maxTeamSize;
+                   team_offset++) {
+                int player_idx = team * consts::maxTeamSize + team_offset;
+
+                PackedPlayerSnapshot player_state =
+                    step_snapshot.playerData[player_idx];
+
+                bool player_match =
+                    player_state.pos[0] >= in_region_filter.region.min.x &&
+                    player_state.pos[0] <= in_region_filter.region.max.x &&
+                    player_state.pos[1] >= in_region_filter.region.min.y &&
+                    player_state.pos[1] <= in_region_filter.region.max.y;
+
+                if (player_match) {
+                  FiltersMatchState &match_state = match_states[team];
+                  match_state.active |= 1 << filter_idx;
+                  match_state.lastMatches[filter_idx] = step_idx;
+                  break;
+                }
+              }
+            }
           } break;
           default: MADRONA_UNREACHABLE(); break;
           }
