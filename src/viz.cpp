@@ -328,6 +328,27 @@ struct FilterResult {
   i64 windowEnd;
 };
 
+struct AnalyticsStepSnapshot {
+  PackedMatchState matchData;
+  PackedPlayerSnapshot playerData[consts::maxTeamSize * 2];
+  u32 captureEventsOffset;
+  u32 numCaptureEvents;
+  u32 reloadEventsOffset;
+  u32 numReloadEvents;
+  u32 killEventsOffset;
+  u32 numKillEvents;
+  u32 playerShotEventsOffset;
+  u32 numPlayerShotEvents;
+};
+
+struct AnalyticsMatchData {
+  DynArray<AnalyticsStepSnapshot> steps;
+  DynArray<GameEvent::Capture> captureEvents;
+  DynArray<GameEvent::Reload> reloadEvents;
+  DynArray<GameEvent::Kill> killEvents;
+  DynArray<GameEvent::PlayerShot> playerShotEvents;
+};
+
 static FlyCamera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
 {
   fwd = normalize(fwd);
@@ -347,8 +368,15 @@ struct AnalyticsDB {
   sqlite3 *hdl = nullptr;
   sqlite3_stmt *loadStepPlayerStates = nullptr;
   sqlite3_stmt *loadMatchZoneState = nullptr;
-  sqlite3_stmt *loadMatchSteps = nullptr;
+  sqlite3_stmt *loadMatchStepIDs = nullptr;
   sqlite3_stmt *loadTeamStates = nullptr;
+
+  sqlite3_stmt *loadMatchStepPlayerSnapshots = nullptr;
+  sqlite3_stmt *loadMatchStepMatchDataSnapshots = nullptr;
+  sqlite3_stmt *loadMatchCaptureEvents = nullptr;
+  sqlite3_stmt *loadMatchReloadEvents = nullptr;
+  sqlite3_stmt *loadMatchKillEvents = nullptr;
+  sqlite3_stmt *loadMatchPlayerShotEvents = nullptr;
 
   AnalyticsFilterType addFilterType = AnalyticsFilterType::CaptureEvent;
 
@@ -839,7 +867,7 @@ FROM match_steps AS ms
 WHERE
   ms.match_id = ?
 ORDER BY ms.step_idx
-)", -1, &db.loadMatchSteps, nullptr));
+)", -1, &db.loadMatchStepIDs, nullptr));
 
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
@@ -851,6 +879,77 @@ WHERE
 ORDER BY
   ts.team_idx
 )", -1, &db.loadTeamStates, nullptr));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
+  ms.step_idx, ps.pos_x, ps.pos_y, ps.pos_z, ps.yaw, ps.pitch,
+  ps.num_bullets, ps.is_reloading, ps.fired_shot,
+  ps.hp, ps.flags
+FROM match_steps AS ms
+INNER JOIN player_states AS ps ON 
+  ps.step_id = ms.id
+WHERE ms.match_id = ?
+ORDER BY ms.step_idx, ps.player_idx
+)", -1, &db.loadMatchStepPlayerSnapshots, nullptr));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
+  ms.step_idx, ms.cur_zone, ms.cur_zone_controller,
+  ms.zone_steps_remaining, ms.zone_steps_until_point
+FROM match_steps AS ms
+WHERE ms.match_id = ?
+ORDER BY ms.step_idx
+)", -1, &db.loadMatchStepMatchDataSnapshots, nullptr));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
+  ms.step_idx, ce.zone_idx, ce.capture_team_idx, ce.in_zone_mask
+FROM match_steps AS ms
+INNER JOIN capture_events AS ce ON 
+  ce.step_id = ms.id
+WHERE ms.match_id = ?
+ORDER BY ms.step_idx
+)", -1, &db.loadMatchCaptureEvents, nullptr));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
+  ms.step_idx, reloaders.player_idx, re.num_bullets
+FROM match_steps AS ms
+INNER JOIN reload_events AS re ON 
+  re.step_id = ms.id
+INNER JOIN player_states AS reloaders ON
+  reloaders.id = re.player_state_id
+WHERE ms.match_id = ?
+ORDER BY ms.step_idx, reloaders.player_idx
+)", -1, &db.loadMatchReloadEvents, nullptr));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
+  ms.step_idx, attackers.player_idx, targets.player_idx
+FROM match_steps AS ms
+INNER JOIN kill_events AS ke ON 
+  ke.step_id = ms.id
+INNER JOIN player_states AS attackers ON
+  attackers.id = ke.killer_id
+INNER JOIN player_states AS targets ON
+  targets.id = ke.killed_id
+WHERE ms.match_id = ?
+ORDER BY ms.step_idx, attackers.player_idx, targets.player_idx
+)", -1, &db.loadMatchKillEvents, nullptr));
+
+  REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
+SELECT
+  ms.step_idx, attackers.player_idx, targets.player_idx
+FROM match_steps AS ms
+INNER JOIN player_shot_events AS pse ON 
+  pse.step_id = ms.id
+INNER JOIN player_states AS attackers ON
+  attackers.id = pse.attacker_id
+INNER JOIN player_states AS targets ON
+  targets.id = pse.target_id
+WHERE ms.match_id = ?
+ORDER BY ms.step_idx, attackers.player_idx, targets.player_idx
+)", -1, &db.loadMatchPlayerShotEvents, nullptr));
 
   {
     sqlite3_stmt *num_matches_stmt;
@@ -876,8 +975,15 @@ static void unloadAnalyticsDB(AnalyticsDB &db)
   sendAnalyticsThreadCmd(db, AnalyticsThreadCtrl::Exit);
   db.bgThread.join();
 
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchStepPlayerSnapshots));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchStepMatchDataSnapshots));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchCaptureEvents));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchReloadEvents));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchKillEvents));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchPlayerShotEvents));
+
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadTeamStates));
-  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchSteps));
+  REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchStepIDs));
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadMatchZoneState));
   REQ_SQL(db.hdl, sqlite3_finalize(db.loadStepPlayerStates));
   REQ_SQL(db.hdl, sqlite3_close(db.hdl));
@@ -905,21 +1011,191 @@ static std::array<TeamConvexHull, 2> loadTeamConvexHulls(
   return hulls;
 }
 
-static DynArray<i64> loadMatchSteps(AnalyticsDB &db,
+static DynArray<i64> loadMatchStepIDs(AnalyticsDB &db,
                                     i64 match_id)
 {
   DynArray<i64> results(5000);
 
-  sqlite3_bind_int64(db.loadMatchSteps, 1, match_id);
+  sqlite3_bind_int64(db.loadMatchStepIDs, 1, match_id);
 
-  while (sqlite3_step(db.loadMatchSteps) == SQLITE_ROW) {
-    i64 step_id = sqlite3_column_int(db.loadMatchSteps, 0);
+  while (sqlite3_step(db.loadMatchStepIDs) == SQLITE_ROW) {
+    i64 step_id = sqlite3_column_int(db.loadMatchStepIDs, 0);
     results.push_back(step_id);
   }
 
-  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchSteps));
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchStepIDs));
 
   return results;
+}
+
+static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
+{
+  AnalyticsMatchData match_data {
+    .steps = {},
+    .captureEvents = {},
+    .reloadEvents = {},
+    .killEvents = {},
+    .playerShotEvents = {},
+  };
+
+  sqlite3_bind_int64(db.loadMatchStepPlayerSnapshots, 1, match_id);
+  sqlite3_bind_int64(db.loadMatchStepMatchDataSnapshots, 1, match_id);
+  sqlite3_bind_int64(db.loadMatchCaptureEvents, 1, match_id);
+  sqlite3_bind_int64(db.loadMatchReloadEvents, 1, match_id);
+  sqlite3_bind_int64(db.loadMatchKillEvents, 1, match_id);
+  sqlite3_bind_int64(db.loadMatchPlayerShotEvents, 1, match_id);
+
+  i32 cur_capture_step = -1;
+  i32 cur_reload_step = -1;
+  i32 cur_kill_step = -1;
+  i32 cur_player_shot_step = -1;
+
+  while (sqlite3_step(db.loadMatchStepMatchDataSnapshots) == SQLITE_ROW) {
+    i32 step_idx = (i32)match_data.steps.size();
+
+    AnalyticsStepSnapshot snapshot;
+    snapshot.captureEventsOffset = (u32)match_data.captureEvents.size();
+    snapshot.numCaptureEvents = cur_capture_step == step_idx ? 1 : 0;
+    snapshot.reloadEventsOffset = (u32)match_data.reloadEvents.size();
+    snapshot.numReloadEvents = cur_reload_step == step_idx ? 1 : 0;
+    snapshot.killEventsOffset = (u32)match_data.killEvents.size();
+    snapshot.numKillEvents = cur_kill_step == step_idx ? 1 : 0;
+    snapshot.playerShotEventsOffset = (u32)match_data.playerShotEvents.size();
+    snapshot.numPlayerShotEvents = cur_player_shot_step == step_idx ? 1 : 0;
+
+    {
+      int db_step_idx = sqlite3_column_int(db.loadMatchStepMatchDataSnapshots, 0);
+
+      assert(db_step_idx == step_idx);
+    }
+
+    snapshot.matchData.curZone =
+        sqlite3_column_int(db.loadMatchStepMatchDataSnapshots, 1);
+
+    snapshot.matchData.curZoneController =
+        sqlite3_column_int(db.loadMatchStepMatchDataSnapshots, 2);
+
+    snapshot.matchData.zoneStepsRemaining =
+        sqlite3_column_int(db.loadMatchStepMatchDataSnapshots, 3);
+
+    snapshot.matchData.stepsUntilPoint =
+        sqlite3_column_int(db.loadMatchStepMatchDataSnapshots, 4);
+
+    for (i32 player_idx = 0; player_idx < consts::maxTeamSize * 2; player_idx++) {
+      assert(sqlite3_step(db.loadMatchStepPlayerSnapshots) == SQLITE_ROW);
+      {
+        int db_step_idx = sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 0);
+        assert(db_step_idx == step_idx);
+      }
+
+      snapshot.playerData[player_idx] = {
+        .pos = {
+            (i16)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 1),
+            (i16)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 2),
+            (i16)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 3),
+        },
+        .yaw = (i16)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 4),
+        .pitch = (i16)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 5),
+        .magNumBullets = (u8)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 6),
+        .isReloading = (u8)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 7),
+        .hp = (u8)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 8),
+        .flags = (u8)sqlite3_column_int(db.loadMatchStepPlayerSnapshots, 9),
+      };
+    }
+
+    match_data.steps.push_back(snapshot);
+
+    if (cur_capture_step <= step_idx) {
+      while (sqlite3_step(db.loadMatchCaptureEvents) == SQLITE_ROW) {
+        cur_capture_step = sqlite3_column_int(db.loadMatchCaptureEvents, 0);
+        match_data.captureEvents.push_back({
+          .zoneIDX = 
+              (u8)sqlite3_column_int(db.loadMatchCaptureEvents, 1),
+          .captureTeam =
+              (u8)sqlite3_column_int(db.loadMatchCaptureEvents, 2),
+          .inZoneMask =
+              (u8)sqlite3_column_int(db.loadMatchCaptureEvents, 3),
+        });
+
+        if (cur_capture_step == step_idx) {
+          snapshot.numCaptureEvents += 1;
+        } else if (cur_capture_step > step_idx) {
+          break;
+        } else {
+          assert(false);
+        }
+      }
+    }
+
+    if (cur_reload_step <= step_idx) {
+      while (sqlite3_step(db.loadMatchReloadEvents) == SQLITE_ROW) {
+        cur_reload_step = sqlite3_column_int(db.loadMatchReloadEvents, 0);
+        match_data.reloadEvents.push_back({
+          .player = 
+              (u8)sqlite3_column_int(db.loadMatchReloadEvents, 1),
+          .numBulletsAtReloadTime =
+              (u8)sqlite3_column_int(db.loadMatchReloadEvents, 2),
+        });
+
+        if (cur_reload_step == step_idx) {
+          snapshot.numReloadEvents += 1;
+        } else if (cur_reload_step > step_idx) {
+          break;
+        } else {
+          assert(false);
+        }
+      }
+    }
+
+    if (cur_kill_step <= step_idx) {
+      while (sqlite3_step(db.loadMatchKillEvents) == SQLITE_ROW) {
+        cur_kill_step = sqlite3_column_int(db.loadMatchKillEvents, 0);
+        match_data.killEvents.push_back({
+          .killer = 
+              (u8)sqlite3_column_int(db.loadMatchKillEvents, 1),
+          .killed =
+              (u8)sqlite3_column_int(db.loadMatchKillEvents, 2),
+        });
+
+        if (cur_kill_step == step_idx) {
+          snapshot.numKillEvents += 1;
+        } else if (cur_kill_step > step_idx) {
+          break;
+        } else {
+          assert(false);
+        }
+      }
+    }
+
+    if (cur_player_shot_step <= step_idx) {
+      while (sqlite3_step(db.loadMatchPlayerShotEvents) == SQLITE_ROW) {
+        cur_player_shot_step = sqlite3_column_int(db.loadMatchPlayerShotEvents, 0);
+        match_data.playerShotEvents.push_back({
+          .attacker = 
+              (u8)sqlite3_column_int(db.loadMatchPlayerShotEvents, 1),
+          .target =
+              (u8)sqlite3_column_int(db.loadMatchPlayerShotEvents, 2),
+        });
+
+        if (cur_player_shot_step == step_idx) {
+          snapshot.numPlayerShotEvents += 1;
+        } else if (cur_player_shot_step > step_idx) {
+          break;
+        } else {
+          assert(false);
+        }
+      }
+    }
+  }
+
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchStepPlayerSnapshots));
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchStepMatchDataSnapshots));
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchCaptureEvents));
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchReloadEvents));
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchKillEvents));
+  REQ_SQL(db.hdl, sqlite3_reset(db.loadMatchPlayerShotEvents));
+
+  return match_data;
 }
 
 static void dumpTrajectories(AnalyticsDB &db)
@@ -934,7 +1210,7 @@ static void dumpTrajectories(AnalyticsDB &db)
        result_idx++) {
     FilterResult result = (*db.displayResults)[result_idx];
 
-    DynArray<i64> match_steps = loadMatchSteps(db, result.matchID);
+    DynArray<i64> match_steps = loadMatchStepIDs(db, result.matchID);
 
     int window_start = result.windowStart;
     int window_end = result.windowEnd;
@@ -1397,7 +1673,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   }
 
   DynArray<i64> match_steps = db.currentVizMatch == -1 ?
-    DynArray<i64>(0) : loadMatchSteps(db, db.currentVizMatch);
+    DynArray<i64>(0) : loadMatchStepIDs(db, db.currentVizMatch);
 
   if (db.currentSelectedResult != -1 &&
       db.currentVizMatchTimestep == -1 &&
@@ -1488,271 +1764,116 @@ static void analyticsBGThread(AnalyticsDB &db)
 {
   auto filterResults =
     [&db]
-  (DynArray<AnalyticsFilter> &filters, int window_size)
+  (DynArray<AnalyticsFilter> &filters, int filter_match_window)
   {
     DynArray<FilterResult> results(1000);
 
-    std::string withs = "WITH ";
+    assert(filters.size() < 64);
 
-    for (int filter_idx = 0; filter_idx < (int)filters.size();
-         filter_idx += 1) {
-      AnalyticsFilter &filter = db.currentFilters[filter_idx];
+    struct FiltersMatchState {
+      u64 active = 0;
+      std::array<int, 64> lastMatches = {};
+    };
 
-      std::string filter_query;
 
-      switch (filter.type) {
-      case AnalyticsFilterType::CaptureEvent: {
-        auto &capture = filter.captureEvent;
+    for (int match_id = 0; match_id < db.numMatches; match_id++) {
+      FiltersMatchState match_states[2];
 
-        filter_query = R"(
-          SELECT
-            capture_events.step_id AS step_id,
-            event_steps.match_id AS match_id,
-            event_steps.step_idx AS timestep,
-            capture_events.capture_team_idx AS team_id
-          FROM capture_events
-          INNER JOIN match_steps AS event_steps ON
-            event_steps.id = capture_events.step_id
-          WHERE capture_events.num_in_zone >= )";
+      AnalyticsMatchData match_data = loadMatchData(db, match_id);
 
-        filter_query += std::to_string(capture.minNumInZone);
+      int num_steps = (int)match_data.steps.size();
 
-        if (capture.zoneIDX != -1) {
-          filter_query += "AND (capture_events.zone_idx = ";
-          filter_query += std::to_string(capture.zoneIDX);
-          filter_query += ")";
-        }
-      } break;
-      case AnalyticsFilterType::ReloadEvent: {
-        auto &reload = filter.reloadEvent;
-        filter_query = R"(
-          SELECT
-            reload_events.step_id AS step_id,
-            event_steps.match_id AS match_id,
-            event_steps.step_idx AS timestep,
-            player_states.player_idx / 6 AS team_id
-          FROM reload_events
-          INNER JOIN match_steps AS event_steps ON
-            event_steps.id = reload_events.step_id
-          INNER JOIN player_states ON 
-            player_states.id = reload_events.player_state_id
-          WHERE (reload_events.num_bullets >= )";
+      for (int step_idx = 0; step_idx < num_steps; step_idx++) {
+        AnalyticsStepSnapshot step_snapshot = match_data.steps[step_idx];
 
-        filter_query += std::to_string(reload.minNumBulletsAtReloadTime);
-        filter_query += ")";
+        for (int filter_idx = 0; filter_idx < (int)filters.size();
+             filter_idx += 1) {
+          AnalyticsFilter &filter = db.currentFilters[filter_idx];
 
-        filter_query += "AND (reload_events.num_bullets <=";
-        filter_query += std::to_string(reload.maxNumBulletsAtReloadTime);
-        filter_query += ")";
-      } break;
-      case AnalyticsFilterType::KillEvent: {
-        auto &kill = filter.killEvent;
-
-        filter_query = R"(
-          SELECT
-            kill_events.step_id AS step_id,
-            event_steps.match_id AS match_id,
-            event_steps.step_idx AS timestep,
-            killers.player_idx / 6 AS team_id
-          FROM kill_events
-          INNER JOIN player_states AS killers ON
-            kill_events.killer_id = killers.id
-          INNER JOIN player_states AS killed ON
-            kill_events.killed_id = killed.id
-          INNER JOIN match_steps AS event_steps ON
-            event_steps.id = kill_events.step_id
-          WHERE (killers.pos_x >= )";
-
-        filter_query += std::to_string(kill.killerRegion.min.x);
-        filter_query +=
-          " AND killers.pos_x <= " + std::to_string(kill.killerRegion.max.x);
-        filter_query += ") AND (killers.pos_y >= " +
-          std::to_string(kill.killerRegion.min.y) +
-          " AND killers.pos_y <= " + std::to_string(kill.killerRegion.max.y);
-
-        filter_query += ") AND (killed.pos_x >= " +
-          std::to_string(kill.killedRegion.min.x) +
-          " AND killed.pos_x <= " + std::to_string(kill.killedRegion.max.x);
-
-        filter_query += ") AND (killed.pos_y >= " +
-          std::to_string(kill.killedRegion.min.y) +
-          " AND killed.pos_y <= " + std::to_string(kill.killedRegion.max.y);
-
-        filter_query += ")";
-      } break;
-      case AnalyticsFilterType::PlayerShotEvent: {
-        auto &shot = filter.playerShotEvent;
-
-        filter_query = R"(
-          SELECT
-            player_shot_events.step_id AS step_id,
-            event_steps.match_id AS match_id,
-            event_steps.step_idx AS timestep,
-            attackers.player_idx / 6 AS team_id
-          FROM player_shot_events
-          INNER JOIN player_states AS attackers ON
-            player_shot_events.attacker_id = attackers.id
-          INNER JOIN player_states AS targets ON
-            player_shot_events.target_id = targets.id
-          INNER JOIN match_steps AS event_steps ON
-            event_steps.id = player_shot_events.step_id
-          WHERE (attackers.pos_x >= )";
-
-        filter_query += std::to_string(shot.attackerRegion.min.x);
-        filter_query +=
-          " AND attackers.pos_x <= " + std::to_string(shot.attackerRegion.max.x);
-        filter_query += ") AND (attackers.pos_y >= " +
-          std::to_string(shot.attackerRegion.min.y) +
-          " AND attackers.pos_y <= " + std::to_string(shot.attackerRegion.max.y);
-
-        filter_query += ") AND (targets.pos_x >= " +
-          std::to_string(shot.targetRegion.min.x) +
-          " AND targets.pos_x <= " + std::to_string(shot.targetRegion.max.x);
-
-        filter_query += ") AND (targets.pos_y >= " +
-          std::to_string(shot.targetRegion.min.y) +
-          " AND targets.pos_y <= " + std::to_string(shot.targetRegion.max.y);
-        filter_query += ")";
-      } break;
-      case AnalyticsFilterType::PlayerInRegion: {
-        auto &in_region = filter.playerInRegion;
-
-        filter_query = R"(
-          SELECT
-            player_states.step_id AS step_id,
-            match_steps.match_id AS match_id,
-            match_steps.step_idx AS timestep,
-            player_states.player_idx / 6 AS team_id
-          FROM player_states
-          INNER JOIN match_steps ON
-            match_steps.id = player_states.step_id AND
-            match_steps.step_idx % 10 == 0
-          WHERE (player_states.pos_x >= )";
-
-        filter_query += std::to_string(in_region.region.min.x);
-        filter_query +=
-          " AND player_states.pos_x <= " + std::to_string(in_region.region.max.x);
-        filter_query += ") AND (player_states.pos_y >= " +
-          std::to_string(in_region.region.min.y) +
-          " AND player_states.pos_y <= " + std::to_string(in_region.region.max.y);
-        filter_query += ")";
-      } break;
-      default: MADRONA_UNREACHABLE(); break;
-      }
-
-      withs += "\n  results" + std::to_string(filter_idx);
-      withs += " AS (" + filter_query + "\n  )";
-
-      if (filter_idx < (int)filters.size() - 1) {
-        withs += ",";
-      }
-    }
-
-    std::string query_str = withs + R"(
-SELECT DISTINCT
-  results0.step_id AS step_id,
-  results0.match_id AS match_id,
-  results0.team_id AS team_id,
-)";
-
-    if (filters.size() == 1) {
-      query_str += R"(
-  results0.timestep AS window_start,
-  results0.timestep AS window_end
-)";
-    } else {
-      query_str += "  MIN(";
-
-      for (int filter_idx = 0; filter_idx < (int)filters.size();
-           filter_idx++) {
-        std::string results_name = "results" + std::to_string(filter_idx);
-        query_str += results_name + ".timestep";
-        if (filter_idx < (int)filters.size() - 1) {
-          query_str += ",";
-        }
-      }
-
-      query_str += ") AS window_start,\n";
-
-      query_str += "  MAX(";
-
-      for (int filter_idx = 0; filter_idx < (int)filters.size();
-           filter_idx++) {
-        std::string results_name = "results" + std::to_string(filter_idx);
-        query_str += results_name + ".timestep";
-        if (filter_idx < (int)filters.size() - 1) {
-          query_str += ",";
-        }
-      }
-
-      query_str += ") AS window_end";
-    }
-
-    query_str += "\nFROM results0";
-
-      for (int filter_idx = 1; filter_idx < (int)filters.size();
-           filter_idx++) {
-        std::string results_name = "results" + std::to_string(filter_idx);
-        query_str += "\nJOIN " + results_name + " ON (" +
-          results_name + ".match_id = results0.match_id AND " + results_name + ".team_id = results0.team_id AND ABS(" + results_name + ".timestep - results0.timestep) <= " + std::to_string(window_size) + ")";
-      }
-    query_str += "\nWHERE window_end - window_start <= " +
-        std::to_string(window_size);
-    query_str += "\nORDER BY match_id, team_id, window_start;";
-    
-    printf("%s\n", query_str.c_str());
-
-    {
-      sqlite3_stmt *filter_stmt;
-      REQ_SQL(db.hdl, sqlite3_prepare_v2(
-          db.hdl, query_str.c_str(), -1, &filter_stmt, nullptr));
-
-      FilterResult cur_result {
-        .matchID = -1,
-        .teamID = -1,
-        .windowStart = -1,
-        .windowEnd = -1,
-      };
-
-      while (sqlite3_step(filter_stmt) == SQLITE_ROW) {
-        i64 step_id = sqlite3_column_int64(filter_stmt, 0);
-        i64 match_id = sqlite3_column_int64(filter_stmt, 1);
-        i64 team_id = sqlite3_column_int64(filter_stmt, 2);
-        i64 window_start = sqlite3_column_int64(filter_stmt, 3);
-        i64 window_end = sqlite3_column_int64(filter_stmt, 4);
-
-        (void)step_id;
-
-        bool window_overlaps = window_start <= cur_result.windowEnd + 1 &&
-          cur_result.windowStart <= window_end + 1;
-
-        if (match_id != cur_result.matchID || team_id != cur_result.teamID ||
-            !window_overlaps) {
-          if (cur_result.matchID != -1) {
-            results.push_back(cur_result);
+          for (int team_idx = 0; team_idx < 2; team_idx++) {
+            FiltersMatchState &match_state = match_states[team_idx];
+            if ((match_state.active & (1 << filter_idx)) != 0) {
+              if (step_idx - match_state.lastMatches[filter_idx] >
+                  filter_match_window) {
+                match_state.active &= ~(1 << filter_idx);
+              }
+            }
           }
 
-          cur_result.matchID = match_id;
-          cur_result.teamID = team_id;
-          cur_result.windowStart = window_start;
-          cur_result.windowEnd = window_end;
-        } else {
-          if (window_start < cur_result.windowStart) {
-            cur_result.windowStart = window_start;
-          }
+          switch (filter.type) {
+          case AnalyticsFilterType::CaptureEvent: {
+            auto &capture_filter = filter.captureEvent;
 
-          if (window_end > cur_result.windowEnd) {
-            cur_result.windowEnd = window_end;
+            for (int capture_event_offset = 0;
+                 capture_event_offset < (int)step_snapshot.numCaptureEvents;
+                 capture_event_offset++) {
+              int capture_event_idx = step_snapshot.captureEventsOffset + capture_event_offset;
+              GameEvent::Capture capture_event = match_data.captureEvents[capture_event_idx];
+
+              bool event_match = true;
+
+              if (capture_filter.zoneIDX != -1 &&
+                  capture_filter.zoneIDX != capture_event.zoneIDX) {
+                event_match = false;
+              }
+
+              if (std::popcount(capture_event.inZoneMask) < capture_filter.minNumInZone) {
+                event_match = false;
+              }
+
+              if (event_match) {
+                FiltersMatchState &match_state = match_states[capture_event.captureTeam];
+                match_state.active |= 1 << filter_idx;
+                match_state.lastMatches[filter_idx] = step_idx;
+              }
+            }
+          } break;
+          case AnalyticsFilterType::ReloadEvent: {
+            auto &reload = filter.reloadEvent;
+          } break;
+          case AnalyticsFilterType::KillEvent: {
+            auto &kill = filter.killEvent;
+          } break;
+          case AnalyticsFilterType::PlayerShotEvent: {
+            auto &shot = filter.playerShotEvent;
+          } break;
+          case AnalyticsFilterType::PlayerInRegion: {
+            auto &in_region = filter.playerInRegion;
+          } break;
+          default: MADRONA_UNREACHABLE(); break;
           }
         }
-      }
 
-      if (cur_result.matchID != -1) {
-        results.push_back(cur_result);
-      }
+        for (int team_idx = 0; team_idx < 2; team_idx++) {
+          FiltersMatchState &match_state = match_states[team_idx];
+          if (std::popcount(match_state.active) != filters.size()) {
+            continue;
+          }
 
-      REQ_SQL(db.hdl, sqlite3_reset(filter_stmt));
-      REQ_SQL(db.hdl, sqlite3_finalize(filter_stmt));
+          int window_start = INT_MAX;
+          int window_end = -1;
+          for (int filter_idx = 0; filter_idx < filters.size(); filter_idx++) {
+            int filter_match_step = match_state.lastMatches[filter_idx];
+
+            if (filter_match_step < window_start) {
+              window_start = filter_match_step;
+            }
+
+            if (filter_match_step > window_end) {
+              window_end = filter_match_step;
+            }
+          }
+
+          assert(window_start != INT_MAX && window_end != -1);
+
+          results.push_back({
+            .matchID = match_id,
+            .teamID = team_idx,
+            .windowStart = window_start,
+            .windowEnd = window_end,
+          });
+        }
+      }
     }
 
     return results;

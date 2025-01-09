@@ -53,7 +53,7 @@ enum class ExportID : uint32_t {
     FullTeamPolicyAssignments,
 
     EventLog,
-    EventStepState,
+    PackedStepSnapshot,
 
     NumExports,
 };

@@ -568,7 +568,7 @@ struct PackedMatchState {
   u16 stepsUntilPoint;
 };
 
-struct EventStepState {
+struct PackedStepSnapshot {
   u32 numEvents;
   u32 eventMask;
   u64 matchID;
@@ -576,8 +576,8 @@ struct EventStepState {
   PackedPlayerSnapshot players[consts::maxTeamSize * 2];
 };
 
-struct EventStepStateEntity : madrona::Archetype<
-  EventStepState
+struct PackedStepSnapshotEntity : madrona::Archetype<
+  PackedStepSnapshot
 > {};
 
 struct XYI16 {

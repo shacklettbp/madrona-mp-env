@@ -100,7 +100,7 @@ int main(int argc, char *argv[])
   std::ifstream steps_file(in_dir + "/steps.bin", std::ios::binary);
   assert(steps_file.is_open());
 
-  i64 num_steps = fileNumElems.template operator()<EventStepState>(steps_file);
+  i64 num_steps = fileNumElems.template operator()<PackedStepSnapshot>(steps_file);
 
   printf("%ld %ld\n", (long)num_events, (long)num_steps);
 
@@ -173,6 +173,7 @@ CREATE TABLE player_states (
   fired_shot INTEGER NOT NULL,
   hp INTEGER NOT NULL,
   stand_state INTEGER NOT NULL,
+  flags INTEGER NOT NULL,
   
   UNIQUE(step_id, player_idx)
 );
@@ -182,6 +183,7 @@ CREATE TABLE capture_events (
   step_id INTEGER NOT NULL,
   zone_idx INTEGER NOT NULL,
   capture_team_idx INTEGER NOT NULL,
+  in_zone_mask INTEGER NOT NULL,
   num_in_zone INTEGER NOT NULL,
   
   UNIQUE(step_id, zone_idx)
@@ -255,16 +257,16 @@ VALUES
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO player_states (
   step_id, player_idx, pos_x, pos_y, pos_z,
-  yaw, pitch, num_bullets, is_reloading, fired_shot, hp, stand_state)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+  yaw, pitch, num_bullets, is_reloading, fired_shot, hp, stand_state, flags)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_player_state_stmt, nullptr));
 
   sqlite3_stmt *insert_capture_event_stmt;
   REQ_SQL(db, sqlite3_prepare_v2(db, R"(
 INSERT INTO capture_events (
-  step_id, zone_idx, capture_team_idx, num_in_zone
+  step_id, zone_idx, capture_team_idx, in_zone_mask, num_in_zone
 )
-VALUES (?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?);
 )", -1, &insert_capture_event_stmt, nullptr));
 
   sqlite3_stmt *insert_reload_event_stmt;
@@ -306,12 +308,12 @@ SELECT id FROM match_steps WHERE match_id = ? AND step_idx = ?
 SELECT id FROM matches WHERE orig_id = ?
 )", -1, &find_match_stmt, nullptr));
 
-  HeapArray<EventStepState> steps(num_steps);
-  steps_file.read((char *)steps.data(), sizeof(EventStepState) * num_steps);
+  HeapArray<PackedStepSnapshot> steps(num_steps);
+  steps_file.read((char *)steps.data(), sizeof(PackedStepSnapshot) * num_steps);
 
   execSQL(db, "BEGIN TRANSACTION");
   for (i64 i = 0; i < num_steps; i++) {
-    EventStepState step = steps[i];
+    PackedStepSnapshot step = steps[i];
 
     i64 match_id = -1;
     {
@@ -365,6 +367,7 @@ SELECT id FROM matches WHERE orig_id = ?
       }
 
       sqlite3_bind_int(insert_player_state_stmt, 12, stand_state);
+      sqlite3_bind_int(insert_player_state_stmt, 13, player_state.flags);
 
       execResetStmt(db, insert_player_state_stmt);
 
@@ -509,7 +512,8 @@ CREATE INDEX idx_find_player_by_pos ON player_states (pos_x, pos_y);
       sqlite3_bind_int64(insert_capture_event_stmt, 1, step_id);
       sqlite3_bind_int(insert_capture_event_stmt, 2, zone_idx);
       sqlite3_bind_int(insert_capture_event_stmt, 3, capture_team);
-      sqlite3_bind_int(insert_capture_event_stmt, 4, num_in_zone);
+      sqlite3_bind_int(insert_capture_event_stmt, 4, in_zone_mask);
+      sqlite3_bind_int(insert_capture_event_stmt, 5, num_in_zone);
 
       execResetStmt(db, insert_capture_event_stmt);
     } break;

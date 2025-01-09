@@ -103,13 +103,13 @@ static void writeGameEvents(
     std::fstream &event_log_file,
     std::fstream &step_log_file,
     const GameEvent *events, uint32_t num_events,
-    const EventStepState *step_states, uint32_t num_step_states,
+    const PackedStepSnapshot *step_states, uint32_t num_step_states,
     CountT num_worlds, int32_t step_idx)
 {
   (void)num_worlds;
   (void)step_idx;
 
-  step_log_file.write((char *)step_states, sizeof(EventStepState) * num_step_states);
+  step_log_file.write((char *)step_states, sizeof(PackedStepSnapshot) * num_step_states);
   event_log_file.write((char *)events, sizeof(GameEvent) * num_events);
 }
     
@@ -155,7 +155,7 @@ struct Manager::CPUImpl final : Manager::Impl {
     StepLog *recordLogBuffer;
 
     GameEvent *eventLogExported;
-    EventStepState *eventLogStepStatesExported;
+    PackedStepSnapshot *eventLogStepStatesExported;
     EventLogGlobalState *eventLogGlobalState;
     TrajectoryCurriculum trajectoryCurriculum;
 
@@ -189,7 +189,7 @@ struct Manager::CPUImpl final : Manager::Impl {
         eventLogExported(
           (GameEvent *)cpuExec.getExported((CountT)ExportID::EventLog)),
         eventLogStepStatesExported(
-          (EventStepState *)cpuExec.getExported((CountT)ExportID::EventStepState)),
+          (PackedStepSnapshot *)cpuExec.getExported((CountT)ExportID::PackedStepSnapshot)),
         eventLogGlobalState(event_log_global_state),
         trajectoryCurriculum(trajectory_curriculum),
         replayLog(Optional<std::fstream>::none()),
@@ -320,11 +320,11 @@ struct Manager::CUDAImpl final : Manager::Impl {
     StepLog *recordLogStaging;
 
     GameEvent *eventLogExported;
-    EventStepState *eventLogStepStatesExported;
+    PackedStepSnapshot *eventLogStepStatesExported;
     EventLogGlobalState *eventLogGlobalState;
 
     GameEvent *eventLogReadBack;
-    EventStepState *eventLogStepStatesReadback;
+    PackedStepSnapshot *eventLogStepStatesReadback;
     uint32_t eventLogReadBackSize;
     uint32_t eventLogStepStatesReadBackSize;
 
@@ -367,7 +367,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
         eventLogExported(
             (GameEvent *)gpuExec.getExported((CountT)ExportID::EventLog)),
         eventLogStepStatesExported(
-          (EventStepState *)gpuExec.getExported((CountT)ExportID::EventStepState)),
+          (PackedStepSnapshot *)gpuExec.getExported((CountT)ExportID::PackedStepSnapshot)),
         eventLogGlobalState(event_log_global_state),
         eventLogReadBack(nullptr),
         eventLogStepStatesReadback(nullptr),
@@ -459,8 +459,8 @@ struct Manager::CUDAImpl final : Manager::Impl {
       if (num_steps > eventLogStepStatesReadBackSize) {
         cu::deallocCPU(eventLogStepStatesReadback);
 
-        eventLogStepStatesReadback = (EventStepState *)cu::allocReadback(
-            sizeof(EventStepState) * num_steps);
+        eventLogStepStatesReadback = (PackedStepSnapshot *)cu::allocReadback(
+            sizeof(PackedStepSnapshot) * num_steps);
       }
 
       cudaMemcpyAsync(eventLogReadBack, eventLogExported,
@@ -469,7 +469,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
                  strm);
 
       cudaMemcpyAsync(eventLogStepStatesReadback, eventLogStepStatesExported,
-                      sizeof(EventStepState) * num_steps,
+                      sizeof(PackedStepSnapshot) * num_steps,
                       cudaMemcpyDeviceToHost,
                       strm);
 

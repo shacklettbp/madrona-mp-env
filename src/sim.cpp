@@ -32,7 +32,7 @@ static inline void logEvent(Engine &ctx, const GameEvent &event)
   event_mask_atomic.fetch_or<sync::relaxed>((u32)event.type);
 }
 
-static void writeEventStepState(Engine &ctx)
+static void writePackedStepSnapshot(Engine &ctx)
 {
   u32 cur_step = ctx.singleton<MatchInfo>().curStep;
 
@@ -52,8 +52,8 @@ static void writeEventStepState(Engine &ctx)
   AtomicU32Ref num_match_states_atomic(ctx.data().eventGlobalState->numStepStates);
   num_match_states_atomic.fetch_add_relaxed(1);
 
-  EventStepState &state_out =
-    ctx.getDirect<EventStepState>(2, ctx.makeTemporary<EventStepStateEntity>());
+  PackedStepSnapshot &state_out =
+    ctx.getDirect<PackedStepSnapshot>(2, ctx.makeTemporary<PackedStepSnapshotEntity>());
 
   PackedMatchState &match_state = state_out.matchState;
   
@@ -363,8 +363,8 @@ void Sim::registerTypes(ECSRegistry &registry,
     registry.registerComponent<GameEvent>();
     registry.registerArchetype<GameEventEntity>();
 
-    registry.registerComponent<EventStepState>();
-    registry.registerArchetype<EventStepStateEntity>();
+    registry.registerComponent<PackedStepSnapshot>();
+    registry.registerArchetype<PackedStepSnapshotEntity>();
 
     registry.exportSingleton<WorldReset>(
         (uint32_t)ExportID::Reset);
@@ -535,8 +535,8 @@ void Sim::registerTypes(ECSRegistry &registry,
     registry.exportColumn<GameEventEntity, GameEvent>(
         ExportID::EventLog);
 
-    registry.exportColumn<EventStepStateEntity, EventStepState>(
-        ExportID::EventStepState);
+    registry.exportColumn<PackedStepSnapshotEntity, PackedStepSnapshot>(
+        ExportID::PackedStepSnapshot);
 }
 
 static inline void initWorld(Engine &ctx, bool triggered_reset)
@@ -3956,7 +3956,7 @@ inline void zoneMatchInfoSystem(Engine &ctx, MatchInfo &match_info)
           });
         }
 
-        writeEventStepState(ctx);
+        writePackedStepSnapshot(ctx);
       }
     }
 
@@ -4688,7 +4688,7 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
 
 #ifdef MADRONA_GPU_MODE
   queueSortByWorld<GameEventEntity>(builder, {});
-  queueSortByWorld<EventStepStateEntity>(builder, {});
+  queueSortByWorld<PackedStepSnapshotEntity>(builder, {});
 #endif
 }
 
@@ -4700,7 +4700,7 @@ static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
   builder.addToGraph<ClearTmpNode<GameEventEntity>>({});
-  builder.addToGraph<ClearTmpNode<EventStepStateEntity>>({});
+  builder.addToGraph<ClearTmpNode<PackedStepSnapshotEntity>>({});
 
   auto pvpGameplayLogic = [&](Span<const TaskGraphNodeID> deps) {
     if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
