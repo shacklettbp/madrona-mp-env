@@ -1038,6 +1038,12 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
     .playerShotEvents = {},
   };
 
+
+  i32 cur_capture_step = -1;
+  i32 cur_reload_step = -1;
+  i32 cur_kill_step = -1;
+  i32 cur_player_shot_step = -1;
+
   sqlite3_bind_int64(db.loadMatchStepPlayerSnapshots, 1, match_id);
   sqlite3_bind_int64(db.loadMatchStepMatchDataSnapshots, 1, match_id);
   sqlite3_bind_int64(db.loadMatchCaptureEvents, 1, match_id);
@@ -1045,23 +1051,41 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
   sqlite3_bind_int64(db.loadMatchKillEvents, 1, match_id);
   sqlite3_bind_int64(db.loadMatchPlayerShotEvents, 1, match_id);
 
-  i32 cur_capture_step = -1;
-  i32 cur_reload_step = -1;
-  i32 cur_kill_step = -1;
-  i32 cur_player_shot_step = -1;
-
   while (sqlite3_step(db.loadMatchStepMatchDataSnapshots) == SQLITE_ROW) {
     i32 step_idx = (i32)match_data.steps.size();
 
     AnalyticsStepSnapshot snapshot;
-    snapshot.captureEventsOffset = (u32)match_data.captureEvents.size();
-    snapshot.numCaptureEvents = cur_capture_step == step_idx ? 1 : 0;
-    snapshot.reloadEventsOffset = (u32)match_data.reloadEvents.size();
-    snapshot.numReloadEvents = cur_reload_step == step_idx ? 1 : 0;
-    snapshot.killEventsOffset = (u32)match_data.killEvents.size();
-    snapshot.numKillEvents = cur_kill_step == step_idx ? 1 : 0;
-    snapshot.playerShotEventsOffset = (u32)match_data.playerShotEvents.size();
-    snapshot.numPlayerShotEvents = cur_player_shot_step == step_idx ? 1 : 0;
+    if (cur_capture_step == step_idx) {
+      snapshot.captureEventsOffset = (u32)match_data.captureEvents.size() - 1;
+      snapshot.numCaptureEvents = 1;
+    } else {
+      snapshot.captureEventsOffset = (u32)match_data.captureEvents.size();
+      snapshot.numCaptureEvents = 0;
+    }
+
+    if (cur_reload_step == step_idx) {
+      snapshot.reloadEventsOffset = (u32)match_data.reloadEvents.size() - 1;
+      snapshot.numReloadEvents = 1;
+    } else {
+      snapshot.reloadEventsOffset = (u32)match_data.reloadEvents.size();
+      snapshot.numReloadEvents = 0;
+    }
+
+    if (cur_kill_step == step_idx) {
+      snapshot.killEventsOffset = (u32)match_data.killEvents.size() - 1;
+      snapshot.numKillEvents = 1;
+    } else {
+      snapshot.killEventsOffset = (u32)match_data.killEvents.size();
+      snapshot.numKillEvents = 0;
+    }
+
+    if (cur_player_shot_step == step_idx) {
+      snapshot.playerShotEventsOffset = (u32)match_data.playerShotEvents.size() - 1;
+      snapshot.numPlayerShotEvents = 1;
+    } else {
+      snapshot.playerShotEventsOffset = (u32)match_data.playerShotEvents.size();
+      snapshot.numPlayerShotEvents = 0;
+    }
 
     {
       int db_step_idx = sqlite3_column_int(db.loadMatchStepMatchDataSnapshots, 0);
@@ -1106,7 +1130,8 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
     match_data.steps.push_back(snapshot);
 
     if (cur_capture_step <= step_idx) {
-      while (sqlite3_step(db.loadMatchCaptureEvents) == SQLITE_ROW) {
+      int step_res;
+      while ((step_res = sqlite3_step(db.loadMatchCaptureEvents)) == SQLITE_ROW) {
         cur_capture_step = sqlite3_column_int(db.loadMatchCaptureEvents, 0);
         match_data.captureEvents.push_back({
           .zoneIDX = 
@@ -1125,10 +1150,15 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
           assert(false);
         }
       }
+
+      if (step_res == SQLITE_DONE) {
+        cur_capture_step = INT_MAX;
+      }
     }
 
     if (cur_reload_step <= step_idx) {
-      while (sqlite3_step(db.loadMatchReloadEvents) == SQLITE_ROW) {
+      int step_res;
+      while ((step_res = sqlite3_step(db.loadMatchReloadEvents)) == SQLITE_ROW) {
         cur_reload_step = sqlite3_column_int(db.loadMatchReloadEvents, 0);
         match_data.reloadEvents.push_back({
           .player = 
@@ -1145,10 +1175,15 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
           assert(false);
         }
       }
+
+      if (step_res == SQLITE_DONE) {
+        cur_reload_step = INT_MAX;
+      }
     }
 
     if (cur_kill_step <= step_idx) {
-      while (sqlite3_step(db.loadMatchKillEvents) == SQLITE_ROW) {
+      int step_res;
+      while ((step_res = sqlite3_step(db.loadMatchKillEvents)) == SQLITE_ROW) {
         cur_kill_step = sqlite3_column_int(db.loadMatchKillEvents, 0);
         match_data.killEvents.push_back({
           .killer = 
@@ -1165,10 +1200,15 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
           assert(false);
         }
       }
+
+      if (step_res == SQLITE_DONE) {
+        cur_kill_step = INT_MAX;
+      }
     }
 
     if (cur_player_shot_step <= step_idx) {
-      while (sqlite3_step(db.loadMatchPlayerShotEvents) == SQLITE_ROW) {
+      int step_res;
+      while ((step_res = sqlite3_step(db.loadMatchPlayerShotEvents)) == SQLITE_ROW) {
         cur_player_shot_step = sqlite3_column_int(db.loadMatchPlayerShotEvents, 0);
         match_data.playerShotEvents.push_back({
           .attacker = 
@@ -1184,6 +1224,10 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
         } else {
           assert(false);
         }
+      }
+
+      if (step_res == SQLITE_DONE) {
+        cur_player_shot_step = INT_MAX;
       }
     }
   }
@@ -1646,7 +1690,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   {
     int viz_match = db.currentVizMatch;
     ImGui::DragInt("Visualized Match", &viz_match,
-                   1, 0, db.numMatches - 1,
+                   1, 1, db.numMatches,
                    db.currentVizMatch == -1 ? "" : "%d",
                    ImGuiSliderFlags_AlwaysClamp);
 
@@ -1776,8 +1820,8 @@ static void analyticsBGThread(AnalyticsDB &db)
     };
 
 
-    for (int match_id = 0; match_id < db.numMatches; match_id++) {
-      FiltersMatchState match_states[2];
+    for (int match_id = 1; match_id <= db.numMatches; match_id++) {
+      std::array<FiltersMatchState, 2> match_states;
 
       AnalyticsMatchData match_data = loadMatchData(db, match_id);
 
@@ -1807,8 +1851,10 @@ static void analyticsBGThread(AnalyticsDB &db)
             for (int capture_event_offset = 0;
                  capture_event_offset < (int)step_snapshot.numCaptureEvents;
                  capture_event_offset++) {
-              int capture_event_idx = step_snapshot.captureEventsOffset + capture_event_offset;
-              GameEvent::Capture capture_event = match_data.captureEvents[capture_event_idx];
+              int capture_event_idx = step_snapshot.captureEventsOffset +
+                  capture_event_offset;
+              GameEvent::Capture capture_event =
+                  match_data.captureEvents[capture_event_idx];
 
               bool event_match = true;
 
@@ -1817,12 +1863,14 @@ static void analyticsBGThread(AnalyticsDB &db)
                 event_match = false;
               }
 
-              if (std::popcount(capture_event.inZoneMask) < capture_filter.minNumInZone) {
+              if (std::popcount(capture_event.inZoneMask) <
+                  capture_filter.minNumInZone) {
                 event_match = false;
               }
 
               if (event_match) {
-                FiltersMatchState &match_state = match_states[capture_event.captureTeam];
+                FiltersMatchState &match_state =
+                    match_states[capture_event.captureTeam];
                 match_state.active |= 1 << filter_idx;
                 match_state.lastMatches[filter_idx] = step_idx;
               }
