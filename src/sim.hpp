@@ -55,6 +55,8 @@ enum class ExportID : uint32_t {
     EventLog,
     PackedStepSnapshot,
 
+    FiltersStateObservation,
+
     NumExports,
 };
 
@@ -169,6 +171,9 @@ struct Sim : public madrona::WorldBase {
     TrainControl *trainControl;
 
     TrajectoryCurriculum trajectoryCurriculum;
+
+    std::array<FiltersMatchState, 2> filtersState;
+    std::array<int, 2> filtersLastMatchedStep;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

@@ -79,6 +79,7 @@ public:
     madrona::py::Tensor policyAssignmentTensor() const;
 
     madrona::py::Tensor selfObservationTensor() const;
+    madrona::py::Tensor filtersStateObservationTensor() const;
     madrona::py::Tensor teammateObservationsTensor() const;
     madrona::py::Tensor opponentObservationsTensor() const;
     madrona::py::Tensor opponentLastKnownObservationsTensor() const;

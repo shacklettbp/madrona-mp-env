@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "sim.hpp"
+#include "types.hpp"
 #include "utils.hpp"
 #include "level_gen.hpp"
 
@@ -115,6 +116,156 @@ static void writePackedStepSnapshot(Engine &ctx)
       player_state.flags |= u8(PackedPlayerStateFlags::Crouch);
     } else if (stand_state.curPose == Pose::Prone) {
       player_state.flags |= u8(PackedPlayerStateFlags::Prone);
+    }
+  }
+}
+
+static void updateFiltersState(Engine &ctx, u32 cur_step)
+{
+  std::array<AnalyticsFilter, 3> hardcoded_filters;
+  hardcoded_filters[0].type = AnalyticsFilterType::PlayerInRegion;
+  hardcoded_filters[0].playerInRegion.region = {
+    .min = { -1419, -841 },
+    .max = { -886, 823 },
+  };
+
+  hardcoded_filters[1].type = AnalyticsFilterType::PlayerInRegion;
+  hardcoded_filters[1].playerInRegion.region = {
+    .min = { 843, -742 },
+    .max = { 1289, 772 },
+  };
+
+  hardcoded_filters[2].type = AnalyticsFilterType::PlayerShotEvent;
+  hardcoded_filters[2].playerShotEvent = {};
+
+  constexpr int filter_match_window = 0;
+
+  for (int filter_idx = 0;
+       filter_idx < (int)hardcoded_filters.size();
+       filter_idx += 1) {
+    AnalyticsFilter &filter = hardcoded_filters[filter_idx];
+
+    for (int team_idx = 0; team_idx < 2; team_idx++) {
+      FiltersMatchState &filter_state = ctx.data().filtersState[team_idx];
+      if ((filter_state.active & (1 << filter_idx)) != 0) {
+        if (cur_step - filter_state.lastMatches[filter_idx] >
+            filter_match_window) {
+          filter_state.active &= ~(1 << filter_idx);
+        }
+      }
+    }
+
+    switch (filter.type) {
+    case AnalyticsFilterType::CaptureEvent: {
+      assert(false);
+    } break;
+    case AnalyticsFilterType::ReloadEvent: {
+      assert(false);
+    } break;
+    case AnalyticsFilterType::KillEvent: {
+      auto &kill_filter = filter.killEvent;
+
+      for (int player_idx = 0;
+           player_idx < (int)ctx.data().numAgents;
+           player_idx++) {
+        Entity agent = ctx.data().agents[player_idx];
+        int team = player_idx / ctx.data().pTeamSize;
+
+        Vector3 attacker_pos = ctx.get<Position>(agent);
+        const CombatState &combat_state = ctx.get<CombatState>(agent);
+
+        if (!combat_state.successfulKill) {
+          continue;
+        }
+
+        Entity killed = combat_state.landedShotOn;
+        Vector3 target_pos = ctx.get<Position>(killed);
+
+        if (attacker_pos.x < kill_filter.killerRegion.min.x ||
+            attacker_pos.y < kill_filter.killerRegion.min.y ||
+            attacker_pos.x > kill_filter.killerRegion.max.x ||
+            attacker_pos.y > kill_filter.killerRegion.max.y ||
+            target_pos.x < kill_filter.killedRegion.min.x ||
+            target_pos.y < kill_filter.killedRegion.min.y ||
+            target_pos.x > kill_filter.killedRegion.max.x ||
+            target_pos.y > kill_filter.killedRegion.max.y) {
+          continue;
+        }
+
+        FiltersMatchState &filter_state = ctx.data().filtersState[team];
+        filter_state.active |= 1 << filter_idx;
+        filter_state.lastMatches[filter_idx] = cur_step;
+      }
+    } break;
+    case AnalyticsFilterType::PlayerShotEvent: {
+      auto &shot_filter = filter.playerShotEvent;
+
+      for (int player_idx = 0;
+           player_idx < (int)ctx.data().numAgents;
+           player_idx++) {
+        Entity agent = ctx.data().agents[player_idx];
+        int team = player_idx / ctx.data().pTeamSize;
+
+        Vector3 attacker_pos = ctx.get<Position>(agent);
+        const CombatState &combat_state = ctx.get<CombatState>(agent);
+
+        if (combat_state.landedShotOn == Entity::none()) {
+          continue;
+        }
+
+        Entity target = combat_state.landedShotOn;
+        Vector3 target_pos = ctx.get<Position>(target);
+
+        if (attacker_pos.x < shot_filter.attackerRegion.min.x ||
+            attacker_pos.y < shot_filter.attackerRegion.min.y ||
+            attacker_pos.x > shot_filter.attackerRegion.max.x ||
+            attacker_pos.y > shot_filter.attackerRegion.max.y ||
+            target_pos.x < shot_filter.targetRegion.min.x ||
+            target_pos.y < shot_filter.targetRegion.min.y ||
+            target_pos.x > shot_filter.targetRegion.max.x ||
+            target_pos.y > shot_filter.targetRegion.max.y) {
+          continue;
+        }
+
+        FiltersMatchState &filter_state = ctx.data().filtersState[team];
+        filter_state.active |= 1 << filter_idx;
+        filter_state.lastMatches[filter_idx] = cur_step;
+      }
+    } break;
+    case AnalyticsFilterType::PlayerInRegion: {
+      auto &in_region_filter = filter.playerInRegion;
+
+      for (int player_idx = 0;
+           player_idx < (int)ctx.data().numAgents;
+           player_idx++) {
+        Entity agent = ctx.data().agents[player_idx];
+        int team = player_idx / ctx.data().pTeamSize;
+
+        Vector3 pos = ctx.get<Position>(agent);
+
+        if (pos.x < in_region_filter.region.min.x ||
+            pos.y < in_region_filter.region.min.y ||
+            pos.x > in_region_filter.region.max.x ||
+            pos.y > in_region_filter.region.max.y) {
+          continue;
+        }
+
+        FiltersMatchState &filter_state = ctx.data().filtersState[team];
+        filter_state.active |= 1 << filter_idx;
+        filter_state.lastMatches[filter_idx] = cur_step;
+      }
+
+    } break;
+    default: MADRONA_UNREACHABLE(); break;
+    }
+  }
+
+  for (int team = 0; team < 2; team++) {
+    int num_active_filters = 
+        std::popcount(ctx.data().filtersState[team].active);
+
+    if (num_active_filters == hardcoded_filters.size()) {
+      ctx.data().filtersLastMatchedStep[team] = cur_step;
     }
   }
 }
@@ -409,6 +560,8 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerComponent<OpponentMasks>();
         registry.registerSingleton<ZoneState>();
 
+        registry.registerComponent<FiltersStateObservation>();
+
         registry.registerArchetype<CamEntity>();
         registry.registerArchetype<PvPAgent>();
         registry.registerArchetype<ShotViz>();
@@ -468,6 +621,9 @@ void Sim::registerTypes(ECSRegistry &registry,
             (uint32_t)ExportID::Magazine);
         registry.exportColumn<PvPAgent, Alive>(
             (uint32_t)ExportID::Alive);
+
+        registry.exportColumn<PvPAgent, FiltersStateObservation>(
+            (u32)ExportID::FiltersStateObservation);
     } else if (cfg.task == Task::Explore) {
         registry.registerComponent<ExploreAction>();
 
@@ -626,6 +782,11 @@ static inline void initWorld(Engine &ctx, bool triggered_reset)
     }
 
     resetPersistentEntities(ctx, episode_rand_key);
+
+    for (int team = 0; team < 2; team++) {
+      ctx.data().filtersState[team].active = 0;
+      ctx.data().filtersLastMatchedStep[team] = 0;
+    }
 }
 
 inline void resetSystem(Engine &ctx, WorldReset &reset)
@@ -2315,8 +2476,19 @@ inline void pvpObservationsSystem(
     OpponentPositionObservations &opponent_pos_obs,
     OpponentLastKnownPositionObservations &opponent_last_known_pos_obs,
 
-    OpponentMasks &opponent_masks)
+    OpponentMasks &opponent_masks,
+    FiltersStateObservation &filters_state_obs)
 {
+  {
+    const MatchInfo &match_info = ctx.singleton<MatchInfo>();
+
+    if (match_info.curStep - ctx.data().filtersLastMatchedStep[team_info.team] < 5) {
+      filters_state_obs.filtersMatching = 1.f;
+    } else {
+      filters_state_obs.filtersMatching = 0.f;
+    }
+  }
+
   self_ob = {};
   self_pos_ob = {};
 
@@ -3915,6 +4087,8 @@ inline void zoneMatchInfoSystem(Engine &ctx, MatchInfo &match_info)
         cur_zone_stats.numSwaps += 1;
       }
 
+      updateFiltersState(ctx, cur_step);
+
       if (ctx.data().eventGlobalState && ctx.data().matchID != ~0_u64) {
         if (new_captured) {
           AABB zone_aabb = ctx.data().zones.bboxes[zone_state.curZone];
@@ -4613,7 +4787,8 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
             TeammatePositionObservations,
             OpponentPositionObservations,
             OpponentLastKnownPositionObservations,
-            OpponentMasks
+            OpponentMasks,
+            FiltersStateObservation
           >>({masks_sys});
 
         collect_obs = builder.addToGraph<ParallelForNode<Engine,
@@ -5288,6 +5463,11 @@ Sim::Sim(Engine &ctx,
 
     eventGlobalState = cfg.eventGlobalState;
     eventLoggedInStep = 0;
+
+    for (int team = 0; team < 2; team++) {
+      filtersState[team].active = 0;
+      filtersLastMatchedStep[team] = -1;
+    }
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, TaskConfig, Sim::WorldInit);

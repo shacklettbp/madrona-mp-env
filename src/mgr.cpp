@@ -537,6 +537,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
             copyFromSim(*buffers++, mgr.aliveTensor());
 
             copyFromSim(*buffers++, mgr.selfObservationTensor());
+            copyFromSim(*buffers++, mgr.filtersStateObservationTensor());
             copyFromSim(*buffers++, mgr.teammateObservationsTensor());
             copyFromSim(*buffers++, mgr.opponentObservationsTensor());
             copyFromSim(*buffers++, mgr.opponentLastKnownObservationsTensor());
@@ -2026,6 +2027,16 @@ Tensor Manager::selfObservationTensor() const
                                });
 }
 
+Tensor Manager::filtersStateObservationTensor() const
+{
+    return impl_->exportTensor(ExportID::FiltersStateObservation,
+                               TensorElementType::Float32,
+                               {
+                                   impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
+                                   sizeof(FiltersStateObservation) / sizeof(float),
+                               });
+}
+
 Tensor Manager::teammateObservationsTensor() const
 {
     static_assert(sizeof(TeammateObservations) == 
@@ -2379,6 +2390,7 @@ TrainInterface Manager::trainInterface() const
                     { "alive", aliveTensor().interface() },
 
                     { "self", selfObservationTensor().interface() },
+                    { "filters_state", filtersStateObservationTensor().interface() },
                     { "teammates", teammateObservationsTensor().interface() },
                     { "opponents", opponentObservationsTensor().interface() },
                     { "opponents_last_known", opponentLastKnownObservationsTensor().interface() },

@@ -250,77 +250,6 @@ enum class AnalyticsThreadCtrl : u32 {
   Exit,
 };
 
-struct AABB2D16 {
-  XYI16 min;
-  XYI16 max;
-};
-
-enum class AnalyticsFilterType : u32 {
-  CaptureEvent,
-  ReloadEvent,
-  KillEvent,
-  PlayerShotEvent,
-  PlayerInRegion,
-  NUM_TYPES,
-};
-
-struct CaptureEventFilter {
-  i32 minNumInZone = 1;
-  i32 zoneIDX = -1;
-};
-
-struct ReloadEventFilter {
-  i32 minNumBulletsAtReloadTime = 0;
-  i32 maxNumBulletsAtReloadTime = 100;
-};
-
-struct KillEventFilter {
-  AABB2D16 killerRegion = {
-    .min = { -32768, -32768 },
-    .max = { 32767, 32767 },
-  };
-
-  AABB2D16 killedRegion = {
-    .min = { -32768, -32768 },
-    .max = { 32767, 32767 },
-  };
-};
-
-struct PlayerShotEventFilter {
-  AABB2D16 attackerRegion = {
-    .min = { -32768, -32768 },
-    .max = { 32767, 32767 },
-  };
-
-  AABB2D16 targetRegion = {
-    .min = { -32768, -32768 },
-    .max = { 32767, 32767 },
-  };
-};
-
-struct PlayerInRegionFilter {
-  AABB2D16 region = {
-    .min = { -32768, -32768 },
-    .max = { 32767, 32767 },
-  };
-};
-
-struct AnalyticsFilter {
-  AnalyticsFilterType type;
-  union {
-    CaptureEventFilter captureEvent;
-    ReloadEventFilter reloadEvent;
-    KillEventFilter killEvent;
-    PlayerShotEventFilter playerShotEvent;
-    PlayerInRegionFilter playerInRegion;
-  };
-
-  inline AnalyticsFilter()
-    : type(),
-      captureEvent()
-  {}
-};
-
 struct FilterResult {
   i64 matchID;
   i64 teamID;
@@ -1813,12 +1742,6 @@ static void analyticsBGThread(AnalyticsDB &db)
     DynArray<FilterResult> results(1000);
 
     assert(filters.size() < 64);
-
-    struct FiltersMatchState {
-      u64 active = 0;
-      std::array<int, 64> lastMatches = {};
-    };
-
 
     for (int match_id = 1; match_id <= db.numMatches; match_id++) {
       std::array<FiltersMatchState, 2> match_states;

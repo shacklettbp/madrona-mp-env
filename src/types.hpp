@@ -535,6 +535,8 @@ struct EventLogGlobalState {
   u32 numStepStates;
 };
 
+
+
 enum class PackedPlayerStateFlags : u8 {
   None        = 0,
   FiredShot   = 1 << 1,
@@ -580,9 +582,86 @@ struct PackedStepSnapshotEntity : madrona::Archetype<
   PackedStepSnapshot
 > {};
 
+
+enum class AnalyticsFilterType : u32 {
+  CaptureEvent,
+  ReloadEvent,
+  KillEvent,
+  PlayerShotEvent,
+  PlayerInRegion,
+  NUM_TYPES,
+};
+
+struct CaptureEventFilter {
+  i32 minNumInZone = 1;
+  i32 zoneIDX = -1;
+};
+
+struct ReloadEventFilter {
+  i32 minNumBulletsAtReloadTime = 0;
+  i32 maxNumBulletsAtReloadTime = 100;
+};
+
 struct XYI16 {
   i16 x;
   i16 y;
+};
+
+struct AABB2D16 {
+  XYI16 min;
+  XYI16 max;
+};
+
+struct KillEventFilter {
+  AABB2D16 killerRegion = {
+    .min = { -32768, -32768 },
+    .max = { 32767, 32767 },
+  };
+
+  AABB2D16 killedRegion = {
+    .min = { -32768, -32768 },
+    .max = { 32767, 32767 },
+  };
+};
+
+struct PlayerShotEventFilter {
+  AABB2D16 attackerRegion = {
+    .min = { -32768, -32768 },
+    .max = { 32767, 32767 },
+  };
+
+  AABB2D16 targetRegion = {
+    .min = { -32768, -32768 },
+    .max = { 32767, 32767 },
+  };
+};
+
+struct PlayerInRegionFilter {
+  AABB2D16 region = {
+    .min = { -32768, -32768 },
+    .max = { 32767, 32767 },
+  };
+};
+
+struct AnalyticsFilter {
+  AnalyticsFilterType type;
+  union {
+    CaptureEventFilter captureEvent;
+    ReloadEventFilter reloadEvent;
+    KillEventFilter killEvent;
+    PlayerShotEventFilter playerShotEvent;
+    PlayerInRegionFilter playerInRegion;
+  };
+
+  constexpr inline AnalyticsFilter()
+    : type(),
+      captureEvent()
+  {}
+};
+
+struct FiltersMatchState {
+  u64 active = 0;
+  std::array<int, 64> lastMatches = {};
 };
 
 struct TeamConvexHull {
@@ -783,6 +862,10 @@ struct CamEntity : public madrona::Archetype<
     VizCamera
 > {};
 
+struct FiltersStateObservation {
+  float filtersMatching;
+};
+
 struct PvPAgent : public madrona::Archetype<
     // Basic components required for physics. Note that the current physics
     // implementation requires archetypes to have these components first
@@ -821,6 +904,7 @@ struct PvPAgent : public madrona::Archetype<
 
     // Observations
     SelfObservation,
+    FiltersStateObservation,
     TeammateObservations,
     OpponentObservations,
     OpponentLastKnownObservations,

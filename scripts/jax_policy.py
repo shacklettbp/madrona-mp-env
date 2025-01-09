@@ -895,6 +895,7 @@ def make_policy(dtype, scene_name, actions_cfg):
         decay = 0.99999,
         dtype = dtype,
         prep_fns = {
+            'filters_state': lambda x: x,
             'opponent_masks': lambda m: m,#m.astype(jnp.bool_),
 
             'self_pos': lambda x: x, #x.astype(dtype),
@@ -903,6 +904,7 @@ def make_policy(dtype, scene_name, actions_cfg):
             'opponent_last_known_positions': lambda x: x,# x.astype(dtype),
         },
         skip_normalization = {
+            'filters_state',
             'opponent_masks',
 
             'self_pos',
