@@ -536,8 +536,8 @@ CREATE INDEX idx_find_player_by_pos ON player_states (pos_x, pos_y);
       execResetStmt(db, insert_kill_event_stmt);
     } break;
     case EventType::PlayerShot: {
-      i16 attacker_id = lookupPlayerID(step_id, event.playerShot.attacker);
-      i16 target_id = lookupPlayerID(step_id, event.playerShot.target);
+      i64 attacker_id = lookupPlayerID(step_id, event.playerShot.attacker);
+      i64 target_id = lookupPlayerID(step_id, event.playerShot.target);
 
       sqlite3_bind_int64(insert_player_shot_event_stmt, 1, step_id);
       sqlite3_bind_int64(insert_player_shot_event_stmt, 2, attacker_id);

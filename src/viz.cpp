@@ -812,7 +812,7 @@ ORDER BY
   REQ_SQL(db.hdl, sqlite3_prepare_v2(db.hdl, R"(
 SELECT
   ms.step_idx, ps.pos_x, ps.pos_y, ps.pos_z, ps.yaw, ps.pitch,
-  ps.num_bullets, ps.is_reloading, ps.fired_shot,
+  ps.num_bullets, ps.is_reloading,
   ps.hp, ps.flags
 FROM match_steps AS ms
 INNER JOIN player_states AS ps ON 
@@ -1022,6 +1022,7 @@ static AnalyticsMatchData loadMatchData(AnalyticsDB &db, i64 match_id)
       assert(db_step_idx == step_idx);
     }
 
+    snapshot.matchData.step = (u16)step_idx;
     snapshot.matchData.curZone =
         sqlite3_column_int(db.loadMatchStepMatchDataSnapshots, 1);
 
@@ -1492,7 +1493,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
   ImGui::PushItemWidth(box_width);
   ImGui::DragInt("Time Window", &db.filterTimeWindow,
-                 1, 0, consts::episodeLen - 1, "%d",
+                 0.25f, 0, consts::episodeLen - 1, "%d",
                  ImGuiSliderFlags_AlwaysClamp);
   ImGui::PopItemWidth();
 
@@ -1563,7 +1564,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   ImGui::PushItemWidth(box_width);
   int result_idx = db.currentSelectedResult;
   ImGui::DragInt("Result Trajectory", &result_idx,
-                 1, 0, num_filter_results - 1,
+                 0.25f, 0, num_filter_results - 1,
                  num_filter_results == 0 ? "" :
                    (result_idx == -1 ? "" : "%d"),
                  ImGuiSliderFlags_AlwaysClamp);
@@ -1657,7 +1658,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
   ImGui::BeginDisabled(match_steps.size() == 0);
 
   ImGui::DragInt("Visualized Timestep", &db.currentVizMatchTimestep,
-                 1, 0, match_steps.size() - 1,
+                 0.5f, 0, match_steps.size() - 1,
                  db.currentVizMatchTimestep == -1 ? "" : "%d",
                  ImGuiSliderFlags_AlwaysClamp);
 
@@ -1745,10 +1746,20 @@ static void analyticsBGThread(AnalyticsDB &db)
 
     for (int match_id = 1; match_id <= db.numMatches; match_id++) {
       std::array<FiltersMatchState, 2> match_states;
+      std::array<FilterResult, 2> running_results;
 
       AnalyticsMatchData match_data = loadMatchData(db, match_id);
 
       int num_steps = (int)match_data.steps.size();
+
+      for (int team = 0; team < 2; team++) {
+        match_states[team].active = 0;
+
+        running_results[team].matchID = match_id;
+        running_results[team].teamID = team;
+        running_results[team].windowStart = -100;
+        running_results[team].windowEnd = -100;
+      }
 
       for (int step_idx = 0; step_idx < num_steps; step_idx++) {
         AnalyticsStepSnapshot step_snapshot = match_data.steps[step_idx];
@@ -1810,9 +1821,10 @@ static void analyticsBGThread(AnalyticsDB &db)
               GameEvent::Reload reload_event =
                   match_data.reloadEvents[reload_event_idx];
 
-              bool event_match =
-                  reload_event.numBulletsAtReloadTime <= reload_filter.maxNumBulletsAtReloadTime &&
-                  reload_event.numBulletsAtReloadTime >= reload_filter.minNumBulletsAtReloadTime;
+              bool event_match = reload_event.numBulletsAtReloadTime <=
+                                   reload_filter.maxNumBulletsAtReloadTime &&
+                                 reload_event.numBulletsAtReloadTime >=
+                                   reload_filter.minNumBulletsAtReloadTime;
 
               int team = reload_event.player / consts::maxTeamSize;
 
@@ -1867,7 +1879,7 @@ static void analyticsBGThread(AnalyticsDB &db)
             for (int shot_event_offset = 0;
                  shot_event_offset < (int)step_snapshot.numPlayerShotEvents;
                  shot_event_offset++) {
-              int shot_event_idx = step_snapshot.killEventsOffset +
+              int shot_event_idx = step_snapshot.playerShotEventsOffset +
                 shot_event_offset;
 
               GameEvent::PlayerShot shot_event =
@@ -1877,7 +1889,9 @@ static void analyticsBGThread(AnalyticsDB &db)
                   step_snapshot.playerData[shot_event.attacker];
 
               PackedPlayerSnapshot target_state =
-                  step_snapshot.playerData[shot_event.attacker];
+                  step_snapshot.playerData[shot_event.target];
+
+              assert((attacker_state.flags & (u8)PackedPlayerStateFlags::FiredShot) != 0); 
 
               bool event_match =
                   attacker_state.pos[0] >= shot_filter.attackerRegion.min.x &&
@@ -1935,9 +1949,9 @@ static void analyticsBGThread(AnalyticsDB &db)
             continue;
           }
 
-          int window_start = INT_MAX;
-          int window_end = -1;
-          for (int filter_idx = 0; filter_idx < filters.size(); filter_idx++) {
+          int window_start = match_state.lastMatches[0];
+          int window_end = window_start;
+          for (int filter_idx = 1; filter_idx < filters.size(); filter_idx++) {
             int filter_match_step = match_state.lastMatches[filter_idx];
 
             if (filter_match_step < window_start) {
@@ -1949,14 +1963,44 @@ static void analyticsBGThread(AnalyticsDB &db)
             }
           }
 
-          assert(window_start != INT_MAX && window_end != -1);
+          {
+            int filter_time_spread = window_end - window_start;
+            int extra_window = filter_match_window - filter_time_spread;
 
-          results.push_back({
-            .matchID = match_id,
-            .teamID = team_idx,
-            .windowStart = window_start,
-            .windowEnd = window_end,
-          });
+            window_start -= extra_window;
+            window_end += extra_window;
+          }
+
+          FilterResult &team_running_results = running_results[team_idx];
+
+          int running_window_start = team_running_results.windowStart;
+          int running_window_end = team_running_results.windowEnd;
+
+          if (window_start <= running_window_end + 1 &&
+              running_window_start <= window_end + 1) {
+            if (window_start < running_window_start) {
+              running_window_start = window_start;
+            }
+
+            if (window_end > running_window_end) {
+              running_window_end = window_end;
+            }
+
+            team_running_results.windowStart = running_window_start;
+            team_running_results.windowEnd = running_window_end;
+          } else {
+            if (team_running_results.windowStart != -100) {
+              results.push_back(team_running_results);
+            }
+            team_running_results.windowStart = window_start;
+            team_running_results.windowEnd = window_end;
+          }
+        }
+      }
+
+      for (int team = 0; team < 2; team++) {
+        if (running_results[team].windowStart != -100) {
+          results.push_back(running_results[team]);
         }
       }
     }

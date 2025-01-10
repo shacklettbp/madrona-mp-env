@@ -42,6 +42,7 @@ def load_match_state_for_step(step_id):
 
     return res.fetchone()
 
+
 for trajectory_idx in range(trajectories.shape[0]):
     for trajectory_offset in range(trajectories.shape[1]):
         step_id = trajectories[trajectory_idx, trajectory_offset]
