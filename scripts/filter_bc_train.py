@@ -194,6 +194,9 @@ def iter(train_state_mgr,
          bc_mb_rnn_starts):
     @jax.vmap
     def vmap_update(policy_state, train_state):
+        rnn_rnd, next_rnd = random.split(train_state.update_prng_key)
+        train_state = train_state.update(update_prng_key=next_rnd)
+
         def fwd_pass(params):
             fake_dones = jnp.zeros(bc_mb_rewards.shape, dtype=jnp.int32)
 
@@ -211,10 +214,17 @@ def iter(train_state_mgr,
             processed_obs = policy_state.obs_preprocess.preprocess(
                 policy_state.obs_preprocess_state, processed_obs, False)
 
+            rnn_starts = convert_rnn_states(
+                bc_mb_rnn_starts.reshape(-1, *bc_mb_rnn_starts.shape[2:]))
+
+            #rnn_starts = jax.tree.map(
+            #    lambda x: x + 0.1 * random.normal(
+            #        rnn_rnd, shape=x.shape, dtype=x.dtype),
+            #    rnn_starts)
+
             return policy_state.apply_fn(
                 { 'params': params, 'batch_stats': policy_state.batch_stats },
-                convert_rnn_states(
-                    bc_mb_rnn_starts.reshape(-1, *bc_mb_rnn_starts.shape[2:])),
+                rnn_starts,
                 reorder_input(fake_dones),
                 reorder_input(bc_mb_actions),
                 processed_obs,
