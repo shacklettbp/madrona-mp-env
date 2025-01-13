@@ -125,14 +125,14 @@ static void updateFiltersState(Engine &ctx, u32 cur_step)
   std::array<AnalyticsFilter, 3> hardcoded_filters;
   hardcoded_filters[0].type = AnalyticsFilterType::PlayerInRegion;
   hardcoded_filters[0].playerInRegion.region = {
-    .min = { -1419, -841 },
-    .max = { -886, 823 },
+    .min = { -1272, -866 },
+    .max = { -825, 696 },
   };
 
   hardcoded_filters[1].type = AnalyticsFilterType::PlayerInRegion;
   hardcoded_filters[1].playerInRegion.region = {
-    .min = { 843, -742 },
-    .max = { 1289, 772 },
+    .min = { 852, -851 },
+    .max = { 1280, 593 },
   };
 
   hardcoded_filters[2].type = AnalyticsFilterType::PlayerShotEvent;
