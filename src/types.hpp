@@ -641,6 +641,7 @@ struct PlayerInRegionFilter {
     .min = { -32768, -32768 },
     .max = { 32767, 32767 },
   };
+  i32 minNumInRegion = 1;
 };
 
 struct AnalyticsFilter {

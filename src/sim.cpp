@@ -124,15 +124,21 @@ static void updateFiltersState(Engine &ctx, u32 cur_step)
 {
   std::array<AnalyticsFilter, 3> hardcoded_filters;
   hardcoded_filters[0].type = AnalyticsFilterType::PlayerInRegion;
-  hardcoded_filters[0].playerInRegion.region = {
-    .min = { -1272, -866 },
-    .max = { -825, 696 },
+  hardcoded_filters[0].playerInRegion = {
+    .region = {
+      .min = { -1272, -866 },
+      .max = { -825, 696 },
+    },
+    .minNumInRegion = 5,
   };
 
   hardcoded_filters[1].type = AnalyticsFilterType::PlayerInRegion;
-  hardcoded_filters[1].playerInRegion.region = {
-    .min = { 852, -851 },
-    .max = { 1280, 593 },
+  hardcoded_filters[1].playerInRegion = {
+    .region = {
+      .min = { 852, -851 },
+      .max = { 1280, 593 },
+    },
+    .minNumInRegion = 1,
   };
 
   hardcoded_filters[2].type = AnalyticsFilterType::PlayerShotEvent;
@@ -235,6 +241,10 @@ static void updateFiltersState(Engine &ctx, u32 cur_step)
     case AnalyticsFilterType::PlayerInRegion: {
       auto &in_region_filter = filter.playerInRegion;
 
+      i32 num_in_region[2];
+      num_in_region[0] = 0;
+      num_in_region[1] = 0;
+
       for (int player_idx = 0;
            player_idx < (int)ctx.data().numAgents;
            player_idx++) {
@@ -250,11 +260,16 @@ static void updateFiltersState(Engine &ctx, u32 cur_step)
           continue;
         }
 
-        FiltersMatchState &filter_state = ctx.data().filtersState[team];
-        filter_state.active |= 1 << filter_idx;
-        filter_state.lastMatches[filter_idx] = cur_step;
+        num_in_region[team] += 1;
       }
 
+      for (int team = 0; team < 2; team++) {
+        if (num_in_region[team] >= in_region_filter.minNumInRegion) {
+          FiltersMatchState &filter_state = ctx.data().filtersState[team];
+          filter_state.active |= 1 << filter_idx;
+          filter_state.lastMatches[filter_idx] = cur_step;
+        }
+      }
     } break;
     default: MADRONA_UNREACHABLE(); break;
     }

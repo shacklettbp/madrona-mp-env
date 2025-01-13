@@ -1449,6 +1449,11 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
 
       aabbRegionSelector(&player_in_region.region, "Region");
 
+      ImGui::PushItemWidth(box_width);
+      ImGui::DragInt("Min Num In Region",
+                     &player_in_region.minNumInRegion, 0.5f,
+                     1, 6, "%d", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::PopItemWidth();
     } break;
     default: MADRONA_UNREACHABLE(); break;
     }
@@ -1932,6 +1937,8 @@ static void analyticsBGThread(AnalyticsDB &db)
             auto &in_region_filter = filter.playerInRegion;
 
             for (int team = 0; team < 2; team++) {
+              i32 num_in_region = 0;
+
               for (int team_offset = 0; team_offset < consts::maxTeamSize;
                    team_offset++) {
                 int player_idx = team * consts::maxTeamSize + team_offset;
@@ -1946,11 +1953,15 @@ static void analyticsBGThread(AnalyticsDB &db)
                     player_state.pos[1] <= in_region_filter.region.max.y;
 
                 if (player_match) {
-                  FiltersMatchState &match_state = match_states[team];
-                  match_state.active |= 1 << filter_idx;
-                  match_state.lastMatches[filter_idx] = step_idx;
-                  break;
+                  num_in_region += 1;
                 }
+              }
+
+              if (num_in_region >= in_region_filter.minNumInRegion) {
+                FiltersMatchState &match_state = match_states[team];
+                match_state.active |= 1 << filter_idx;
+                match_state.lastMatches[filter_idx] = step_idx;
+                break;
               }
             }
           } break;
