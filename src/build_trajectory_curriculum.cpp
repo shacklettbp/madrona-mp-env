@@ -112,17 +112,17 @@ int main(int argc, char *argv[])
   const i64 subsample = 20;
 
   i64 num_trajectories;
-  i64 *trajectory_steps = nullptr;
+  DumpItem *trajectory_steps = nullptr;
   {
-    i64 num_steps = fileNumElems.template operator()<i64>(trajectories_file);
+    i64 num_steps = fileNumElems.template operator()<DumpItem>(trajectories_file);
 
     assert(num_steps % trajectory_len == 0);
 
     num_trajectories = num_steps / trajectory_len;
 
-    trajectory_steps = (i64 *)malloc(sizeof(i64) * num_steps);
+    trajectory_steps = (DumpItem *)malloc(sizeof(DumpItem) * num_steps);
     trajectories_file.read(
-        (char *)trajectory_steps, sizeof(i64) * num_steps);
+        (char *)trajectory_steps, sizeof(DumpItem) * num_steps);
   }
 
   sqlite3_stmt *load_step_players_stmt = initLoadStepSnapshotStatement(db);
@@ -143,11 +143,11 @@ int main(int argc, char *argv[])
 
   for (i64 trajectory_idx = 0; trajectory_idx < num_trajectories;
        trajectory_idx++) {
-    i64 *trajectory_start = trajectory_steps + trajectory_idx * trajectory_len;
+    DumpItem *trajectory_start = trajectory_steps + trajectory_idx * trajectory_len;
 
     for (i64 trajectory_offset = 0; trajectory_offset < trajectory_len;
          trajectory_offset += subsample) {
-      i64 step_id = trajectory_start[trajectory_offset];
+      i64 step_id = trajectory_start[trajectory_offset].stepID;
 
       CurriculumSnapshot snapshot = loadCurriculumSnapshot(
           db, load_step_match_data_stmt, load_step_players_stmt, step_id);

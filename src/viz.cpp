@@ -1179,12 +1179,23 @@ static void dumpTrajectories(AnalyticsDB &db)
 
   assert(db.displayResults.has_value());
 
+  i32 num_dumped = 0;
+
   for (i32 result_idx = 0;
        result_idx < db.displayResults->size();
        result_idx++) {
     FilterResult result = (*db.displayResults)[result_idx];
 
     DynArray<i64> match_steps = loadMatchStepIDs(db, result.matchID);
+
+    HeapArray<DumpItem> traj_dump(match_steps.size());
+
+    for (i64 i = 0; i < traj_dump.size(); i++) {
+      traj_dump[i] = {
+        .stepID = match_steps[i],
+        .teamID = result.teamID,
+      };
+    }
 
     int window_start = result.windowStart;
     int window_end = result.windowEnd;
@@ -1208,14 +1219,18 @@ static void dumpTrajectories(AnalyticsDB &db)
       assert(cur_end - cur_traj_start == traj_len);
 
       db.trajectoriesOutFile.write(
-          (char *)(match_steps.data() + cur_traj_start),
-          traj_len * sizeof(i64));
+          (char *)(traj_dump.data() + cur_traj_start),
+          traj_len * sizeof(DumpItem));
+
+      num_dumped += 1;
 
       if (past_end > 0) {
         break;
       }
     }
   }
+
+  printf("Dumped %d\n", (int)num_dumped);
 }
 
 static void analyticsDBUI(Engine &ctx, VizState *viz)

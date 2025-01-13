@@ -142,6 +142,8 @@ CREATE TABLE match_steps (
   zone_steps_until_point INTEGER NOT NULL,
   num_events INTEGER NOT NULL,
   event_mask INTEGER NOT NULL,
+  world_id INTEGER NOT NULL,
+  global_idx INTEGER NOT NULL,
   
   UNIQUE(match_id, step_idx)
 );
@@ -239,9 +241,9 @@ VALUES
 INSERT INTO match_steps
   (match_id, step_idx,
    cur_zone, cur_zone_controller, zone_steps_remaining, zone_steps_until_point,
-   event_mask, num_events)
+   event_mask, num_events, world_id, global_idx)
 VALUES
-  (?, ?, ?, ?, ?, ?, ?, ?);
+  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 )", -1, &insert_match_step_stmt, nullptr));
 
   sqlite3_stmt *insert_team_state_stmt;
@@ -337,6 +339,8 @@ SELECT id FROM matches WHERE orig_id = ?
     sqlite3_bind_int(insert_match_step_stmt, 6, step.matchState.stepsUntilPoint);
     sqlite3_bind_int(insert_match_step_stmt, 7, step.eventMask);
     sqlite3_bind_int(insert_match_step_stmt, 8, step.numEvents);
+    sqlite3_bind_int(insert_match_step_stmt, 9, u32(step.matchID >> 32));
+    sqlite3_bind_int(insert_match_step_stmt, 10, i);
 
     execResetStmt(db, insert_match_step_stmt);
 

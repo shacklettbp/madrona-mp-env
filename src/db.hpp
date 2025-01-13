@@ -24,6 +24,11 @@ struct StepSnapshot {
   int curZoneController;
 };
 
+struct DumpItem {
+  i64 stepID;
+  i64 teamID;
+};
+
 sqlite3_stmt * initLoadStepSnapshotStatement(sqlite3 *db);
 sqlite3_stmt * initLoadMatchZoneStatement(sqlite3 *db);
 

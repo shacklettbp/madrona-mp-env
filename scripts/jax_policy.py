@@ -797,7 +797,7 @@ class MapCriticNet(nn.Module):
         )(obs_vec, train)
 
 
-def make_policy(dtype, scene_name, actions_cfg):
+def make_policy(dtype, actions_cfg):
     use_map_net = False
 
     if use_map_net:

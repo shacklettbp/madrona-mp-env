@@ -1381,7 +1381,6 @@ inline void hlBattleSystem(Engine &ctx,
 }
 
 inline void fireSystem(Engine &ctx,
-                       Entity firer,
                        Position &pos,
                        Rotation &rot,
                        Aim &aim,
@@ -4991,7 +4990,6 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
     } else {
       auto fire_sys = builder.addToGraph<ParallelForNode<Engine,
           fireSystem,
-              Entity,
               Position,
               Rotation,
               Aim,

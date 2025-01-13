@@ -23,6 +23,8 @@ from madrona_learn import (
 import madrona_mp_env
 from madrona_mp_env import Task, SimFlags
 
+import pickle
+
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument('--gpu-id', type=int, default=0)
 arg_parser.add_argument('--ckpt-dir', type=str, required=True)
@@ -272,7 +274,10 @@ cfg = TrainConfig(
     #custom_policy_ids = [-1],
 )
 
-policy = make_policy(dtype, args.scene, cfg.actions)
+with open("/tmp/t_cfg", 'wb') as f:
+    pickle.dump(cfg, f)
+
+policy = make_policy(dtype, cfg.actions)
 
 restore_ckpt = None
 if args.restore:

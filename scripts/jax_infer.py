@@ -47,6 +47,7 @@ arg_parser.add_argument('--fp16', action='store_true')
 arg_parser.add_argument('--bf16', action='store_true')
 
 arg_parser.add_argument('--full-team-policy', action='store_true')
+arg_parser.add_argument('--bc-dump-dir', type=str)
 
 args = arg_parser.parse_args()
 
@@ -70,7 +71,7 @@ actions_cfg = ActionsConfig(
     actions_num_buckets = [ 4, 8, 5, 5, 2, 2, 3 ],
 )
 
-policy = make_policy(dtype, args.scene, actions_cfg)
+policy = make_policy(dtype, actions_cfg)
 
 game_mode = getattr(Task, args.game_mode)
 
@@ -119,8 +120,17 @@ sim_fns = sim.jax(jax_gpu)
 
 total_num_swaps = np.zeros((4,), np.int32)
 
+if args.bc_dump_dir != None:
+    obs_files = {}
+    actions_file = open(f"{args.bc_dump_dir}/actions", 'wb')
+    actions_logits_file = open(f"{args.bc_dump_dir}/action_logits", 'wb')
+    rewards_file = open(f"{args.bc_dump_dir}/rewards", 'wb')
+    rnn_states_file = open(f"{args.bc_dump_dir}/rnn_states", 'wb')
+
 def host_cb(obs, actions, action_probs, values, dones, rewards, num_zone_swaps):
     global total_num_swaps
+
+    print(obs)
 
     total_num_swaps += num_zone_swaps
 
@@ -166,7 +176,25 @@ def print_step_cb():
     print("Step:", step_idx)
     step_idx += 1
 
+def dump_for_bc_cb(obs, actions, action_logits, rewards, rnn_states):
+    global obs_files
+    global actions_file
+    global actions_logits_file
+    global rewards_file
+    global rnn_states_file
+
+    for k, v in obs.items():
+        if k not in obs_files:
+            obs_files[k] = open(f"{args.bc_dump_dir}/{k}", 'wb')
+        np.asarray(v).tofile(obs_files[k])
+
+    np.asarray(actions).tofile(actions_file)
+    np.asarray(action_logits).tofile(actions_logits_file)
+    np.asarray(rewards).tofile(rewards_file)
+    np.asarray(rnn_states).tofile(rnn_states_file)
+
 def iter_cb(step_data):
+    print(step_data.keys())
     if args.record == None:
         cb = partial(jax.experimental.io_callback, host_cb, ())
 
@@ -195,6 +223,32 @@ def iter_cb(step_data):
     else:
         cb = partial(jax.experimental.io_callback, print_step_cb, ())
         cb()
+
+    if args.bc_dump_dir != None:
+        dump_for_bc_cb_host = partial(
+            jax.experimental.io_callback, dump_for_bc_cb, ())
+
+        dump_obs = step_data['obs']
+        dump_obs, _ = dump_obs.pop('agent_map')
+        dump_obs, _ = dump_obs.pop('unmasked_agent_map')
+
+        dump_rnn_states = step_data['rnn_states']
+        dump_rnn_states = jnp.permute_dims(jnp.asarray(dump_rnn_states), (3, 0, 1, 2, 4))
+
+        dump_actions_logits = jnp.concatenate(step_data['action_logits'], axis=-1)
+
+        dump_for_bc_cb_host(dump_obs,
+                            step_data['actions'],
+                            dump_actions_logits,
+                            step_data['rewards'],
+                            dump_rnn_states)
+
+    for k, v in step_data['obs'].items():
+        print(k, v.shape)
+
+    print('actions:', step_data['actions'].shape)
+    print('rnn_states:', jnp.asarray(step_data['rnn_states']).shape)
+    print('rewards:', step_data['rewards'].shape)
 
 if args.full_team_policy:
     eval_team_size = 1
