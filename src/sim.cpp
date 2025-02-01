@@ -840,7 +840,7 @@ inline void exploreMovementSystem(Engine &,
 inline void applyVelocitySystem(Engine &ctx,
                                 const Position &pos,
                                 const AgentVelocity &vel,
-                                StandState &stand_state,
+                                StandState &,
                                 IntermediateMoveState &move_state)
 {
     Vector3 x = pos;

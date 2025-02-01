@@ -233,7 +233,7 @@ struct AssetGroup {
   i32 numObjects;
 };
 
-struct FlyCamera {
+struct Camera {
   Vector3 position;
   Vector3 fwd;
   Vector3 up;
@@ -278,14 +278,14 @@ struct AnalyticsMatchData {
   DynArray<GameEvent::PlayerShot> playerShotEvents;
 };
 
-static FlyCamera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
+static Camera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
 {
   fwd = normalize(fwd);
   up = normalize(up);
   Vector3 right = normalize(cross(fwd, up));
   up = normalize(cross(right, fwd));
 
-  return FlyCamera {
+  return Camera {
     .position = pos,
     .fwd = fwd,
     .up = up,
@@ -393,7 +393,7 @@ struct VizState {
   i32 simTickRate;
   bool doAI[2];
 
-  /*FlyCamera flyCam = {
+  /*Camera flyCam = {
     .position = {202.869324, 211.050766, 716.584534},
     .fwd = {0.592786, 0.093471, -0.799917},
     .up = {0.790154, 0.124592, 0.600111},
@@ -403,11 +403,11 @@ struct VizState {
 	  //.position = {},
 	  //.fwd = {}
 
-  FlyCamera flyCam = initCam({79, 143, 4307},
+  Camera flyCam = initCam({79, 143, 4307},
 	                           {0.0f,-0.05f, -1.00f},
                              {0, 1, -0.02f});
   
-  //FlyCamera flyCam = initCam({43000, 8500, 4500},
+  //Camera flyCam = initCam({43000, 8500, 4500},
 	//                           {0.2f,0.0f, -0.9f},
   //                           {0, 1, -0.02f});
 
@@ -1468,7 +1468,7 @@ static void analyticsDBUI(Engine &ctx, VizState *viz)
     const UserInputEvents &input_events = viz->ui->inputEvents();
 
     if (input_events.downEvent(InputID::MouseLeft)) {
-      FlyCamera cam = viz->flyCam;
+      Camera cam = viz->flyCam;
       Vector2 mouse_pos = input.mousePosition();
 
       float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
@@ -2359,7 +2359,7 @@ void initWorld(Context &ctx, VizState *viz)
 
 static void handleCamera(VizState *viz, float delta_t)
 {
-  FlyCamera &cam = viz->flyCam;
+  Camera &cam = viz->flyCam;
 
   Vector3 translate = Vector3::zero();
 
@@ -2811,7 +2811,7 @@ static int32_t numDigits(uint32_t x)
   return (x + table[idx]) >> 32;
 }
 
-static void flyCamUI(FlyCamera &cam)
+static void flyCamUI(Camera &cam)
 {
   auto side_size = ImGui::CalcTextSize(" Bottom " );
   side_size.y *= 1.4f;
@@ -3200,11 +3200,12 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   return ctx;
 }
 
-static void setupViewData(Engine &ctx, VizState *viz, GlobalPassData *out)
+static void setupViewData(Engine &ctx,
+                          const Camera &cam,
+                          VizState *viz,
+                          GlobalPassData *out)
 {
   (void)ctx;
-
-  const FlyCamera &cam = viz->flyCam;
 
   float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
 
@@ -3732,7 +3733,38 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     GlobalPassData *global_param_staging_ptr =
       (GlobalPassData *)global_param_staging.ptr;
 
-    setupViewData(ctx, viz, global_param_staging_ptr);
+    Camera cam;
+    {
+      if (viz->curView == 0) {
+        cam = viz->flyCam;
+      } else {
+        Entity agent = ctx.data().agents[viz->curView - 1];
+
+        Vector3 pos = ctx.get<Position>(agent);
+        Aim aim = ctx.get<Aim>(agent);
+
+        StandState stand_state = ctx.get<StandState>(agent);
+
+        if (stand_state.curPose == Pose::Stand) {
+          pos.z += consts::standHeight;
+        } else if (stand_state.curPose == Pose::Crouch) {
+          pos.z += consts::crouchHeight;
+        } else if (stand_state.curPose == Pose::Prone) {
+          pos.z += consts::proneHeight;
+        }
+
+        pos.z -= 0.9f * consts::agentRadius;
+
+        cam = {
+          .position = pos,
+          .fwd = aim.rot.rotateVec(math::fwd),
+          .up = aim.rot.rotateVec(math::up),
+          .right = aim.rot.rotateVec(math::right),
+        };
+      }
+    }
+
+    setupViewData(ctx, cam, viz, global_param_staging_ptr);
 
     copy_enc.copyBufferToBuffer(
         global_param_staging.buffer, viz->globalPassDataBuffer,
