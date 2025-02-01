@@ -166,14 +166,17 @@ struct ExploreAction {
     int32_t mantle;
 };
 
-struct PvPAction {
+struct PvPDiscreteAction {
     int32_t moveAmount; // [0, 2]
     int32_t moveAngle; // [0, 7]
-    int32_t yawRotate; // [-2, 2]
-    int32_t pitchRotate; // [-2, 2]
     int32_t fire;
     int32_t reload;
     int32_t stand; // [0, 1, 2]
+};
+
+struct PvPAimAction {
+    float yaw;
+    float pitch;
 };
 
 struct HardcodedBotAction {
@@ -900,7 +903,8 @@ struct PvPAgent : public madrona::Archetype<
     ExploreTracker,
 
     // Input
-    PvPAction,
+    PvPDiscreteAction,
+    PvPAimAction,
     CoarsePvPAction,
     HardcodedBotAction,
 
@@ -977,7 +981,7 @@ struct FullTeamID {
 };
 
 struct FullTeamActions {
-  PvPAction actions[consts::maxTeamSize];
+  PvPDiscreteAction actions[consts::maxTeamSize];
 };
 
 struct FullTeamZoneObservation {

@@ -560,7 +560,8 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerComponent<Teammates>();
         registry.registerComponent<Opponents>();
         registry.registerComponent<OpponentsVisibility>();
-        registry.registerComponent<PvPAction>();
+        registry.registerComponent<PvPDiscreteAction>();
+        registry.registerComponent<PvPAimAction>();
         registry.registerComponent<CoarsePvPAction>();
         registry.registerComponent<HardcodedBotAction>();
 
@@ -585,10 +586,12 @@ void Sim::registerTypes(ECSRegistry &registry,
 
         if (cfg.highlevelMove) {
             registry.exportColumn<PvPAgent, CoarsePvPAction>(
-                (uint32_t)ExportID::PvPAction);
+                (uint32_t)ExportID::PvPDiscreteAction);
         } else {
-            registry.exportColumn<PvPAgent, PvPAction>(
-                (uint32_t)ExportID::PvPAction);
+            registry.exportColumn<PvPAgent, PvPDiscreteAction>(
+                (uint32_t)ExportID::PvPDiscreteAction);
+            registry.exportColumn<PvPAgent, PvPAimAction>(
+                (uint32_t)ExportID::PvPAimAction);
         }
 
         registry.exportColumn<PvPAgent, SelfObservation>(
@@ -1351,7 +1354,7 @@ inline void fireSystem(Engine &ctx,
                        Position &pos,
                        Rotation &rot,
                        Aim &aim,
-                       PvPAction &action,
+                       PvPDiscreteAction &action,
                        const Opponents &opponents,
                        Magazine &magazine,
                        const TeamInfo &team_info,
@@ -2014,7 +2017,8 @@ inline void destroyShotVizSystem(Engine &ctx,
 
 inline void applyBotActionsSystem(Engine &ctx,
                                   HardcodedBotAction hardcoded,
-                                  PvPAction &out,
+                                  PvPDiscreteAction &out_discrete,
+                                  PvPAimAction &out_aim,
                                   AgentPolicy policy)
 {
   (void)ctx;
@@ -2022,19 +2026,32 @@ inline void applyBotActionsSystem(Engine &ctx,
     return;
   }
 
-  out = {
+  out_discrete = {
     .moveAmount = hardcoded.moveAmount,
     .moveAngle = hardcoded.moveAngle,
-    .yawRotate = hardcoded.yawRotate,
-    .pitchRotate = hardcoded.pitchRotate,
     .fire = hardcoded.fire,
     .reload = hardcoded.reload,
     .stand = hardcoded.stand,
   };
+
+  constexpr float discrete_turn_delta = discreteTurnDelta();
+  int32_t discrete_yaw_rotate = hardcoded.yawRotate;
+  int32_t discrete_pitch_rotate = hardcoded.pitchRotate;
+
+  float t_z =
+      discrete_turn_delta * (discrete_yaw_rotate - consts::numTurnBuckets / 2);
+
+  float t_x =
+      discrete_turn_delta * (discrete_pitch_rotate - consts::numTurnBuckets / 2);
+
+  out_aim = {
+    .yaw = t_z,
+    .pitch = t_x,
+  }
 }
 
 inline void pvpMovementSystem(Engine &,
-                              PvPAction &action, 
+                              PvPDiscreteAction &action, 
                               const Rotation &rot,
                               AgentVelocity &vel,
                               const Alive &alive,
@@ -2086,7 +2103,6 @@ inline void pvpMovementSystem(Engine &,
   } else if (stand_state.curPose == Pose::Prone) {
     move_accel_max = 50;
   }
-  
 
   float move_amount = discrete_move_amount *
       (move_accel_max / (consts::numMoveAmountBuckets - 1));
@@ -2150,6 +2166,15 @@ inline void coarseMovementSystem(
     CombatState &combat_state,
     const StandState &stand_state)
 {
+  (void)action;
+  (void)rot;
+  (void)aim;
+  (void)vel;
+  (void)alive;
+  (void)combat_state;
+  (void)stand_state;
+
+#if 0
     if (alive.mask == 0.f) {
         return;
     }
@@ -2193,10 +2218,11 @@ inline void coarseMovementSystem(
     aim = computeAim(aim.yaw, aim.pitch);
 
     rot = Quat::angleAxis(aim.yaw, math::up).normalize();
+#endif
 }
 
 inline void pvpTurnSystem(Engine &,
-                          PvPAction action,
+                          PvPAimAction action,
                           Rotation &rot,
                           Aim &aim,
                           const Alive &alive)
@@ -2205,18 +2231,8 @@ inline void pvpTurnSystem(Engine &,
         return;
     }
 
-    constexpr float discrete_turn_delta = discreteTurnDelta();
-    int32_t discrete_yaw_rotate = action.yawRotate;
-    int32_t discrete_pitch_rotate = action.pitchRotate;
-
-    float t_z =
-        discrete_turn_delta * (discrete_yaw_rotate - consts::numTurnBuckets / 2);
-
-    float t_x =
-        discrete_turn_delta * (discrete_pitch_rotate - consts::numTurnBuckets / 2);
-
-    aim.yaw += t_z * consts::deltaT;
-    aim.pitch += t_x * consts::deltaT;
+    aim.yaw += action.yaw * consts::deltaT;
+    aim.pitch += action.pitch * consts::deltaT;
 
     aim = computeAim(aim.yaw, aim.pitch);
 
@@ -4456,6 +4472,13 @@ void readFullTeamActionsPolicies(Engine &ctx,
                                  const FullTeamActions &actions,
                                  FullTeamPolicy team_policy)
 {
+  assert(false);
+  (void)ctx;
+  (void)team_idx;
+  (void)actions;
+  (void)team_policy;
+
+#if 0
   i32 team_agent_offset = 0;
 
   for (i32 i = 0; i < (i32)ctx.data().numAgents; i++) {
@@ -4471,6 +4494,7 @@ void readFullTeamActionsPolicies(Engine &ctx,
 
     team_agent_offset += 1;
   }
+#endif
 }
 
 namespace {
@@ -4898,7 +4922,8 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
     builder.addToGraph<ParallelForNode<Engine,
         applyBotActionsSystem,
             HardcodedBotAction,
-            PvPAction,
+            PvPDiscreteAction,
+            PvPAimAction,
             AgentPolicy
         >>({});
 
@@ -4989,7 +5014,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
               Position,
               Rotation,
               Aim,
-              PvPAction,
+              PvPDiscreteAction,
               Opponents,
               Magazine,
               TeamInfo,

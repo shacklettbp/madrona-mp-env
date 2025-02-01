@@ -15,7 +15,8 @@ class Engine;
 enum class ExportID : uint32_t {
     Reset,
     ExploreAction,
-    PvPAction,
+    PvPDiscreteAction,
+    PvPAimAction,
     Reward,
     Done,
     MatchResult,
