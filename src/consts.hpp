@@ -20,7 +20,10 @@ inline constexpr float standHeight = 65.f;
 inline constexpr float crouchHeight = 47.f;
 inline constexpr float proneHeight = 30.f;
 
-inline constexpr float maxVelocity = 200.f;
+inline constexpr float maxRunVelocity = 200.f;
+inline constexpr float maxWalkVelocity = 30.f;
+inline constexpr float maxCrouchVelocity = 5.f;
+inline constexpr float maxProneVelocity = 1.f;
 inline constexpr float deaccelerateRate = 1000.f;
 
 //inline constexpr float accuracyScale = 0.08f;
@@ -41,7 +44,7 @@ inline constexpr float slackReward = -0.005f;
 inline constexpr int32_t episodeLen = 1800; //240;//1800; // 400;
 
 // How many discrete options for actions
-inline constexpr madrona::CountT numMoveAmountBuckets = 4;
+inline constexpr madrona::CountT numMoveAmountBuckets = 3;
 inline constexpr madrona::CountT numMoveAngleBuckets = 8;
 inline constexpr madrona::CountT numTurnBuckets = 5;
 inline constexpr madrona::CountT numFacingBuckets = 16;

@@ -68,7 +68,7 @@ else:
     dtype= jnp.float32
 
 actions_cfg = ActionsConfig(
-    actions_num_buckets = [ 4, 8, 5, 5, 2, 2, 3 ],
+    actions_num_buckets = [ 3, 8, 5, 5, 2, 2, 3 ],
 )
 
 policy = make_policy(dtype, actions_cfg)

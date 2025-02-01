@@ -245,7 +245,7 @@ cfg = TrainConfig(
     num_agents_per_world = num_agents_per_world,
     num_updates = args.num_updates,
     actions = ActionsConfig(
-        actions_num_buckets = [ 4, 8, 5, 5, 2, 2, 3 ],
+        actions_num_buckets = [ 3, 8, 5, 5, 2, 2, 3 ],
     ),
     steps_per_update = args.steps_per_update,
     num_bptt_chunks = args.num_bptt_chunks,

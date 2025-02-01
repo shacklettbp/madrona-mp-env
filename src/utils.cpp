@@ -862,6 +862,12 @@ void spawnAgents(Engine &ctx, bool is_respawn)
             .transitionRemaining = 0,
         };
 
+        ctx.get<IntermediateMoveState>(spawning_agent) = {
+          .newPosition = ctx.get<Position>(spawning_agent),
+          .newVelocity = Vector3::zero(),
+          .maxVelocity = consts::maxWalkVelocity,
+        };
+
         alive.mask = 1.f;
     }
 

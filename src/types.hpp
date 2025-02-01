@@ -167,7 +167,7 @@ struct ExploreAction {
 };
 
 struct PvPAction {
-    int32_t moveAmount; // [0, 3]
+    int32_t moveAmount; // [0, 2]
     int32_t moveAngle; // [0, 7]
     int32_t yawRotate; // [-2, 2]
     int32_t pitchRotate; // [-2, 2]
@@ -436,6 +436,7 @@ struct AgentVelocity : madrona::math::Vector3 {
 struct IntermediateMoveState {
     Vector3 newPosition;
     Vector3 newVelocity;
+    float maxVelocity;
 };
 
 struct HP {

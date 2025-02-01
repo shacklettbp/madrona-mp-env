@@ -826,66 +826,18 @@ inline void resetSystem(Engine &ctx, WorldReset &reset)
     } 
 }
 
-static inline void processMoveAction(int32_t discrete_move_amount,
-                                     int32_t discrete_move_angle,
-                                     int32_t discrete_rotate,
-                                     Quat cur_rot,
-                                     Velocity &vel)
-{
-    constexpr float move_max = 5000;
-    constexpr float turn_max = 320;
-
-    float move_amount = discrete_move_amount *
-        (move_max / (consts::numMoveAmountBuckets - 1));
-
-    constexpr float move_angle_per_bucket =
-        2.f * math::pi / float(consts::numMoveAngleBuckets);
-
-    float move_angle = float(discrete_move_angle) * move_angle_per_bucket;
-
-    float f_x = move_amount * sinf(move_angle);
-    float f_y = move_amount * cosf(move_angle);
-
-    constexpr float turn_delta_per_bucket = 
-        turn_max / (consts::numTurnBuckets / 2);
-    float t_z =
-        turn_delta_per_bucket * (discrete_rotate - consts::numTurnBuckets / 2);
-
-    vel.linear = cur_rot.rotateVec({ f_x, f_y, 0 }) * consts::deltaT;
-    vel.angular = Vector3 { 0, 0, t_z } * consts::deltaT;
-}
-
 // Provide forces for entities which are controlled by actions (the two agents in this case).
 inline void exploreMovementSystem(Engine &,
-                                  ExploreAction &action, 
-                                  Rotation &rot,
-                                  Velocity &vel)
+                                  ExploreAction &, 
+                                  Rotation &,
+                                  Velocity &)
 {
-    processMoveAction(action.moveAmount, action.moveAngle, action.rotate,
-                      rot, vel);
-}
-
-inline void deaccelerateSystem(Engine &,
-                               AgentVelocity &vel)
-{
-    Vector3 v = vel;
-    float vlen = v.length();
-
-    if (vlen == 0.f) {
-        return;
-    }
-
-    Vector3 norm_v = v / vlen;
-
-    vlen -= consts::deaccelerateRate * consts::deltaT;
-    vlen = fmaxf(0.f, vlen);
-
-    vel = norm_v * vlen;
 }
 
 inline void applyVelocitySystem(Engine &ctx,
                                 const Position &pos,
                                 const AgentVelocity &vel,
+                                StandState &stand_state,
                                 IntermediateMoveState &move_state)
 {
     Vector3 x = pos;
@@ -901,7 +853,6 @@ inline void applyVelocitySystem(Engine &ctx,
     }
 
     Vector3 v_norm = v / v_len;
-    v_len = fminf(v_len, consts::maxVelocity);
 
     float move_dist = v_len * consts::deltaT;
 
@@ -979,6 +930,7 @@ inline void applyVelocitySystem(Engine &ctx,
 
     move_state.newPosition = x + to_new_pos * to_new_dist;
     move_state.newVelocity = Vector3::zero();
+
 }
 
 inline void updateMoveStateSystem(
@@ -2081,72 +2033,111 @@ inline void applyBotActionsSystem(Engine &ctx,
   };
 }
 
-inline void pvpStandSystem(Engine &,
-                           PvPAction action,
-                           StandState &stand_state,
-                           const Alive alive)
-{
-    if (alive.mask == 0.f) {
-        return;
-    }
-
-    if (stand_state.transitionRemaining > 0) {
-        stand_state.transitionRemaining -= 1;
-
-        if (stand_state.transitionRemaining == 0) {
-            stand_state.curPose = stand_state.tgtPose;
-        }
-    }
-
-    Pose action_pose = (Pose)action.stand;
-
-    if (action_pose != stand_state.tgtPose) {
-        stand_state.tgtPose = action_pose;
-
-        int dst_to_tgt = abs((int)stand_state.tgtPose - (int)stand_state.curPose);
-        stand_state.transitionRemaining = dst_to_tgt * (
-            consts::poseTransitionSpeed / 2);
-    }
-}
-
 inline void pvpMovementSystem(Engine &,
                               PvPAction &action, 
                               const Rotation &rot,
                               AgentVelocity &vel,
                               const Alive &alive,
                               CombatState &combat_state,
-                              const StandState &stand_state)
+                              StandState &stand_state,
+                              IntermediateMoveState &move_state)
 {
-    if (alive.mask == 0.f) {
-        return;
+  if (alive.mask == 0.f) {
+      return;
+  }
+
+  Vector3 v = vel;
+  float v_len = v.length();
+
+  if (v_len > 0.f) {
+    Vector3 norm_v = v / v_len;
+
+    v_len -= consts::deaccelerateRate * consts::deltaT;
+    v_len = fmaxf(0.f, v_len);
+
+    vel = norm_v * v_len;
+  }
+
+  if (stand_state.transitionRemaining > 0) {
+    stand_state.transitionRemaining -= 1;
+
+    if (stand_state.transitionRemaining == 0) {
+      stand_state.curPose = stand_state.tgtPose;
+    }
+  }
+
+  Pose action_pose = (Pose)action.stand;
+
+  if (action_pose != stand_state.tgtPose) {
+    stand_state.tgtPose = action_pose;
+
+    int dst_to_tgt =
+        abs((int)stand_state.tgtPose - (int)stand_state.curPose);
+    stand_state.transitionRemaining = dst_to_tgt * (
+        consts::poseTransitionSpeed / 2);
+  }
+
+  int32_t discrete_move_amount = action.moveAmount;
+  int32_t discrete_move_angle = action.moveAngle;
+
+  float move_accel_max = 3000;
+  if (stand_state.curPose == Pose::Crouch) {
+    move_accel_max = 100;
+  } else if (stand_state.curPose == Pose::Prone) {
+    move_accel_max = 50;
+  }
+  
+
+  float move_amount = discrete_move_amount *
+      (move_accel_max / (consts::numMoveAmountBuckets - 1));
+
+  constexpr float move_angle_per_bucket =
+      2.f * math::pi / float(consts::numMoveAngleBuckets);
+
+  float move_angle = float(discrete_move_angle) * move_angle_per_bucket;
+
+  float f_x = move_amount * sinf(move_angle);
+  float f_y = move_amount * cosf(move_angle);
+
+  vel += rot.rotateVec({ f_x, f_y, 0 }) * consts::deltaT;
+
+  if (move_amount != 0) {
+      combat_state.remainingRespawnSteps = 0;
+  }
+
+  v_len = vel.length();
+  if (v_len == 0.f) {
+    return;
+  }
+
+  {
+    constexpr float max_vel_change_rate = 10.f;
+    float tgt_max_vel;
+    if (stand_state.curPose == Pose::Stand) {
+      if (move_amount == 2) {
+        tgt_max_vel =  consts::maxRunVelocity;
+      } else {
+        tgt_max_vel = consts::maxWalkVelocity;
+      }
+    } else if (stand_state.curPose == Pose::Crouch) {
+      tgt_max_vel = consts::maxCrouchVelocity;
+    } else {
+      tgt_max_vel = consts::maxProneVelocity;
     }
 
-    int32_t discrete_move_amount = action.moveAmount;
-    int32_t discrete_move_angle = action.moveAngle;
+    float max_vel_diff = tgt_max_vel - move_state.maxVelocity;
+    float max_vel_adjust = fmaxf(fminf(max_vel_diff, max_vel_change_rate),
+                                 -max_vel_change_rate);
 
-    float move_max = 5000;
-    if (stand_state.curPose == Pose::Crouch) {
-        move_max = 1000;
-    } else if (stand_state.curPose == Pose::Prone) {
-        move_max = 100;
-    }
+    move_state.maxVelocity += max_vel_adjust;
+  }
 
-    float move_amount = discrete_move_amount *
-        (move_max / (consts::numMoveAmountBuckets - 1));
+  v_len = fminf(v_len, move_state.maxVelocity);
 
-    constexpr float move_angle_per_bucket =
-        2.f * math::pi / float(consts::numMoveAngleBuckets);
+  Vector3 v_norm = vel / v_len;
 
-    float move_angle = float(discrete_move_angle) * move_angle_per_bucket;
 
-    float f_x = move_amount * sinf(move_angle);
-    float f_y = move_amount * cosf(move_angle);
-
-    vel += rot.rotateVec({ f_x, f_y, 0 }) * consts::deltaT;
-
-    if (move_amount != 0) {
-        combat_state.remainingRespawnSteps = 0;
-    }
+  vel = v_norm * v_len;
 }
 
 inline void coarseMovementSystem(
@@ -4926,18 +4917,6 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 
         move_finished_sys = move_sys;
     } else {
-        auto deaccelerate = builder.addToGraph<ParallelForNode<Engine,
-            deaccelerateSystem,
-                AgentVelocity
-            >>(deps);
-
-        auto stand_sys = builder.addToGraph<ParallelForNode<Engine,
-            pvpStandSystem,
-                PvPAction,
-                StandState,
-                Alive 
-            >>({deaccelerate});
-
         auto move_sys = builder.addToGraph<ParallelForNode<Engine,
             pvpMovementSystem,
                 PvPAction,
@@ -4945,8 +4924,9 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 AgentVelocity,
                 Alive,
                 CombatState,
-                StandState
-            >>({stand_sys});
+                StandState,
+                IntermediateMoveState
+            >>(deps);
 
         auto turn_sys = builder.addToGraph<ParallelForNode<Engine,
             pvpTurnSystem,
@@ -4963,6 +4943,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
         applyVelocitySystem,
             Position,
             AgentVelocity,
+            StandState,
             IntermediateMoveState
         >>({move_finished_sys});
 
