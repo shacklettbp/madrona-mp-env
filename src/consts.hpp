@@ -20,8 +20,8 @@ inline constexpr float standHeight = 65.f;
 inline constexpr float crouchHeight = 47.f;
 inline constexpr float proneHeight = 30.f;
 
-inline constexpr float maxRunVelocity = 200.f;
-inline constexpr float maxWalkVelocity = 30.f;
+inline constexpr float maxRunVelocity = 400.f;
+inline constexpr float maxWalkVelocity = 200.f;
 inline constexpr float maxCrouchVelocity = 5.f;
 inline constexpr float maxProneVelocity = 1.f;
 inline constexpr float deaccelerateRate = 1000.f;

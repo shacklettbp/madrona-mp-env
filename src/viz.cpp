@@ -2124,7 +2124,7 @@ VizState * init(const VizConfig &cfg)
   viz->doAI[0] = cfg.doAITeam1;
   viz->doAI[1] = cfg.doAITeam2;
 
-  viz->simTickRate = 0;
+  viz->simTickRate = 20;
 
   viz->globalParamBlockType = gpu->createParamBlockType({
     .uuid = "global_pb"_to_uuid,
@@ -2437,7 +2437,8 @@ float smoothStep(int step, int range)
     return (3.0f - 2.0f * t) * t * t;
 }
 
-static std::vector<PvPAction> actions;
+static std::vector<PvPDiscreteAction> actions;
+static std::vector<PvPAimAction> aimActions;
 void planAI(Engine& ctx, VizState* viz, int world, int player)
 {
   if (actions.empty())
@@ -2551,14 +2552,17 @@ void planAI(Engine& ctx, VizState* viz, int world, int player)
   if (f)
       r_yaw = 2;
 
-  actions[world * viz->numViews + player] = PvPAction{
+  actions[world * viz->numViews + player] = PvPDiscreteAction{
     .moveAmount = move_amount,
     .moveAngle = move_angle,
-    .yawRotate = r_yaw,
-    .pitchRotate = r_pitch,
     .fire = f,
     .reload = r,
     .stand = stand,
+  };
+
+  aimActions[world * viz->numViews + player] = PvPAimAction {
+    .yaw = (float)r_yaw,
+    .pitch = (float)r_pitch,
   };
 }
 
@@ -2566,7 +2570,10 @@ void doAI(VizState* viz, Manager& mgr, int world, int player)
 {
 	if (actions.empty())
 		return;
-    mgr.setPvPAction(world, player, actions[world * viz->numViews + player]);
+    mgr.setPvPAction(
+        world, player,
+        actions[world * viz->numViews + player],
+        aimActions[world * viz->numViews + player]);
 }
 
 void loop(VizState *viz, Manager &mgr)
@@ -2645,10 +2652,11 @@ void loop(VizState *viz, Manager &mgr)
 
         int32_t stand;
         {
-          PvPAction action_readback;
-          PvPAction *src_action = (PvPAction *)action_tensor.devicePtr();
+          PvPDiscreteAction action_readback;
+          PvPDiscreteAction *src_action =
+              (PvPDiscreteAction *)action_tensor.devicePtr();
           src_action += viz->curWorld * viz->numViews + viz->curControl;
-          memcpy(&action_readback, src_action, sizeof(PvPAction));
+          memcpy(&action_readback, src_action, sizeof(PvPDiscreteAction));
           stand = action_readback.stand;
         }
 
@@ -2724,14 +2732,15 @@ void loop(VizState *viz, Manager &mgr)
           move_angle = 0;
         }
 
-        mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPAction {
+        mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
           .moveAmount = move_amount,
           .moveAngle = move_angle,
-          .yawRotate = r_yaw,
-          .pitchRotate = r_pitch,
           .fire = f,
           .reload = r,
           .stand = stand,
+        }, PvPAimAction {
+          .yaw = (float)r_yaw,
+          .pitch = (float)r_pitch,
         });
 
         for (int world = 0; world < viz->numWorlds; world++)

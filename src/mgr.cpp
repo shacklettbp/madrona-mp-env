@@ -1822,7 +1822,7 @@ Manager::Impl * Manager::Impl::init(
                 mgr_cfg.taskType == Task::ZoneCaptureDefend ||
                 mgr_cfg.taskType == Task::Turret) {
                 pvp_actions_buffer = gpu_exec.getExported(
-                    (uint32_t)ExportID::PvPAction);
+                    (uint32_t)ExportID::PvPDiscreteAction);
             }
 
             return new CUDAImpl {
@@ -1877,7 +1877,7 @@ Manager::Impl * Manager::Impl::init(
                 mgr_cfg.taskType == Task::ZoneCaptureDefend ||
                 mgr_cfg.taskType == Task::Turret) {
                 pvp_actions_buffer = cpu_exec.getExported(
-                    (uint32_t)ExportID::PvPAction);
+                    (uint32_t)ExportID::PvPDiscreteAction);
             }
 
             auto cpu_impl = new CPUImpl {
@@ -1969,13 +1969,13 @@ Tensor Manager::simControlTensor() const
 
 Tensor Manager::pvpActionTensor() const
 {
-    return impl_->exportTensor(ExportID::PvPAction,
+    return impl_->exportTensor(ExportID::PvPDiscreteAction,
                                TensorElementType::Int32,
                                {
                                    impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
                                    (int64_t)(impl_->cfg.highlevelMove ?
                                              (sizeof(CoarsePvPAction) / sizeof(uint32_t)) :
-                                             (sizeof(PvPAction) / sizeof(uint32_t))),
+                                             (sizeof(PvPDiscreteAction) / sizeof(uint32_t))),
                                });
 }
 
@@ -2230,7 +2230,7 @@ Tensor Manager::fullTeamActionTensor() const
                                {
                                    impl_->cfg.numWorlds * consts::numTeams,
                                    consts::maxTeamSize,
-                                   (sizeof(PvPAction) / sizeof(uint32_t)),
+                                   (sizeof(PvPDiscreteAction) / sizeof(uint32_t)),
                                });
 }
 
@@ -2466,19 +2466,24 @@ void Manager::setExploreAction(int32_t world_idx,
 
 void Manager::setPvPAction(int32_t world_idx,
                            int32_t agent_idx,
-                           PvPAction action)
+                           PvPDiscreteAction discrete,
+                           PvPAimAction aim)
 {
-    auto *action_ptr = (PvPAction *)impl_->pvpActionsBuffer +
+  (void)aim;
+
+  {
+    auto *action_ptr = (PvPDiscreteAction *)impl_->pvpActionsBuffer +
         world_idx * impl_->numAgentsPerWorld + agent_idx;
 
     if (impl_->cfg.execMode == ExecMode::CUDA) {
 #ifdef MADRONA_CUDA_SUPPORT 
-        cudaMemcpy(action_ptr, &action, sizeof(PvPAction),
+        cudaMemcpy(action_ptr, &discrete, sizeof(PvPDiscreteAction),
                    cudaMemcpyHostToDevice);
 #endif
     } else {
-        *action_ptr = action;
+        *action_ptr = discrete;
     }
+  }
 }
 
 void Manager::setCoarsePvPAction(int32_t world_idx,

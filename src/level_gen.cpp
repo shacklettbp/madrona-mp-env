@@ -339,15 +339,19 @@ void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
                ctx.data().taskType == Task::Zone ||
                ctx.data().taskType == Task::ZoneCaptureDefend ||
                ctx.data().taskType == Task::Turret) {
-      ctx.get<PvPAction>(agent_entity) = {
+      ctx.get<PvPDiscreteAction>(agent_entity) = {
         .moveAmount = 0,
         .moveAngle = 0,
-        .yawRotate = consts::numTurnBuckets / 2,
-        .pitchRotate = consts::numTurnBuckets / 2,
         .fire = 0,
         .reload = 0,
         .stand = 0,
       };
+
+      ctx.get<PvPAimAction>(agent_entity) = {
+        .yaw = 0,
+        .pitch = 0,
+      };
+
       ctx.get<CoarsePvPAction>(agent_entity) = {
         .moveAmount = 0,
         .moveAngle = 0,

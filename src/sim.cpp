@@ -933,7 +933,6 @@ inline void applyVelocitySystem(Engine &ctx,
 
     move_state.newPosition = x + to_new_pos * to_new_dist;
     move_state.newVelocity = Vector3::zero();
-
 }
 
 inline void updateMoveStateSystem(
@@ -2047,7 +2046,7 @@ inline void applyBotActionsSystem(Engine &ctx,
   out_aim = {
     .yaw = t_z,
     .pitch = t_x,
-  }
+  };
 }
 
 inline void pvpMovementSystem(Engine &,
@@ -2063,16 +2062,18 @@ inline void pvpMovementSystem(Engine &,
       return;
   }
 
-  Vector3 v = vel;
-  float v_len = v.length();
+  {
+    Vector3 v = vel;
+    float v_len = v.length();
 
-  if (v_len > 0.f) {
-    Vector3 norm_v = v / v_len;
+    if (v_len > 0.f) {
+      Vector3 norm_v = v / v_len;
 
-    v_len -= consts::deaccelerateRate * consts::deltaT;
-    v_len = fmaxf(0.f, v_len);
+      v_len -= consts::deaccelerateRate * consts::deltaT;
+      v_len = fmaxf(0.f, v_len);
 
-    vel = norm_v * v_len;
+      vel = norm_v * v_len;
+    }
   }
 
   if (stand_state.transitionRemaining > 0) {
@@ -2121,16 +2122,16 @@ inline void pvpMovementSystem(Engine &,
       combat_state.remainingRespawnSteps = 0;
   }
 
-  v_len = vel.length();
+  float v_len = vel.length();
   if (v_len == 0.f) {
     return;
   }
 
   {
-    constexpr float max_vel_change_rate = 10.f;
+    constexpr float max_vel_change_rate =510.f;
     float tgt_max_vel;
     if (stand_state.curPose == Pose::Stand) {
-      if (move_amount == 2) {
+      if (discrete_move_amount == 2) {
         tgt_max_vel =  consts::maxRunVelocity;
       } else {
         tgt_max_vel = consts::maxWalkVelocity;
@@ -2148,10 +2149,10 @@ inline void pvpMovementSystem(Engine &,
     move_state.maxVelocity += max_vel_adjust;
   }
 
-  v_len = fminf(v_len, move_state.maxVelocity);
 
   Vector3 v_norm = vel / v_len;
 
+  v_len = fminf(v_len, move_state.maxVelocity);
 
   vel = v_norm * v_len;
 }
@@ -4474,7 +4475,7 @@ void readFullTeamActionsPolicies(Engine &ctx,
 {
   assert(false);
   (void)ctx;
-  (void)team_idx;
+  (void)team_id;
   (void)actions;
   (void)team_policy;
 
@@ -4944,7 +4945,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
     } else {
         auto move_sys = builder.addToGraph<ParallelForNode<Engine,
             pvpMovementSystem,
-                PvPAction,
+                PvPDiscreteAction,
                 Rotation,
                 AgentVelocity,
                 Alive,
@@ -4955,7 +4956,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 
         auto turn_sys = builder.addToGraph<ParallelForNode<Engine,
             pvpTurnSystem,
-                PvPAction,
+                PvPAimAction,
                 Rotation,
                 Aim,
                 Alive
