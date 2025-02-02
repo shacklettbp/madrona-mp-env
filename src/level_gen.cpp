@@ -281,9 +281,6 @@ void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
     combat_state.landedShotOn = Entity::none();
     combat_state.remainingRespawnSteps = 0;
     combat_state.remainingStepsBeforeAutoheal = 0;
-    for (int32_t j = 0; j < consts::maxFireQueueSize; j++) {
-      combat_state.fireQueue[j] = false;
-    }
     combat_state.successfulKill = false;
     combat_state.wasShotCount = 0;
     combat_state.wasKilled = false;

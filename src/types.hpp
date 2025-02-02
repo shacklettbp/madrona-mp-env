@@ -52,7 +52,6 @@ enum class Task : uint32_t {
 
 struct WeaponStats {
     i32 magSize;
-    i32 fireQueueSize;
     i32 reloadTime;
     f32 dmgPerBullet;
     f32 accuracyScale;
@@ -313,7 +312,6 @@ struct CombatStateObservation {
   float hp = 0.f;
   float magazine = 0.f;
   float isReloading = 0.f;
-  std::array<float, consts::maxFireQueueSize - 1> fireQueue = {};
   float timeBeforeAutoheal = 0.f;
 };
 
@@ -480,7 +478,6 @@ struct CombatState {
     Entity landedShotOn;
     int32_t remainingRespawnSteps;
     int32_t remainingStepsBeforeAutoheal;
-    bool fireQueue[consts::maxFireQueueSize];
     bool successfulKill;
     int32_t wasShotCount;
     bool wasKilled;
@@ -1028,7 +1025,6 @@ struct FullTeamPlayerObservation : public FullTeamCommonObservation {
   float hp = 0.f;
   float magazine = 0.f;
   float isReloading = 0.f;
-  std::array<float, consts::maxFireQueueSize - 1> fireQueue = {};
   float timeBeforeAutoheal = 0.f;
 };
 

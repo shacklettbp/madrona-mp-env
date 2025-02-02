@@ -2680,14 +2680,9 @@ void loop(VizState *viz, Manager &mgr)
           x -= 1;
         }
 
-        if (input.isDown(InputID::Q)) {
-          r_yaw += shift_pressed ? 2 : 1;
-        }
-        if (input.isDown(InputID::E)) {
-          r_yaw -= shift_pressed ? 2 : 1;
-        }
-
-        if (input.isDown(InputID::F)) {
+        if (input.isDown(InputID::F) ||
+            input.isDown(InputID::MouseLeft) ||
+            input_events.downEvent(InputID::MouseLeft)) {
           f = 1;
         }
 
@@ -2785,9 +2780,22 @@ void loop(VizState *viz, Manager &mgr)
     } else {
       viz->ui->enableRawMouseInput(viz->window);
       const UserInput &input = viz->ui->inputState();
-      Vector2 mouse_delta = input.mouseDelta();
+      Vector2 mouse_move = input.mouseDelta();
+      mouse_move.x /= (0.5f * viz->window->pixelWidth);
+      mouse_move.y /= (0.5f * viz->window->pixelHeight);
 
-      printf("%f %f\n", mouse_delta.x, mouse_delta.y);
+      Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+      Entity agent = ctx.data().agents[viz->curControl - 1];
+
+      const float mouse_aim_sensitivity = 50.f;
+
+      Aim aim = ctx.get<Aim>(agent);
+      aim.yaw -= frontend_delta_t * mouse_aim_sensitivity * mouse_move.x;
+      aim.pitch -= frontend_delta_t * mouse_aim_sensitivity * mouse_move.y;
+
+      ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
+      ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
     }
     
     vizStep(viz, mgr);

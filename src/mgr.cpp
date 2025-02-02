@@ -1364,7 +1364,6 @@ Manager::Impl * Manager::Impl::init(
 
         weapon_type_stats[0] = {
             .magSize = 30,
-            .fireQueueSize = 4,
             .reloadTime = 30,
             .dmgPerBullet = 10.f,
             .accuracyScale = 0.015f,

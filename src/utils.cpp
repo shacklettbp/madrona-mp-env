@@ -838,9 +838,6 @@ void spawnAgents(Engine &ctx, bool is_respawn)
         }
 
         combat_state.remainingStepsBeforeAutoheal = 0;
-        for (int32_t j = 0; j < consts::maxFireQueueSize; j++) {
-            combat_state.fireQueue[j] = false;
-        }
 
         if (ctx.data().taskType == Task::Zone ||
                 ctx.data().taskType == Task::ZoneCaptureDefend) {

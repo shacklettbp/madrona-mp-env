@@ -1361,277 +1361,164 @@ inline void fireSystem(Engine &ctx,
                        Alive alive,
                        CombatState &combat_state)
 {
-    combat_state.landedShotOn = Entity::none();
-    combat_state.successfulKill = false;
-    combat_state.firedShotT = -FLT_MAX;
-    combat_state.reloadedFullMag = false;
+  combat_state.landedShotOn = Entity::none();
+  combat_state.successfulKill = false;
+  combat_state.firedShotT = -FLT_MAX;
+  combat_state.reloadedFullMag = false;
 
-    const WeaponStats &weapon_stats =
-        ctx.data().weaponTypeStats[combat_state.weaponType];
+  const WeaponStats &weapon_stats =
+      ctx.data().weaponTypeStats[combat_state.weaponType];
 
-    bool queue_fire = action.fire == 1;
+  if (alive.mask == 0.f) {
+    return;
+  }
 
-    if (alive.mask == 0.f) {
-      return;
-    }
-
-    if (action.reload == 1) {
-      logEvent(ctx, GameEvent {
-        .type = EventType::Reload,
-        .matchID = ctx.data().matchID,
-        .step = (u32)ctx.singleton<MatchInfo>().curStep,
-        .reload = {
-          .player = u8(team_info.team * consts::maxTeamSize + team_info.offset),
-          .numBulletsAtReloadTime = u8(magazine.numBullets),
-        },
-      });
-
-      if (magazine.numBullets == weapon_stats.magSize) {
-          combat_state.reloadedFullMag = true;
-      }
-
-      magazine.numBullets = weapon_stats.magSize;
-      magazine.isReloading = weapon_stats.reloadTime;
-
-      for (int32_t i = 0; i < weapon_stats.fireQueueSize; i++) {
-          combat_state.fireQueue[i] = false;
-      }
-    }
-
-    bool reload_in_progress = magazine.isReloading > 0;
-    if (reload_in_progress) {
-        magazine.isReloading -= 1;
-    }
-
-    bool should_fire = false;
-    if (!reload_in_progress) {
-        should_fire = combat_state.fireQueue[0];
-
-        combat_state.fireQueue[weapon_stats.fireQueueSize - 1] = queue_fire;
-        for (int32_t i = 0; i < weapon_stats.fireQueueSize - 1; i++) {
-            combat_state.fireQueue[i] = combat_state.fireQueue[i + 1];
-        }
-    }
-
-    if (!should_fire) {
-        return;
-    }
-
-    Vector3 fire_from = pos;
-    fire_from.z += viewHeight(stand_state);
-
-    Vector3 cur_fwd = aim.rot.rotateVec(math::fwd);
-
-    constexpr float max_aim_turn =
-        discreteTurnDelta() * (consts::numTurnBuckets / 2) * consts::deltaT;
-    const float cos_max_aim_turn = cosf(max_aim_turn);
-
-    float max_cos_turn = 0.f;
-    float min_dist = FLT_MAX;
-    Vector3 tgt_pos = Vector3 {
-        .x = FLT_MAX,
-        .y = FLT_MAX,
-        .z = FLT_MAX,
-    };
-
-    // First, select closest opponent
-    const CountT team_size = ctx.data().eTeamSize;
-    for (CountT i = 0; i < team_size; i++) {
-        Entity opponent = opponents.e[i];
-        Alive opponent_alive = ctx.get<Alive>(opponent);
-
-        if (opponent_alive.mask == 0.f) {
-            continue;
-        }
-
-        Vector3 opponent_vis_pos;
-        if (!isAgentVisible(ctx, fire_from, aim, opponent, &opponent_vis_pos)) {
-            continue;
-        }
-
-        Vector3 to_tgt = opponent_vis_pos - fire_from;
-        float to_tgt_dist = to_tgt.length();
-        assert(to_tgt_dist > 0.f);
-
-        to_tgt /= to_tgt_dist;
-
-        float cos_angle_to_tgt = dot(cur_fwd, to_tgt);
-
-        // Any angle that we can autocorrect to in this frame
-        // is effectively 1.
-        if (cos_angle_to_tgt > cos_max_aim_turn) {
-            cos_angle_to_tgt = 1.f;
-        }
-
-        // If the angle is lower than any alternative so far, pick
-        // Otherwise, if angle is equal, pick min dist
-        if (cos_angle_to_tgt > max_cos_turn || (
-                cos_angle_to_tgt == max_cos_turn && to_tgt_dist < min_dist)) {
-            max_cos_turn = cos_angle_to_tgt;
-            min_dist = to_tgt_dist;
-            tgt_pos = opponent_vis_pos;
-        }
-    }
-
-    bool not_centered = false;
-    if (min_dist != FLT_MAX) {
-        Vector3 to_tgt = tgt_pos - fire_from;
-        to_tgt = to_tgt.normalize();
-
-        float old_yaw = aim.yaw;
-        float old_pitch = aim.pitch;
-
-        float new_yaw = -atan2f(to_tgt.x, to_tgt.y);
-        float new_pitch = asinf(std::clamp(to_tgt.z, -1.f, 1.f));
-
-        float yaw_delta = new_yaw - old_yaw;
-        float pitch_delta = new_pitch - old_pitch;
-
-        if (yaw_delta > math::pi) {
-            old_yaw += 2.f * math::pi;
-            yaw_delta -= 2.f * math::pi;
-        } else if (yaw_delta < -math::pi) {
-            old_yaw -= 2.f * math::pi;
-            yaw_delta += 2.f * math::pi;
-        }
-
-        if (yaw_delta < -max_aim_turn) {
-            yaw_delta = -max_aim_turn;
-            not_centered = true;
-        } else if (yaw_delta > max_aim_turn) {
-            yaw_delta = max_aim_turn;
-            not_centered = true;
-        }
-
-        if (pitch_delta < -max_aim_turn) {
-            pitch_delta = -max_aim_turn;
-            not_centered = true;
-        } else if (pitch_delta > max_aim_turn) {
-            pitch_delta = max_aim_turn;
-            not_centered = true;
-        }
-
-        aim = computeAim(old_yaw + yaw_delta, old_pitch + pitch_delta);
-    }
-    rot = Quat::angleAxis(aim.yaw, math::up).normalize();
-
-    if (not_centered || reload_in_progress || magazine.numBullets == 0) {
-        return;
-    }
-
-    magazine.numBullets -= 1;
-
-    float u1 = combat_state.rng.sampleUniform();
-    float u2 = combat_state.rng.sampleUniform();
-
-    float z1 = sqrtf(-2.f * logf(u1)) * cosf(2.f * math::pi * u2);
-    float z2 = sqrtf(-2.f * logf(u1)) * sinf(2.f * math::pi * u2);
-
-    cur_fwd = aim.rot.rotateVec(math::fwd);
-    Vector3 cur_up = aim.rot.rotateVec(math::up);
-    Vector3 cur_right = aim.rot.rotateVec(math::right);
-
-    float accuracy_scale =
-      weapon_stats.accuracyScale;
-
-    float up_delta = fminf(fmaxf(z1 * accuracy_scale,
-                                 -4.f * accuracy_scale), 4.f * accuracy_scale);
-
-    float right_delta = fminf(fmaxf(z2 * accuracy_scale,
-                                    -4.f * accuracy_scale), 4.f * accuracy_scale);
-
-    Vector3 fire_dir = (
-        cur_fwd + cur_up * up_delta + cur_right * right_delta).normalize();
-
-    float hit_t;
-    Entity hit_entity;
-
-    bool hit = traceRayAgainstWorld(ctx, fire_from, fire_dir,
-                                    &hit_t, &hit_entity);
-
-    if (!hit) {
-        combat_state.firedShotT = FLT_MAX;
-    } else {
-        assert(hit_t >= 0.f);
-        combat_state.firedShotT = hit_t;
-    }
-
-    bool hit_success = hit;
-    ResultRef<TeamInfo> hit_teaminfo = nullptr;
-    if (hit_entity == Entity::none()) {
-        hit_success = false;
-    } else if (
-        ctx.data().taskType == Task::TDM ||
-        ctx.data().taskType == Task::Zone ||
-        ctx.data().taskType == Task::ZoneCaptureDefend
-    ) {
-        hit_teaminfo = ctx.getSafe<TeamInfo>(hit_entity);
-        if (!hit_teaminfo.valid()) {
-            hit_success = false;
-        }
-
-        if (hit_success && hit_teaminfo.value().team == team_info.team) {
-            hit_success = false;
-        }
-
-        if (hit_success) {
-            const CombatState &opponent_combat_state =
-                ctx.get<CombatState>(hit_entity);
-            if (opponent_combat_state.remainingRespawnSteps > 0) {
-                hit_success = false;
-            }
-        }
-    } else if (ctx.data().taskType == Task::Turret) {
-        auto hit_turretstate = ctx.getSafe<TurretState>(hit_entity);
-        if (!hit_turretstate.valid()) {
-            hit_success = false;
-        }
-    }
-
-    if (ctx.data().enableVizRender) {
-        makeShotVizEntity(ctx, hit_success, fire_from, fire_dir, hit_t,
-                          team_info.team);
-    }
-
-    if (!hit_success) {
-        return;
-    }
-
+  if (action.reload == 1) {
     logEvent(ctx, GameEvent {
-      .type = EventType::PlayerShot,
+      .type = EventType::Reload,
       .matchID = ctx.data().matchID,
       .step = (u32)ctx.singleton<MatchInfo>().curStep,
-      .playerShot = {
-        .attacker = 
+      .reload = {
+        .player = u8(team_info.team * consts::maxTeamSize + team_info.offset),
+        .numBulletsAtReloadTime = u8(magazine.numBullets),
+      },
+    });
+
+    if (magazine.numBullets == weapon_stats.magSize) {
+      combat_state.reloadedFullMag = true;
+    }
+
+    magazine.numBullets = weapon_stats.magSize;
+    magazine.isReloading = weapon_stats.reloadTime;
+  }
+
+  bool reload_in_progress = magazine.isReloading > 0;
+  if (reload_in_progress) {
+    magazine.isReloading -= 1;
+  }
+
+  bool should_fire = false;
+  if (!reload_in_progress) {
+    should_fire = action.fire == 1;
+  }
+
+  if (!should_fire) {
+    return;
+  }
+
+  Vector3 fire_from = pos;
+  fire_from.z += viewHeight(stand_state);
+
+  float u1 = combat_state.rng.sampleUniform();
+  float u2 = combat_state.rng.sampleUniform();
+
+  float z1 = sqrtf(-2.f * logf(u1)) * cosf(2.f * math::pi * u2);
+  float z2 = sqrtf(-2.f * logf(u1)) * sinf(2.f * math::pi * u2);
+
+  float accuracy_scale =
+    weapon_stats.accuracyScale;
+
+  float upwardBias = 1.5f; // Controls amount of upward recoil bias
+  float up_delta = fminf(fmaxf((z1 + upwardBias) * accuracy_scale, 0.f), 4.f * accuracy_scale);
+
+  float right_delta = fminf(fmaxf(z2 * accuracy_scale, -4.f * accuracy_scale), 4.f * accuracy_scale);
+
+  aim.yaw += right_delta;
+  aim.pitch += up_delta;
+
+  aim = computeAim(aim.yaw, aim.pitch);
+
+  Vector3 fire_dir = aim.rot.rotateVec(math::fwd);
+
+  float hit_t;
+  Entity hit_entity;
+
+  bool hit = traceRayAgainstWorld(ctx, fire_from, fire_dir,
+                                  &hit_t, &hit_entity);
+
+  if (!hit) {
+    combat_state.firedShotT = FLT_MAX;
+  } else {
+    assert(hit_t >= 0.f);
+    combat_state.firedShotT = hit_t;
+  }
+
+  bool hit_success = hit;
+  ResultRef<TeamInfo> hit_teaminfo = nullptr;
+  if (hit_entity == Entity::none()) {
+    hit_success = false;
+  } else if (
+    ctx.data().taskType == Task::TDM ||
+    ctx.data().taskType == Task::Zone ||
+    ctx.data().taskType == Task::ZoneCaptureDefend
+  ) {
+    hit_teaminfo = ctx.getSafe<TeamInfo>(hit_entity);
+    if (!hit_teaminfo.valid()) {
+      hit_success = false;
+    }
+
+    if (hit_success && hit_teaminfo.value().team == team_info.team) {
+      hit_success = false;
+    }
+
+    if (hit_success) {
+      const CombatState &opponent_combat_state =
+          ctx.get<CombatState>(hit_entity);
+      if (opponent_combat_state.remainingRespawnSteps > 0) {
+        hit_success = false;
+      }
+    }
+  } else if (ctx.data().taskType == Task::Turret) {
+    auto hit_turretstate = ctx.getSafe<TurretState>(hit_entity);
+    if (!hit_turretstate.valid()) {
+      hit_success = false;
+    }
+  }
+
+  if (ctx.data().enableVizRender) {
+    makeShotVizEntity(ctx, hit_success, fire_from, fire_dir, hit_t,
+                      team_info.team);
+  }
+
+  if (!hit_success) {
+      return;
+  }
+
+  logEvent(ctx, GameEvent {
+    .type = EventType::PlayerShot,
+    .matchID = ctx.data().matchID,
+    .step = (u32)ctx.singleton<MatchInfo>().curStep,
+    .playerShot = {
+      .attacker = 
+        u8(team_info.team * consts::maxTeamSize + team_info.offset),
+      .target =
+        u8(hit_teaminfo.value().team * consts::maxTeamSize +
+           hit_teaminfo.value().offset),
+    },
+  });
+
+  combat_state.landedShotOn = hit_entity;
+
+  HP hp = ctx.get<HP>(hit_entity);
+  if (hp.hp <= weapon_stats.dmgPerBullet) {
+    combat_state.successfulKill = true;
+
+    logEvent(ctx, GameEvent {
+      .type = EventType::Kill,
+      .matchID = ctx.data().matchID,
+      .step = (u32)ctx.singleton<MatchInfo>().curStep,
+      .kill = {
+        .killer =
           u8(team_info.team * consts::maxTeamSize + team_info.offset),
-        .target =
+        .killed =
           u8(hit_teaminfo.value().team * consts::maxTeamSize +
              hit_teaminfo.value().offset),
       },
     });
+  }
 
-    combat_state.landedShotOn = hit_entity;
-
-    HP hp = ctx.get<HP>(hit_entity);
-    if (hp.hp <= weapon_stats.dmgPerBullet) {
-      combat_state.successfulKill = true;
-
-      logEvent(ctx, GameEvent {
-        .type = EventType::Kill,
-        .matchID = ctx.data().matchID,
-        .step = (u32)ctx.singleton<MatchInfo>().curStep,
-        .kill = {
-          .killer =
-            u8(team_info.team * consts::maxTeamSize + team_info.offset),
-          .killed =
-            u8(hit_teaminfo.value().team * consts::maxTeamSize +
-               hit_teaminfo.value().offset),
-        },
-      });
-    }
-
-    DamageDealt &dmg = ctx.get<DamageDealt>(hit_entity);
-    dmg.dmg[team_info.offset] = weapon_stats.dmgPerBullet;
+  DamageDealt &dmg = ctx.get<DamageDealt>(hit_entity);
+  dmg.dmg[team_info.offset] = weapon_stats.dmgPerBullet;
 }
 
 inline void turretFireSystem(Engine &ctx,
@@ -2617,10 +2504,6 @@ inline void pvpObservationsSystem(
     ob.timeBeforeAutoheal =
         float(combat_state.remainingStepsBeforeAutoheal) /
         float(consts::numOutOfCombatStepsBeforeAutoheal);
-
-    for (int32_t i = 0; i < consts::maxFireQueueSize - 1; i++) {
-        ob.fireQueue[i] = combat_state.fireQueue[i] ? 1.f : 0.f;
-    }
   };
 
   {
@@ -3016,10 +2899,6 @@ inline void fullTeamObservationsSystem(
     ob.isReloading = mag.isReloading;
 
     const CombatState &combat_state = ctx.get<CombatState>(agent);
-    for (int32_t j = 0; j < consts::maxFireQueueSize - 1; j++) {
-        ob.fireQueue[j] = combat_state.fireQueue[j] ? 1.f : 0.f;
-    }
-
     ob.timeBeforeAutoheal =
         float(combat_state.remainingStepsBeforeAutoheal) /
         float(consts::numOutOfCombatStepsBeforeAutoheal);
