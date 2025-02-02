@@ -2778,9 +2778,16 @@ void loop(VizState *viz, Manager &mgr)
     }
 
     //frame_duration = throttleFPS(cur_frame_start_time);
+    //
 
     if (viz->curControl == 0) {
       handleCamera(viz, frontend_delta_t);
+    } else {
+      viz->ui->enableRawMouseInput(viz->window);
+      const UserInput &input = viz->ui->inputState();
+      Vector2 mouse_delta = input.mouseDelta();
+
+      printf("%f %f\n", mouse_delta.x, mouse_delta.y);
     }
     
     vizStep(viz, mgr);
@@ -2884,9 +2891,8 @@ static void flyCamUI(Camera &cam)
   }
 }
 
-static Engine & cfgUI(VizState *viz, Manager &mgr)
-{
-  ImGui::Begin("Controls");
+static void cfgUI(VizState *viz)
+{ ImGui::Begin("Controls");
 
   {
     float worldbox_width = ImGui::CalcTextSize(" ").x * (
@@ -2905,8 +2911,6 @@ static Engine & cfgUI(VizState *viz, Manager &mgr)
       ImGui::EndDisabled();
     }
   }
-
-  Engine &ctx = mgr.getWorldContext(viz->curWorld);
 
   ImGui::Checkbox("Control Current View", &viz->linkViewControl);
 
@@ -3017,8 +3021,6 @@ static Engine & cfgUI(VizState *viz, Manager &mgr)
   ImGui::Checkbox("Show Unmasked Minimaps", &viz->showUnmaskedMinimaps);
 
   ImGui::End();
-
-  return ctx;
 }
 
 static inline void playerInfoUI(Engine &ctx, VizState *viz)
@@ -3189,13 +3191,25 @@ static inline void playerInfoUI(Engine &ctx, VizState *viz)
 
 static Engine & uiLogic(VizState *viz, Manager &mgr)
 {
+  const UserInputEvents &input_events = viz->ui->inputEvents();
+  if (input_events.downEvent(InputID::Esc)) {
+    viz->curControl = 0;
+    viz->curView = 0;
+  }
+
   ImGuiSystem::newFrame(viz->ui, viz->window->systemUIScale, 1.f / 60.f);
 
-  Engine &ctx = cfgUI(viz, mgr);
+  if (viz->curView == 0) {
+    cfgUI(viz);
+  }
 
-  playerInfoUI(ctx, viz);
+  Engine &ctx = mgr.getWorldContext(viz->curWorld);
 
-  analyticsDBUI(ctx, viz);
+  if (viz->curView == 0) {
+    playerInfoUI(ctx, viz);
+
+    analyticsDBUI(ctx, viz);
+  }
 
   return ctx;
 }
@@ -3753,7 +3767,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
           pos.z += consts::proneHeight;
         }
 
-        pos.z -= 0.9f * consts::agentRadius;
+        pos.z -= 0.6f * consts::agentRadius;
 
         cam = {
           .position = pos,
