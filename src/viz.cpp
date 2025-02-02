@@ -2734,9 +2734,12 @@ void loop(VizState *viz, Manager &mgr)
           .reload = r,
           .stand = stand,
         }, PvPAimAction {
-          .yaw = (float)r_yaw,
-          .pitch = (float)r_pitch,
+          .yaw = 0,
+          .pitch = 0,
         });
+
+        (void)r_yaw;
+        (void)r_pitch;
 
         for (int world = 0; world < viz->numWorlds; world++)
         {

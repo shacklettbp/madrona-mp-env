@@ -2118,7 +2118,7 @@ inline void pvpTurnSystem(Engine &,
     if (alive.mask == 0.f) {
         return;
     }
-
+    
     aim.yaw += action.yaw * consts::deltaT;
     aim.pitch += action.pitch * consts::deltaT;
 
