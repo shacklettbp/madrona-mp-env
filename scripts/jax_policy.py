@@ -4,7 +4,7 @@ from jax import lax, random, numpy as jnp
 from jax.experimental import checkify
 import flax
 from flax import linen as nn
-from flax.core import FrozenDict
+from flax.core import FrozenDict, frozen_dict
 from typing import Callable
 
 import argparse
@@ -12,6 +12,8 @@ from functools import partial
 
 import madrona_learn
 from madrona_learn import (
+    DiscreteActionDistributions, ContinuousActionDistributions,
+    DiscreteActionsConfig, ContinuousActionsConfig, ContinuousActionProps,
     ActorCritic, TrainConfig, PPOConfig,
     BackboneShared, BackboneSeparate,
     BackboneEncoder, RecurrentBackboneEncoder,
@@ -30,6 +32,17 @@ from madrona_learn.models import (
 from madrona_learn.rnn import LSTM
 
 from hash_encoder import HashGridEncoder
+
+actions_config = {
+    'discrete': DiscreteActionsConfig(
+            actions_num_buckets = [ 3, 8, 2, 2, 3 ],
+        ),
+    'aim': ContinuousActionsConfig(
+            props = [
+                ContinuousActionProps(-1, 1),
+            ],
+        ),
+}
 
 def assert_valid_input(tensor):
     #checkify.check(jnp.isnan(tensor).any() == False, "NaN!")
@@ -797,7 +810,88 @@ class MapCriticNet(nn.Module):
         )(obs_vec, train)
 
 
-def make_policy(dtype, actions_cfg):
+class ActorDistributions(flax.struct.PyTreeNode):
+    discrete: DiscreteActionDistributions
+    aim: ContinuousActionDistributions
+
+    def sample(self, prng_key):
+        discrete_rnd, aim_rnd = random.split(prng_key)
+        
+        discrete_actions, discrete_log_probs = self.discrete.sample(discrete_rnd)
+        continuous_actions, continuous_log_probs = self.aim.sample(aim_rnd)
+
+        return frozen_dict.freeze({
+            'discrete': discrete_actions,
+            'aim': continuous_actions,
+        }), frozen_dict.freeze({
+            'discrete': discrete_log_probs,
+            'aim': continuous_log_probs,
+        })
+
+    def best(self):
+        return frozen_dict.freeze({
+            'discrete': self.discrete.best(),
+            'aim': self.aim.best(),
+        })
+
+    def action_stats(self, actions):
+        discrete_log_probs, discrete_entropies = self.discrete.action_stats(actions['discrete'])
+        continuous_log_probs, continuous_entropies = self.aim.action_stats(actions['aim'])
+
+        return frozen_dict.freeze({
+            'discrete': discrete_log_probs,
+            'aim': continuous_log_probs,
+        }), frozen_dict.freeze({
+            'discrete': discrete_entropies,
+            'aim': continuous_entropies,
+        })
+
+
+class ActorHead(nn.Module):
+    dtype: jnp.dtype
+
+    @nn.compact
+    def __call__(
+        self,
+        features,
+        train=False,
+    ):
+        discrete_dist = DenseLayerDiscreteActor(
+            cfg = actions_config['discrete'],
+            dtype = self.dtype,
+        )(features)
+
+        aim_out = nn.Dense(
+            4,
+            use_bias = True,
+            kernel_init = jax.nn.initializers.orthogonal(scale=0.01),
+            bias_init = jax.nn.initializers.constant(0),
+            dtype = self.dtype,
+            name = 'self_embed',
+        )(features)
+
+        aim_out = aim_out.reshape(*aim_out.shape[0:-1], 2, 2)
+
+        aim_means = aim_out[..., 0:1, :]
+        aim_stds = aim_out[..., 1:2, :]
+
+        init_std_offset = -1.0
+
+        aim_stds = nn.softplus(aim_stds + init_std_offset) + 1e-6
+
+        aim_dist = ContinuousActionDistributions(
+            props = actions_config['aim'].props,
+            means = aim_means,
+            stds = aim_stds,
+        )
+
+        return ActorDistributions(
+            discrete=discrete_dist,
+            aim=aim_dist,
+        )
+
+
+def make_policy(dtype):
     use_map_net = False
 
     if use_map_net:
@@ -855,8 +949,7 @@ def make_policy(dtype, actions_cfg):
 
     actor_critic = ActorCritic(
         backbone = backbone,
-        actor = DenseLayerDiscreteActor(
-            cfg = actions_cfg,
+        actor = ActorHead(
             dtype = dtype,
         ),
         #critic = DreamerV3Critic(dtype=dtype),

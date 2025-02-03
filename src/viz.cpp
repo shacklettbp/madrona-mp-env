@@ -2578,7 +2578,7 @@ void doAI(VizState* viz, Manager& mgr, int world, int player)
 
 void loop(VizState *viz, Manager &mgr)
 {
-  auto action_tensor = mgr.pvpActionTensor();
+  auto action_tensor = mgr.pvpDiscreteActionTensor();
 
   ExecMode exec_mode = mgr.execMode();
   if (exec_mode == ExecMode::CUDA) {

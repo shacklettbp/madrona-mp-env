@@ -16,7 +16,7 @@ from time import time, sleep
 import os
 
 from madrona_learn import (
-    ActionsConfig, ActorCritic, TrainConfig, PPOConfig, PBTConfig,
+    ActorCritic, TrainConfig, PPOConfig, PBTConfig,
     ParamExplore, TensorboardWriter, TrainHooks,
 )
 
@@ -72,7 +72,7 @@ args = arg_parser.parse_args()
 if args.full_team_policy:
     from jax_full_team_policy import make_policy
 else:
-    from jax_policy import make_policy
+    from jax_policy import make_policy, actions_config
 
 game_mode = getattr(Task, args.game_mode)
 
@@ -244,9 +244,7 @@ cfg = TrainConfig(
     num_worlds = args.num_worlds,
     num_agents_per_world = num_agents_per_world,
     num_updates = args.num_updates,
-    actions = ActionsConfig(
-        actions_num_buckets = [ 3, 8, 5, 5, 2, 2, 3 ],
-    ),
+    actions = actions_config,
     steps_per_update = args.steps_per_update,
     num_bptt_chunks = args.num_bptt_chunks,
     lr = lr,
@@ -277,7 +275,7 @@ cfg = TrainConfig(
 with open("/tmp/t_cfg", 'wb') as f:
     pickle.dump(cfg, f)
 
-policy = make_policy(dtype, cfg.actions)
+policy = make_policy(dtype)
 
 restore_ckpt = None
 if args.restore:

@@ -695,7 +695,8 @@ struct Manager::CUDAImpl final : Manager::Impl {
             SimFlags::FullTeamPolicy) {
             copyToSim(mgr.fullTeamActionTensor(), *buffers++);
         } else {
-            copyToSim(mgr.pvpActionTensor(), *buffers++);
+            copyToSim(mgr.pvpDiscreteActionTensor(), *buffers++);
+            copyToSim(mgr.pvpAimActionTensor(), *buffers++);
         }
         copyToSim(mgr.resetTensor(), *buffers++);
         copyToSim(mgr.simControlTensor(), *buffers++);
@@ -1366,7 +1367,7 @@ Manager::Impl * Manager::Impl::init(
             .magSize = 30,
             .reloadTime = 30,
             .dmgPerBullet = 10.f,
-            .accuracyScale = 0.015f,
+            .accuracyScale = 0.005f,
         };
     }
 
@@ -1966,7 +1967,7 @@ Tensor Manager::simControlTensor() const
     return impl_->simControlTensor();
 }
 
-Tensor Manager::pvpActionTensor() const
+Tensor Manager::pvpDiscreteActionTensor() const
 {
     return impl_->exportTensor(ExportID::PvPDiscreteAction,
                                TensorElementType::Int32,
@@ -1975,6 +1976,17 @@ Tensor Manager::pvpActionTensor() const
                                    (int64_t)(impl_->cfg.highlevelMove ?
                                              (sizeof(CoarsePvPAction) / sizeof(uint32_t)) :
                                              (sizeof(PvPDiscreteAction) / sizeof(uint32_t))),
+                               });
+}
+
+Tensor Manager::pvpAimActionTensor() const
+{
+    return impl_->exportTensor(ExportID::PvPAimAction,
+                               TensorElementType::Float32,
+                               {
+                                   impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
+                                   1,
+                                   (sizeof(PvPAimAction) / sizeof(float)),
                                });
 }
 
@@ -2343,7 +2355,10 @@ TrainInterface Manager::trainInterface() const
 
         return TrainInterface {
             {
-                .actions = fullTeamActionTensor().interface(),
+                .actions = {
+                    { "discrete", fullTeamActionTensor().interface() },
+                    { "aim", pvpAimActionTensor().interface() },
+                },
                 .resets = resetTensor().interface(),
                 .simCtrl = simControlTensor().interface(),
                 .pbt = impl_->cfg.numPBTPolicies > 0 ?
@@ -2374,7 +2389,10 @@ TrainInterface Manager::trainInterface() const
 
         return TrainInterface {
             {
-                .actions = pvpActionTensor().interface(),
+                .actions = {
+                  { "discrete", pvpDiscreteActionTensor().interface() },
+                  { "aim", pvpAimActionTensor().interface() },
+                },
                 .resets = resetTensor().interface(),
                 .simCtrl = simControlTensor().interface(),
                 .pbt = impl_->cfg.numPBTPolicies > 0 ?

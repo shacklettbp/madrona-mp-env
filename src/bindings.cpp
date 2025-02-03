@@ -104,7 +104,7 @@ NB_MODULE(madrona_mp_env, m) {
         .def("step", &Manager::step)
         .def("reset_tensor", &Manager::resetTensor)
         .def("explore_action_tensor", &Manager::exploreActionTensor)
-        .def("pvp_action_tensor", &Manager::pvpActionTensor)
+        .def("pvp_action_tensor", &Manager::pvpDiscreteActionTensor)
         .def("reward_tensor", &Manager::rewardTensor)
         .def("done_tensor", &Manager::doneTensor)
         .def("policy_assignment_tensor", &Manager::policyAssignmentTensor)

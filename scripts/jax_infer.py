@@ -14,7 +14,6 @@ from madrona_mp_env import Task, SimFlags
 import madrona_learn
 from madrona_learn import (
     ActorCritic,
-    ActionsConfig,
     EvalConfig,
     eval_load_ckpt,
     eval_policies,
@@ -52,9 +51,9 @@ arg_parser.add_argument('--bc-dump-dir', type=str)
 args = arg_parser.parse_args()
 
 if args.full_team_policy:
-    from jax_full_team_policy import make_policy 
+    from jax_full_team_policy import make_policy, actions_config
 else:
-    from jax_policy import make_policy 
+    from jax_policy import make_policy, actions_config
 
 team_size = 6
 
@@ -67,11 +66,7 @@ elif args.bf16:
 else:
     dtype= jnp.float32
 
-actions_cfg = ActionsConfig(
-    actions_num_buckets = [ 3, 8, 5, 5, 2, 2, 3 ],
-)
-
-policy = make_policy(dtype, actions_cfg)
+policy = make_policy(dtype)
 
 game_mode = getattr(Task, args.game_mode)
 
@@ -221,6 +216,7 @@ def iter_cb(step_data):
            step_data['rewards'],
            step_num_swaps)
     else:
+        jax.debug.print("{}", step_data['actions'])
         cb = partial(jax.experimental.io_callback, print_step_cb, ())
         cb()
 
@@ -246,7 +242,10 @@ def iter_cb(step_data):
     for k, v in step_data['obs'].items():
         print(k, v.shape)
 
-    print('actions:', step_data['actions'].shape)
+    print('actions:')# step_data['actions'].shape)
+    for k, v in step_data['actions'].items():
+        print(k, v.shape)
+
     print('rnn_states:', jnp.asarray(step_data['rnn_states']).shape)
     print('rewards:', step_data['rewards'].shape)
 
@@ -259,7 +258,7 @@ eval_cfg = EvalConfig(
     num_worlds = args.num_worlds,
     num_teams = 2,
     team_size = eval_team_size,
-    actions = actions_cfg,
+    actions = actions_config,
     num_eval_steps = args.num_steps,
     policy_dtype = dtype,
     eval_competitive = True,
