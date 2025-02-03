@@ -732,7 +732,6 @@ struct BreadcrumbEntity : madrona::Archetype<
     Position,
     Rotation,
     Scale,
-    ObjectID,
     Breadcrumb
 > {};
 

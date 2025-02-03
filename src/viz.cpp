@@ -3034,7 +3034,7 @@ static void cfgUI(VizState *viz)
   ImGui::End();
 }
 
-static inline void playerInfoUI(Engine &ctx, VizState *viz)
+static inline void agentInfoUI(Engine &ctx, VizState *viz)
 {
   MatchResult &match_result = ctx.singleton<MatchResult>();
 
@@ -3200,6 +3200,62 @@ static inline void playerInfoUI(Engine &ctx, VizState *viz)
   }
 }
 
+static void playerInfoUI(Engine &ctx, i32 agent_idx)
+{
+  Entity agent = ctx.data().agents[agent_idx];
+
+  auto viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(viewport->WorkSize.x, 0.f),
+                          0, ImVec2(1.f, 0.f));
+  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f);
+  ImGui::Begin("Player Info", nullptr,
+               ImGuiWindowFlags_NoMove |
+               ImGuiWindowFlags_NoInputs |
+               ImGuiWindowFlags_NoTitleBar |
+               ImGuiWindowFlags_AlwaysAutoResize);
+  ImGui::PopStyleVar();
+  ImGui::SetWindowFontScale(3.0f);
+
+  HP hp = ctx.get<HP>(agent);
+  Magazine magazine = ctx.get<Magazine>(agent);
+  CombatState combat_state = ctx.get<CombatState>(agent);
+  const WeaponStats &weapon_stats =
+      ctx.data().weaponTypeStats[combat_state.weaponType];
+  
+  MatchResult match_result = ctx.singleton<MatchResult>();
+
+  TeamInfo team = ctx.get<TeamInfo>(agent);
+
+  i32 my_team_points = match_result.teamObjectivePoints[team.team];
+  i32 enemy_team_points = match_result.teamObjectivePoints[team.team ^ 1];
+
+  ImGui::Text("HP %d", (int)hp.hp);
+  if (magazine.isReloading) {
+    ImGui::Text("Reloading........");
+  } else {
+    ImGui::Text("Magazine: %d / %d", (int)magazine.numBullets,
+                weapon_stats.magSize);
+  }
+
+  ImGui::Text("  Our Points: %d", my_team_points);
+  ImGui::Text("Enemy Points: %d", enemy_team_points);
+
+  ImGui::End();
+
+  ImVec2 display_size = ImGui::GetIO().DisplaySize;
+  ImVec2 center = ImVec2(display_size.x * 0.5f, display_size.y * 0.5f);
+  
+  ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+  
+  float radius = 5.0f;
+  ImU32 color = IM_COL32(255, 255, 255, 255);
+  int segments = 32;
+  float thickness = 2.0f;
+  
+  draw_list->AddCircle(center, radius, color, segments, thickness);
+
+}
+
 static Engine & uiLogic(VizState *viz, Manager &mgr)
 {
   const UserInputEvents &input_events = viz->ui->inputEvents();
@@ -3217,9 +3273,11 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   Engine &ctx = mgr.getWorldContext(viz->curWorld);
 
   if (viz->curView == 0) {
-    playerInfoUI(ctx, viz);
+    agentInfoUI(ctx, viz);
 
     analyticsDBUI(ctx, viz);
+  } else {
+    playerInfoUI(ctx, viz->curView - 1);
   }
 
   return ctx;
@@ -3525,8 +3583,10 @@ static void renderZones(Engine &ctx, VizState *viz,
   raster_enc.setShader(viz->goalRegionsShaderWireframe);
   renderZones(24);
 
-  raster_enc.setShader(viz->goalRegionsShaderWireframeNoDepth);
-  renderZones(24);
+  if (viz->curView == 0) {
+    raster_enc.setShader(viz->goalRegionsShaderWireframeNoDepth);
+    renderZones(24);
+  }
 }
 
 static void renderAgents(Engine &ctx, VizState *viz,
@@ -3804,7 +3864,8 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   renderAgents(ctx, viz, raster_enc);
 
-  renderGoalRegions(ctx, viz, raster_enc);
+  //renderGoalRegions(ctx, viz, raster_enc);
+  (void)renderGoalRegions;
 
   renderShotViz(ctx, viz, raster_enc);
 

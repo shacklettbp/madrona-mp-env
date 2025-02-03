@@ -1398,13 +1398,15 @@ inline void fireSystem(Engine &ctx,
   }
 
   bool should_fire = false;
-  if (!reload_in_progress) {
+  if (!reload_in_progress && magazine.numBullets > 0) {
     should_fire = action.fire == 1;
   }
 
   if (!should_fire) {
     return;
   }
+
+  magazine.numBullets -= 1;
 
   Vector3 fire_from = pos;
   fire_from.z += viewHeight(stand_state);
@@ -4297,7 +4299,7 @@ inline void leaveBreadcrumbsSystem(Engine &ctx,
             ctx.get<Position>(new_breadcrumb_entity) = pos;
             ctx.get<Rotation>(new_breadcrumb_entity) = Quat { 1, 0, 0, 0 };
             ctx.get<Scale>(new_breadcrumb_entity) = 10.f * Diag3x3 { 1, 1, 1 };
-            ctx.get<ObjectID>(new_breadcrumb_entity) = { 11 };
+            //ctx.get<ObjectID>(new_breadcrumb_entity) = { 11 };
         }
     }
 
