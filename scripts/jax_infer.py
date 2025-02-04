@@ -216,7 +216,6 @@ def iter_cb(step_data):
            step_data['rewards'],
            step_num_swaps)
     else:
-        jax.debug.print("{}", step_data['actions'])
         cb = partial(jax.experimental.io_callback, print_step_cb, ())
         cb()
 
