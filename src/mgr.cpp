@@ -58,6 +58,7 @@ struct Manager::Impl {
     void *pvpActionsBuffer;
     uint32_t numAgentsPerWorld;
     TrainControl *trainCtrl;
+    TrainInterface trainInterface;
 
     inline Impl(const Manager::Config &mgr_cfg,
                 WorldReset *reset_buffer,
@@ -84,8 +85,8 @@ struct Manager::Impl {
     virtual void run(TaskGraphID taskgraph_id = TaskGraphID::Step) = 0;
 
 #ifdef MADRONA_CUDA_SUPPORT
-    virtual void gpuStreamInit(cudaStream_t strm, void **buffers, Manager &) = 0;
-    virtual void gpuStreamStep(cudaStream_t strm, void **buffers, Manager &) = 0;
+    virtual void gpuStreamInit(cudaStream_t strm, void **buffers) = 0;
+    virtual void gpuStreamStep(cudaStream_t strm, void **buffers) = 0;
 #endif
 
     virtual Tensor exportTensor(ExportID slot,
@@ -270,12 +271,12 @@ struct Manager::CPUImpl final : Manager::Impl {
     }
 
 #ifdef MADRONA_CUDA_SUPPORT
-    virtual void gpuStreamInit(cudaStream_t, void **, Manager &)
+    virtual void gpuStreamInit(cudaStream_t, void **)
     {
         assert(false);
     }
 
-    virtual void gpuStreamStep(cudaStream_t, void **, Manager &)
+    virtual void gpuStreamStep(cudaStream_t, void **)
     {
         assert(false);
     }
@@ -556,18 +557,8 @@ struct Manager::CUDAImpl final : Manager::Impl {
         return buffers;
     }
 
-    virtual void gpuStreamInit(cudaStream_t strm, void **buffers, Manager &mgr)
+    virtual void gpuStreamInit(cudaStream_t strm, void **buffers)
     {
-#if 0
-        {
-            volatile int should_breakpoint = 1;
-
-            while (should_breakpoint) {
-                printf("Loop\n");
-            }
-        }
-#endif
-
         printf("Sim Stream Init Start\n");
         if (replayLogBuffer) {
             replayLog->read((char *)replayLogStaging,
@@ -652,7 +643,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
         }
 #endif
 
-        copyOutObservations(strm, buffers, mgr);
+        trainInterface.cudaCopyObservations(strm, buffers);
 
         if (recordLogBuffer) {
             REQ_CUDA(cudaMemcpyAsync(recordLogStaging, recordLogBuffer,
@@ -673,7 +664,7 @@ struct Manager::CUDAImpl final : Manager::Impl {
         printf("Sim Stream Init Finished\n");
     }
 
-    virtual void gpuStreamStep(cudaStream_t strm, void **buffers, Manager &mgr)
+    virtual void gpuStreamStep(cudaStream_t strm, void **buffers)
     {
         if (replayLogBuffer) {
             replayLog->read((char *)replayLogStaging,
@@ -684,53 +675,11 @@ struct Manager::CUDAImpl final : Manager::Impl {
                                      cudaMemcpyHostToDevice, strm));
         }
 
-        auto copyToSim = [&strm](const Tensor &dst, void *src) {
-            uint64_t num_bytes = numTensorBytes(dst);
-
-            REQ_CUDA(cudaMemcpyAsync(dst.devicePtr(), src, num_bytes,
-                                     cudaMemcpyDeviceToDevice, strm));
-        };
-
-        if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
-            SimFlags::FullTeamPolicy) {
-            copyToSim(mgr.fullTeamActionTensor(), *buffers++);
-        } else {
-            copyToSim(mgr.pvpDiscreteActionTensor(), *buffers++);
-            copyToSim(mgr.pvpAimActionTensor(), *buffers++);
-        }
-        copyToSim(mgr.resetTensor(), *buffers++);
-        copyToSim(mgr.simControlTensor(), *buffers++);
-
-        if (cfg.numPBTPolicies > 0) {
-            if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
-                SimFlags::FullTeamPolicy) {
-                copyToSim(mgr.fullTeamPolicyAssignmentTensor(), *buffers++);
-            } else {
-                copyToSim(mgr.policyAssignmentTensor(), *buffers++);
-            }
-            copyToSim(mgr.rewardHyperParamsTensor(), *buffers++);
-        }
+        buffers = trainInterface.cudaCopyStepInputs(strm, buffers);
 
         gpuExec.runAsync(stepGraph, strm);
 
-        buffers = copyOutObservations(strm, buffers, mgr);
-
-        auto copyFromSim = [&strm](void *dst, const Tensor &src) {
-            uint64_t num_bytes = numTensorBytes(src);
-
-            REQ_CUDA(cudaMemcpyAsync(dst, src.devicePtr(), num_bytes,
-                                     cudaMemcpyDeviceToDevice, strm));
-        };
-
-        if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
-            SimFlags::FullTeamPolicy) {
-            copyFromSim(*buffers++, mgr.fullTeamRewardTensor());
-            copyFromSim(*buffers++, mgr.fullTeamDoneTensor());
-        } else {
-            copyFromSim(*buffers++, mgr.rewardTensor());
-            copyFromSim(*buffers++, mgr.doneTensor());
-        }
-        copyFromSim(*buffers++, mgr.matchResultTensor());
+        trainInterface.cudaCopyStepOutputs(strm, buffers);
 
         if (recordLogBuffer) {
             REQ_CUDA(cudaMemcpyAsync(recordLogStaging, recordLogBuffer,
@@ -1906,7 +1855,9 @@ Manager::Impl * Manager::Impl::init(
 Manager::Manager(const Config &cfg,
                  VizState *viz)
     : impl_(Impl::init(cfg, viz))
-{}
+{
+  impl_->trainInterface = trainInterface();
+}
 
 Manager::~Manager() {}
 
@@ -1943,12 +1894,12 @@ void Manager::step()
 #ifdef MADRONA_CUDA_SUPPORT
 void Manager::gpuStreamInit(cudaStream_t strm, void **buffers)
 {
-    impl_->gpuStreamInit(strm, buffers, *this);
+    impl_->gpuStreamInit(strm, buffers);
 }
 
 void Manager::gpuStreamStep(cudaStream_t strm, void **buffers)
 {
-    impl_->gpuStreamStep(strm, buffers, *this);
+    impl_->gpuStreamStep(strm, buffers);
 }
 #endif
 
@@ -2348,87 +2299,87 @@ TrainInterface Manager::trainInterface() const
 {
     if ((impl_->cfg.simFlags & SimFlags::FullTeamPolicy) ==
         SimFlags::FullTeamPolicy) {
-        auto pbt_inputs = std::to_array<NamedTensorInterface>({
-            { "policy_assignments", fullTeamPolicyAssignmentTensor().interface() },
-            { "reward_hyper_params", rewardHyperParamsTensor().interface() },
+        auto pbt_inputs = std::to_array<NamedTensor>({
+            { "policy_assignments", fullTeamPolicyAssignmentTensor() },
+            { "reward_hyper_params", rewardHyperParamsTensor() },
         });
 
         return TrainInterface {
             {
                 .actions = {
-                    { "discrete", fullTeamActionTensor().interface() },
-                    { "aim", pvpAimActionTensor().interface() },
+                    { "discrete", fullTeamActionTensor() },
+                    { "aim", pvpAimActionTensor() },
                 },
-                .resets = resetTensor().interface(),
-                .simCtrl = simControlTensor().interface(),
+                .resets = resetTensor(),
+                .simCtrl = simControlTensor(),
                 .pbt = impl_->cfg.numPBTPolicies > 0 ?
-                    pbt_inputs : Span<const NamedTensorInterface>(nullptr, 0),
+                    pbt_inputs : Span<const NamedTensor>(nullptr, 0),
             },
             {
                 .observations = {
-                    { "full_team_global", fullTeamGlobalObservationsTensor().interface() },
-                    { "full_team_players", fullTeamPlayerObservationsTensor().interface() },
-                    { "full_team_enemies", fullTeamEnemyObservationsTensor().interface() },
+                    { "full_team_global", fullTeamGlobalObservationsTensor() },
+                    { "full_team_players", fullTeamPlayerObservationsTensor() },
+                    { "full_team_enemies", fullTeamEnemyObservationsTensor() },
                     { "full_team_last_known_enemies",
-                        fullTeamLastKnownEnemyObservationsTensor().interface() },
-                    { "full_team_fwd_lidar", fullTeamFwdLidarTensor().interface() },
-                    { "full_team_rear_lidar", fullTeamRearLidarTensor().interface() },
+                        fullTeamLastKnownEnemyObservationsTensor() },
+                    { "full_team_fwd_lidar", fullTeamFwdLidarTensor() },
+                    { "full_team_rear_lidar", fullTeamRearLidarTensor() },
                 },
-                .rewards = fullTeamRewardTensor().interface(),
-                .dones = fullTeamDoneTensor().interface(),
+                .rewards = fullTeamRewardTensor(),
+                .dones = fullTeamDoneTensor(),
                 .pbt = {
-                    { "episode_results", matchResultTensor().interface() },
+                    { "episode_results", matchResultTensor() },
                 },
             },
         };
     } else {
-        auto pbt_inputs = std::to_array<NamedTensorInterface>({
-            { "policy_assignments", policyAssignmentTensor().interface() },
-            { "reward_hyper_params", rewardHyperParamsTensor().interface() },
+        auto pbt_inputs = std::to_array<NamedTensor>({
+            { "policy_assignments", policyAssignmentTensor() },
+            { "reward_hyper_params", rewardHyperParamsTensor() },
         });
 
         return TrainInterface {
             {
                 .actions = {
-                  { "discrete", pvpDiscreteActionTensor().interface() },
-                  { "aim", pvpAimActionTensor().interface() },
+                  { "discrete", pvpDiscreteActionTensor() },
+                  { "aim", pvpAimActionTensor() },
                 },
-                .resets = resetTensor().interface(),
-                .simCtrl = simControlTensor().interface(),
+                .resets = resetTensor(),
+                .simCtrl = simControlTensor(),
                 .pbt = impl_->cfg.numPBTPolicies > 0 ?
-                    pbt_inputs : Span<const NamedTensorInterface>(nullptr, 0),
+                    pbt_inputs : Span<const NamedTensor>(nullptr, 0),
             },
             {
                 .observations = {
-                    { "fwd_lidar", fwdLidarTensor().interface() },
-                    { "rear_lidar", rearLidarTensor().interface() },
-                    { "hp", hpTensor().interface() },
-                    { "magazine", magazineTensor().interface() },
-                    { "alive", aliveTensor().interface() },
+                    { "fwd_lidar", fwdLidarTensor() },
+                    { "rear_lidar", rearLidarTensor() },
+                    { "hp", hpTensor() },
+                    { "magazine", magazineTensor() },
+                    { "alive", aliveTensor() },
 
-                    { "self", selfObservationTensor().interface() },
-                    { "filters_state", filtersStateObservationTensor().interface() },
-                    { "teammates", teammateObservationsTensor().interface() },
-                    { "opponents", opponentObservationsTensor().interface() },
-                    { "opponents_last_known", opponentLastKnownObservationsTensor().interface() },
+                    { "self", selfObservationTensor() },
+                    { "filters_state", filtersStateObservationTensor() },
+                    { "teammates", teammateObservationsTensor() },
+                    { "opponents", opponentObservationsTensor() },
+                    { "opponents_last_known", opponentLastKnownObservationsTensor() },
 
-                    { "self_pos", selfPositionTensor().interface() },
+                    { "self_pos", selfPositionTensor() },
                     { "teammate_positions",
-                        teammatePositionObservationsTensor().interface() },
+                        teammatePositionObservationsTensor() },
                     { "opponent_positions",
-                        opponentPositionObservationsTensor().interface() },
+                        opponentPositionObservationsTensor() },
                     { "opponent_last_known_positions", 
-                        opponentLastKnownPositionObservationsTensor().interface() },
+                        opponentLastKnownPositionObservationsTensor() },
 
-                    { "opponent_masks", opponentMasksTensor().interface() },
+                    { "opponent_masks", opponentMasksTensor() },
 
-                    { "agent_map", agentMapTensor().interface() },
-                    { "unmasked_agent_map", agentMapTensor().interface() },
+                    { "agent_map", agentMapTensor() },
+                    { "unmasked_agent_map", agentMapTensor() },
                 },
-                .rewards = rewardTensor().interface(),
-                .dones = doneTensor().interface(),
+                .rewards = rewardTensor(),
+                .dones = doneTensor(),
                 .pbt = {
-                    { "episode_results", matchResultTensor().interface() },
+                    { "episode_results", matchResultTensor() },
                 },
             },
         };
