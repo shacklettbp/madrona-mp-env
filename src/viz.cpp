@@ -12,7 +12,9 @@
 #include "mgr.hpp"
 #include "utils.hpp"
 
+#ifdef DB_SUPPORT
 #include "db.hpp"
+#endif
 
 #include "viz_shader_common.hpp"
 
@@ -294,6 +296,7 @@ static Camera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
 }
 
 struct AnalyticsDB {
+#ifdef DB_SUPPORT
   sqlite3 *hdl = nullptr;
   sqlite3_stmt *loadStepPlayerStates = nullptr;
   sqlite3_stmt *loadMatchZoneState = nullptr;
@@ -345,6 +348,7 @@ struct AnalyticsDB {
   std::ofstream trajectoriesOutFile {};
 
   std::thread bgThread = {};
+#endif
 };
 
 struct VizState {
@@ -760,6 +764,7 @@ static void vizStep(VizState *viz, Manager &mgr);
 static constexpr inline f32 MOUSE_SPEED = 1e-1f;
 // FIXME
 
+#ifdef DB_SUPPORT
 static void sendAnalyticsThreadCmd(AnalyticsDB &db, AnalyticsThreadCtrl ctrl)
 {
   while (true) {
@@ -2056,6 +2061,7 @@ static void analyticsBGThread(AnalyticsDB &db)
     }
   }
 }
+#endif
 
 VizState * init(const VizConfig &cfg)
 {
@@ -2288,18 +2294,22 @@ VizState * init(const VizConfig &cfg)
 
   loadAssets(viz, cfg);
 
+#ifdef DB_SUPPORT
   if (cfg.analyticsDBPath != nullptr) {
     loadAnalyticsDB(viz, cfg);
   }
+#endif
 
   return viz;
 }
 
 void shutdown(VizState *viz)
 {
+#ifdef DB_SUPPORT
   if (viz->db.hdl != nullptr) {
     unloadAnalyticsDB(viz->db);
   }
+#endif
 
   GPURuntime *gpu = viz->gpu;
 
@@ -3275,7 +3285,9 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   if (viz->curView == 0) {
     agentInfoUI(ctx, viz);
 
+#ifdef DB_SUPPORT
     analyticsDBUI(ctx, viz);
+#endif
   } else {
     playerInfoUI(ctx, viz->curView - 1);
   }
@@ -3640,6 +3652,7 @@ static void renderAgents(Engine &ctx, VizState *viz,
   });
 }
 
+#ifdef DB_SUPPORT
 static void renderAnalyticsViz(Engine &ctx, VizState *viz,
                                RasterPassEncoder &raster_enc)
 {
@@ -3803,6 +3816,7 @@ static void renderAnalyticsViz(Engine &ctx, VizState *viz,
     }
   }
 }
+#endif
 
 inline void renderSystem(Engine &ctx, VizState *viz)
 {
@@ -3871,7 +3885,9 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   renderZones(ctx, viz, raster_enc);
 
+#ifdef DB_SUPPORT
   renderAnalyticsViz(ctx, viz, raster_enc);
+#endif
 
 #if 0
   raster_enc.setShader(viz->opaqueGeoShader);

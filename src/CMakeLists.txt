@@ -42,16 +42,20 @@ target_link_libraries(madrona_mp_env_importer PUBLIC
 
 add_subdirectory(nav)
 
-find_package(SQLite3 REQUIRED)
+find_package(SQLite3)
 
-add_library(madrona_mp_env_db STATIC
-  db.hpp db.cpp
-)
+if (SQLite3_FOUND)
+    add_library(madrona_mp_env_db STATIC
+      db.hpp db.cpp
+    )
 
-target_link_libraries(madrona_mp_env_db PUBLIC
-  madrona_mw_core
-  SQLite::SQLite3
-)
+    target_link_libraries(madrona_mp_env_db PUBLIC
+      madrona_mw_core
+      SQLite::SQLite3
+    )
+
+    target_compile_definitions(madrona_mp_env_cpu_impl PUBLIC DB_SUPPORT=1)
+endif ()
 
 add_library(madrona_mp_env_mgr STATIC
     mgr.hpp mgr.cpp
@@ -68,8 +72,13 @@ target_link_libraries(madrona_mp_env_mgr
         madrona_physics_loader
         madrona_mp_env_importer
         meshoptimizer
-        madrona_mp_env_db
 )
+
+if (SQLite3_FOUND)
+    target_link_libraries(madrona_mp_env_mgr PRIVATE
+        madrona_mp_env_db
+    )
+endif ()
 
 if (TARGET madrona_cuda)
     target_link_libraries(madrona_mp_env_mgr
@@ -146,16 +155,18 @@ target_link_libraries(convert_assets
   madrona_mp_env_nav_build
 )
 
-add_executable(build_db build_db.cpp)
-target_link_libraries(build_db
-  madrona_mw_core madrona_mp_env_mgr
-  madrona_mp_env_db
-)
-
-add_executable(build_trajectory_curriculum
-  build_trajectory_curriculum.cpp
-)
-target_link_libraries(build_trajectory_curriculum
-  madrona_mw_core madrona_mp_env_mgr
-  madrona_mp_env_db
-)
+if (SQLite3_FOUND)
+    add_executable(build_db build_db.cpp)
+    target_link_libraries(build_db
+      madrona_mw_core madrona_mp_env_mgr
+      madrona_mp_env_db
+    )
+    
+    add_executable(build_trajectory_curriculum
+      build_trajectory_curriculum.cpp
+    )
+    target_link_libraries(build_trajectory_curriculum
+      madrona_mw_core madrona_mp_env_mgr
+      madrona_mp_env_db
+    )
+endif ()
