@@ -2347,13 +2347,13 @@ void shutdown(VizState *viz)
   gpu->destroyTexture(viz->depthAttachment);
 
   gpu->destroySwapchain(viz->swapchain);
+  viz->ui->destroyMainWindow();
 
   viz->shadercLib.destroyCompiler(viz->shaderc);
   InitSystem::unloadShaderCompiler(viz->shadercLib);
 
   viz->gpuAPI->destroyRuntime(gpu);
 
-  viz->ui->destroyMainWindow();
   viz->ui->shutdown();
 
   delete viz;
