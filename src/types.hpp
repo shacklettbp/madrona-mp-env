@@ -495,10 +495,6 @@ struct ShotVizRemaining {
     int32_t numStepsRemaining;
 };
 
-struct ShotVizCleanupTracker {
-    Entity e;
-};
-
 struct TurretState {
     madrona::RNG rng;
     int32_t offset;
@@ -720,14 +716,6 @@ struct BreadcrumbAgentState {
     int32_t stepsSinceLastNewBreadcrumb;
 };
 
-struct BreadcrumbDelete {
-    Entity e;
-};
-
-struct BreadcrumbDeleteEntity : madrona::Archetype<
-    BreadcrumbDelete
-> {};
-
 struct BreadcrumbEntity : madrona::Archetype<
     Position,
     Rotation,
@@ -947,10 +935,6 @@ struct ShotVizState {
 struct ShotViz : public madrona::Archetype<
     ShotVizState,
     ShotVizRemaining
-> {};
-
-struct ShotVizCleanup : public madrona::Archetype<
-    ShotVizCleanupTracker
 > {};
 
 struct Turret : public madrona::Archetype<

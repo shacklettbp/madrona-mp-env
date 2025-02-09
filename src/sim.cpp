@@ -510,9 +510,6 @@ void Sim::registerTypes(ECSRegistry &registry,
     registry.registerComponent<Breadcrumb>();
     registry.registerArchetype<BreadcrumbEntity>();
 
-    registry.registerComponent<BreadcrumbDelete>();
-    registry.registerArchetype<BreadcrumbDeleteEntity>();
-
     registry.registerSingleton<WorldReset>();
     registry.registerSingleton<TeamRewardState>();
     registry.registerSingleton<MatchResult>();
@@ -555,7 +552,6 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerComponent<CombatState>();
         registry.registerComponent<ShotVizState>();
         registry.registerComponent<ShotVizRemaining>();
-        registry.registerComponent<ShotVizCleanupTracker>();
 
         registry.registerComponent<Teammates>();
         registry.registerComponent<Opponents>();
@@ -581,7 +577,6 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerArchetype<CamEntity>();
         registry.registerArchetype<PvPAgent>();
         registry.registerArchetype<ShotViz>();
-        registry.registerArchetype<ShotVizCleanup>();
         registry.registerArchetype<ZoneViz>();
 
         if (cfg.highlevelMove) {
@@ -1888,19 +1883,12 @@ inline void cleanupShotVizSystem(Engine &ctx,
                                  Entity e,
                                  ShotVizRemaining &remaining)
 {
-    int32_t num_remaining = --remaining.numStepsRemaining;
-    if (num_remaining > 0) {
-        return;
-    }
+  int32_t num_remaining = --remaining.numStepsRemaining;
+  if (num_remaining > 0) {
+      return;
+  }
 
-    Loc l = ctx.makeTemporary<ShotVizCleanup>();
-    ctx.get<ShotVizCleanupTracker>(l).e = e;
-}
-
-inline void destroyShotVizSystem(Engine &ctx,
-                                 ShotVizCleanupTracker tracker)
-{
-    ctx.destroyEntity(tracker.e);
+  ctx.destroyEntity(e);
 }
 
 inline void applyBotActionsSystem(Engine &ctx,
@@ -4244,21 +4232,6 @@ inline void pvpReplaySystem(Engine &ctx,
     }
 }
 
-#ifdef MADRONA_GPU_MODE
-    template <typename ArchetypeT>
-TaskGraph::NodeID queueSortByWorld(TaskGraph::Builder &builder,
-                                   Span<const TaskGraph::NodeID> deps)
-{
-    auto sort_sys =
-        builder.addToGraph<SortArchetypeNode<ArchetypeT, WorldID>>(
-            deps);
-    auto post_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_sys});
-
-    return post_sort_reset_tmp;
-}
-#endif
-
 inline void leaveBreadcrumbsSystem(Engine &ctx,
                                    Position pos,
                                    TeamInfo team_info,
@@ -4338,15 +4311,8 @@ inline void accumulateBreadcrumbPenaltiesSystem(Engine &ctx,
     breadcrumb.penalty -= 0.025f;
 
     if (breadcrumb.penalty <= 0.f) {
-        Loc loc = ctx.makeTemporary<BreadcrumbDeleteEntity>();
-        ctx.get<BreadcrumbDelete>(loc).e = e;
+        ctx.destroyEntity(e);
     }
-}
-
-inline void deleteBreadcrumbsSystem(Engine &ctx,
-                                    BreadcrumbDelete del)
-{
-    ctx.destroyEntity(del.e);
 }
 
 void readFullTeamActionsPolicies(Engine &ctx,
@@ -4732,26 +4698,6 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
             >>({post_reset});
     }
 
-#ifdef MADRONA_GPU_MODE
-    auto sort_geo = queueSortByWorld<StaticGeometry>(
-        builder, {lidar, collect_obs});
-
-    if (cfg.task == Task::Explore) {
-        queueSortByWorld<ExploreAgent>(builder, {sort_geo});
-    } else if (cfg.task == Task::TDM ||
-               cfg.task == Task::Zone ||
-               cfg.task == Task::ZoneCaptureDefend ||
-               cfg.task == Task::Turret) {
-        queueSortByWorld<PvPAgent>(builder, {sort_geo});
-    }
-
-
-    queueSortByWorld<FullTeamInterface>(builder, {});
-#else
-    (void)lidar;
-    (void)collect_obs;
-#endif
-
 #ifndef MADRONA_GPU_MODE
     if (cfg.viz) {
       VizSystem::setupGameTasks(cfg.viz, builder);
@@ -4773,15 +4719,26 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
           AgentPolicy
       >>({});
 
-#ifdef MADRONA_GPU_MODE
-  queueSortByWorld<GameEventEntity>(builder, {});
-  queueSortByWorld<PackedStepSnapshotEntity>(builder, {});
-#endif
+  builder.addToGraph<CompactArchetypeNode<GameEventEntity>>({});
+  builder.addToGraph<CompactArchetypeNode<PackedStepSnapshotEntity>>({});
 }
 
 static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
   resetAndObsTasks(builder, cfg, {});
+
+  builder.addToGraph<CompactArchetypeNode<StaticGeometry>>({});
+
+  if (cfg.task == Task::Explore) {
+    builder.addToGraph<CompactArchetypeNode<ExploreAgent>>({});
+  } else if (cfg.task == Task::TDM ||
+             cfg.task == Task::Zone ||
+             cfg.task == Task::ZoneCaptureDefend ||
+             cfg.task == Task::Turret) {
+    builder.addToGraph<CompactArchetypeNode<PvPAgent>>({});
+  }
+
+  builder.addToGraph<CompactArchetypeNode<FullTeamInterface>>({});
 }
 
 static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
@@ -4978,10 +4935,8 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
             BreadcrumbAgentState
     >>({sim_done});
 
-#ifdef MADRONA_GPU_MODE
-    sim_done = queueSortByWorld<BreadcrumbEntity>(
-        builder, {sim_done});
-#endif
+    sim_done = builder.addToGraph<CompactArchetypeNode<BreadcrumbEntity>>(
+        {sim_done});
 
     sim_done = builder.addToGraph<ParallelForNode<Engine,
         accumulateBreadcrumbPenaltiesSystem,
@@ -4989,18 +4944,8 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
             Breadcrumb
         >>({sim_done});
 
-
-    sim_done = builder.addToGraph<ParallelForNode<Engine,
-        deleteBreadcrumbsSystem,
-            BreadcrumbDelete 
-        >>({sim_done});
-
-    sim_done = builder.addToGraph<ClearTmpNode<BreadcrumbDeleteEntity>>({sim_done});
-
-#ifdef MADRONA_GPU_MODE
-    sim_done = queueSortByWorld<BreadcrumbEntity>(
-        builder, {sim_done});
-#endif
+    sim_done = builder.addToGraph<CompactArchetypeNode<BreadcrumbEntity>>(
+        {sim_done});
 
     return sim_done;
   };
@@ -5079,21 +5024,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                   ShotVizRemaining
               >>({sim_done});
 
-          auto destroy_shot_viz_sys = builder.addToGraph<ParallelForNode<Engine,
-              destroyShotVizSystem,
-                  ShotVizCleanupTracker
-              >>({cleanup_shot_viz_sys});
-
-          auto destroy_trackers = builder.addToGraph<ClearTmpNode<ShotVizCleanup>>(
-              {destroy_shot_viz_sys});
-          sim_done = destroy_trackers;
-
-#ifdef MADRONA_GPU_MODE
-          auto sort_shot_viz = queueSortByWorld<ShotViz>(
-              builder, {destroy_trackers});
-
-          sim_done = sort_shot_viz;
-#endif
+          sim_done = builder.addToGraph<CompactArchetypeNode<ShotViz>>({sim_done});
         }
   } else {
       assert(false);
