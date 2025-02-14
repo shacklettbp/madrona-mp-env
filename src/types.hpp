@@ -150,6 +150,11 @@ struct WorldReset {
     int32_t reset;
 };
 
+enum class WorldCurriculum : uint32_t {
+    FullMatch,
+    LearnShooting,
+};
+
 struct TrainControl {
     int32_t evalMode;
     int32_t randomizeEpisodeLengthAfterReset;
@@ -785,8 +790,6 @@ struct TaskConfig {
 
     VizState *viz;
 
-    RewardHyperParams *rewardHyperParams;
-
     StepLog *recordLog;
     StepLog *replayLog;
 
@@ -914,7 +917,8 @@ struct PvPAgent : public madrona::Archetype<
     // Training metadata
     Reward,
     Done,
-    AgentPolicy
+    AgentPolicy,
+    RewardHyperParams
 > {};
 
 struct StaticGeometry : public madrona::Archetype<

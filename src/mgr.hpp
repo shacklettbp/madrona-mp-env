@@ -78,6 +78,7 @@ public:
     madrona::py::Tensor rewardTensor() const;
     madrona::py::Tensor doneTensor() const;
     madrona::py::Tensor policyAssignmentTensor() const;
+    madrona::py::Tensor worldCurriculumTensor() const;
 
     madrona::py::Tensor selfObservationTensor() const;
     madrona::py::Tensor filtersStateObservationTensor() const;

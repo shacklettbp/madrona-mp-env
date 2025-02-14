@@ -433,6 +433,7 @@ class PrefixCommon(nn.Module):
         obs, opponents_last_known_positions = obs.pop('opponent_last_known_positions')
 
         obs, opponent_masks = obs.pop('opponent_masks')
+        obs, reward_coefs = obs.pop('reward_coefs')
 
         enc = HashGridEncoder(L=16, T=2**14, F=2, N_min=16, N_max=1024,
                               tv_scale=0, param_dtype=jnp.float32)
@@ -492,6 +493,7 @@ class PrefixCommon(nn.Module):
 
         return FrozenDict({
             'self': self_features,
+            'reward_coefs': reward_coefs,
             'fwd_lidar': fwd_lidar,
             'rear_lidar': rear_lidar,
 
@@ -566,6 +568,7 @@ class MaxPoolNet(nn.Module):
 
         obs_vec = jnp.concatenate([
             obs['self'],
+            obs['reward_coefs'],
             obs['fwd_lidar'],
             obs['rear_lidar'],
             jnp.max(obs['teammates'], axis=-2),
@@ -900,22 +903,22 @@ def make_policy(dtype):
             num_embed_channels = 32,
         )
 
-        actor_encoder = RecurrentBackboneEncoder(
+        actor_encoder = BackboneEncoder(
             net = MapActorNet(dtype),
-            rnn = PolicyRNN.create(
-                num_hidden_channels = 512,
-                num_layers = 1,
-                dtype = dtype,
-            ),
+            #rnn = PolicyRNN.create(
+            #    num_hidden_channels = 512,
+            #    num_layers = 1,
+            #    dtype = dtype,
+            #),
         )
 
-        critic_encoder = RecurrentBackboneEncoder(
+        critic_encoder = BackboneEncoder(
             net = MapCriticNet(dtype),
-            rnn = PolicyRNN.create(
-                num_hidden_channels = 512,
-                num_layers = 1,
-                dtype = dtype,
-            ),
+            #rnn = PolicyRNN.create(
+            #    num_hidden_channels = 512,
+            #    num_layers = 1,
+            #    dtype = dtype,
+            #),
         )
     else:
         prefix = PrefixCommon(
@@ -923,22 +926,22 @@ def make_policy(dtype):
             num_embed_channels = 64,
         )
 
-        actor_encoder = RecurrentBackboneEncoder(
+        actor_encoder = BackboneEncoder(
             net = ActorNet(dtype, use_maxpool_net=True),
-            rnn = PolicyRNN.create(
-                num_hidden_channels = 512,
-                num_layers = 1,
-                dtype = dtype,
-            ),
+            #rnn = PolicyRNN.create(
+            #    num_hidden_channels = 512,
+            #    num_layers = 1,
+            #    dtype = dtype,
+            #),
         )
 
-        critic_encoder = RecurrentBackboneEncoder(
+        critic_encoder = BackboneEncoder(
             net = CriticNet(dtype, use_maxpool_net=True),
-            rnn = PolicyRNN.create(
-                num_hidden_channels = 512,
-                num_layers = 1,
-                dtype = dtype,
-            ),
+            #rnn = PolicyRNN.create(
+            #    num_hidden_channels = 512,
+            #    num_layers = 1,
+            #    dtype = dtype,
+            #),
         )
 
     backbone = BackboneSeparate(

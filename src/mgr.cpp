@@ -93,7 +93,6 @@ struct Manager::Impl {
                                 TensorElementType type,
                                 madrona::Span<const int64_t> dimensions) const = 0;
 
-    virtual Tensor rewardHyperParamsTensor() const = 0;
     virtual Tensor simControlTensor() const = 0;
 
     static inline Impl * init(const Config &cfg,
@@ -150,7 +149,6 @@ struct Manager::CPUImpl final : Manager::Impl {
         TaskGraphExecutor<Engine, Sim, TaskConfig, Sim::WorldInit>;
 
     TaskGraphT cpuExec;
-    RewardHyperParams *rewardHyperParams;
 
     StepLog *replayLogBuffer;
     StepLog *recordLogBuffer;
@@ -172,7 +170,6 @@ struct Manager::CPUImpl final : Manager::Impl {
                    ExploreAction *explore_action_buffer,
                    void *pvp_action_buffer,
                    TrainControl *train_ctrl,
-                   RewardHyperParams *reward_hyper_params,
                    TaskGraphT &&cpu_exec,
                    StepLog *replay_log_buffer,
                    StepLog *record_log_buffer,
@@ -184,7 +181,6 @@ struct Manager::CPUImpl final : Manager::Impl {
         : Impl(mgr_cfg, reset_buffer,
                explore_action_buffer, pvp_action_buffer, train_ctrl),
         cpuExec(std::move(cpu_exec)),
-        rewardHyperParams(reward_hyper_params),
         replayLogBuffer(replay_log_buffer),
         recordLogBuffer(record_log_buffer),
         eventLogExported(
@@ -233,7 +229,6 @@ struct Manager::CPUImpl final : Manager::Impl {
 
     inline virtual ~CPUImpl() final
     {
-        free(rewardHyperParams);
         free(trajectoryCurriculum.snapshots);
     }
 
@@ -282,15 +277,6 @@ struct Manager::CPUImpl final : Manager::Impl {
     }
 #endif
 
-    virtual Tensor rewardHyperParamsTensor() const final
-    {
-        return Tensor(rewardHyperParams, TensorElementType::Float32,
-                      {
-                          cfg.numPBTPolicies,
-                          sizeof(RewardHyperParams) / sizeof(float),
-                      }, Optional<int>::none());
-    }
-
     virtual Tensor simControlTensor() const final
     {
         return Tensor(trainCtrl, TensorElementType::Int32,
@@ -312,7 +298,6 @@ struct Manager::CPUImpl final : Manager::Impl {
 struct Manager::CUDAImpl final : Manager::Impl {
     MWCudaExecutor gpuExec;
     MWCudaLaunchGraph stepGraph;
-    RewardHyperParams *rewardHyperParams;
 
     StepLog *replayLogBuffer;
     StepLog *recordLogBuffer;
@@ -345,7 +330,6 @@ struct Manager::CUDAImpl final : Manager::Impl {
                     ExploreAction *explore_action_buffer,
                     void *pvp_action_buffer,
                     TrainControl *train_ctrl,
-                    RewardHyperParams *reward_hyper_params,
                     MWCudaExecutor &&gpu_exec,
                     StepLog *replay_log_buffer,
                     StepLog *record_log_buffer,
@@ -360,7 +344,6 @@ struct Manager::CUDAImpl final : Manager::Impl {
                train_ctrl),
         gpuExec(std::move(gpu_exec)),
         stepGraph(gpuExec.buildLaunchGraph(TaskGraphID::Step)),
-        rewardHyperParams(reward_hyper_params),
         replayLogBuffer(replay_log_buffer),
         recordLogBuffer(record_log_buffer),
         replayLogStaging(nullptr),
@@ -423,7 +406,6 @@ struct Manager::CUDAImpl final : Manager::Impl {
     inline virtual ~CUDAImpl() final
     {
         REQ_CUDA(cudaFree(trajectoryCurriculum.snapshots));
-        REQ_CUDA(cudaFree(rewardHyperParams));
     }
 
     inline void saveEvents(cudaStream_t strm)
@@ -507,54 +489,6 @@ struct Manager::CUDAImpl final : Manager::Impl {
         saveEvents(nullptr);
 
         stepIdx++;
-    }
-
-    inline void ** copyOutObservations(cudaStream_t strm,
-                                       void **buffers,
-                                       Manager &mgr)
-    {
-        auto copyFromSim = [&strm](void *dst, const Tensor &src) {
-            uint64_t num_bytes = numTensorBytes(src);
-
-            REQ_CUDA(cudaMemcpyAsync(dst, src.devicePtr(), num_bytes,
-                                     cudaMemcpyDeviceToDevice, strm));
-            REQ_CUDA(cudaStreamSynchronize(strm));
-        };
-
-        // Observations
-        if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
-            SimFlags::FullTeamPolicy) {
-            copyFromSim(*buffers++, mgr.fullTeamGlobalObservationsTensor());
-            copyFromSim(*buffers++, mgr.fullTeamPlayerObservationsTensor());
-            copyFromSim(*buffers++, mgr.fullTeamEnemyObservationsTensor());
-            copyFromSim(*buffers++, mgr.fullTeamLastKnownEnemyObservationsTensor());
-            copyFromSim(*buffers++, mgr.fullTeamFwdLidarTensor());
-            copyFromSim(*buffers++, mgr.fullTeamRearLidarTensor());
-        } else {
-            copyFromSim(*buffers++, mgr.fwdLidarTensor());
-            copyFromSim(*buffers++, mgr.rearLidarTensor());
-            copyFromSim(*buffers++, mgr.hpTensor());
-            copyFromSim(*buffers++, mgr.magazineTensor());
-            copyFromSim(*buffers++, mgr.aliveTensor());
-
-            copyFromSim(*buffers++, mgr.selfObservationTensor());
-            copyFromSim(*buffers++, mgr.filtersStateObservationTensor());
-            copyFromSim(*buffers++, mgr.teammateObservationsTensor());
-            copyFromSim(*buffers++, mgr.opponentObservationsTensor());
-            copyFromSim(*buffers++, mgr.opponentLastKnownObservationsTensor());
-
-            copyFromSim(*buffers++, mgr.selfPositionTensor());
-            copyFromSim(*buffers++, mgr.teammatePositionObservationsTensor());
-            copyFromSim(*buffers++, mgr.opponentPositionObservationsTensor());
-            copyFromSim(*buffers++, mgr.opponentLastKnownPositionObservationsTensor());
-
-            copyFromSim(*buffers++, mgr.opponentMasksTensor());
-
-            copyFromSim(*buffers++, mgr.agentMapTensor());
-            copyFromSim(*buffers++, mgr.unmaskedAgentMapTensor());
-        }
-
-        return buffers;
     }
 
     virtual void gpuStreamInit(cudaStream_t strm, void **buffers)
@@ -695,15 +629,6 @@ struct Manager::CUDAImpl final : Manager::Impl {
         saveEvents(strm);
 
         stepIdx++;
-    }
-
-    virtual Tensor rewardHyperParamsTensor() const final
-    {
-        return Tensor(rewardHyperParams, TensorElementType::Float32,
-                      {
-                          cfg.numPBTPolicies,
-                          sizeof(RewardHyperParams) / sizeof(float),
-                      }, cfg.gpuID);
     }
 
     virtual Tensor simControlTensor() const final
@@ -1338,8 +1263,6 @@ Manager::Impl * Manager::Impl::init(
         };
     }
 
-    RewardHyperParams *reward_hyper_params;
-
     StepLog *record_log = nullptr;
     StepLog *replay_log = nullptr;
     EventLogGlobalState *event_log_global_state = nullptr;
@@ -1529,20 +1452,6 @@ Manager::Impl * Manager::Impl::init(
                            cudaMemcpyHostToDevice);
             }
 
-            if (mgr_cfg.numPBTPolicies > 0) {
-                reward_hyper_params = (RewardHyperParams *)cu::allocGPU(
-                    sizeof(RewardHyperParams) * mgr_cfg.numPBTPolicies);
-            } else {
-                reward_hyper_params = (RewardHyperParams *)cu::allocGPU(
-                    sizeof(RewardHyperParams));
-
-                RewardHyperParams default_reward_hyper_params;
-
-                REQ_CUDA(cudaMemcpy(reward_hyper_params,
-                                    &default_reward_hyper_params, sizeof(RewardHyperParams),
-                                    cudaMemcpyHostToDevice));
-            }
-
             if (mgr_cfg.recordLogPath != nullptr) {
                 record_log = (StepLog *)cu::allocGPU(
                     sizeof(StepLog) * mgr_cfg.numWorlds);
@@ -1652,16 +1561,6 @@ Manager::Impl * Manager::Impl::init(
                        sizeof(GoalRegion) * num_goal_regions);
             }
 
-            if (mgr_cfg.numPBTPolicies > 0) {
-                reward_hyper_params = (RewardHyperParams *)malloc(
-                    sizeof(RewardHyperParams) * mgr_cfg.numPBTPolicies);
-            } else {
-                reward_hyper_params = (RewardHyperParams *)malloc(
-                    sizeof(RewardHyperParams));
-
-                *(reward_hyper_params) = RewardHyperParams {};
-            }
-
             if (mgr_cfg.recordLogPath != nullptr) {
                 record_log = (StepLog *)malloc(
                     sizeof(StepLog) * mgr_cfg.numWorlds);
@@ -1709,7 +1608,6 @@ Manager::Impl * Manager::Impl::init(
         .task = mgr_cfg.taskType,
         .highlevelMove = mgr_cfg.highlevelMove,
         .viz = viz_state,
-        .rewardHyperParams = reward_hyper_params,
         .recordLog = record_log,
         .replayLog = replay_log,
         .eventGlobalState = event_log_global_state,
@@ -1780,7 +1678,6 @@ Manager::Impl * Manager::Impl::init(
                 explore_actions_buffer,
                 pvp_actions_buffer,
                 train_ctrl,
-                reward_hyper_params,
                 std::move(gpu_exec),
                 replay_log,
                 record_log,
@@ -1835,7 +1732,6 @@ Manager::Impl * Manager::Impl::init(
                 explore_actions_buffer,
                 pvp_actions_buffer,
                 train_ctrl,
-                reward_hyper_params,
                 std::move(cpu_exec),
                 replay_log,
                 record_log,
@@ -2171,7 +2067,12 @@ Tensor Manager::aliveTensor() const
 
 Tensor Manager::rewardHyperParamsTensor() const
 {
-    return impl_->rewardHyperParamsTensor();
+    return impl_->exportTensor(ExportID::RewardHyperParams,
+                               TensorElementType::Float32,
+                               {
+                                   impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
+                                   sizeof(RewardHyperParams) / sizeof(float),
+                               });
 }
 
 Tensor Manager::matchResultTensor() const
@@ -2287,21 +2188,80 @@ Tensor Manager::fullTeamDoneTensor() const
 
 Tensor Manager::fullTeamPolicyAssignmentTensor() const
 {
-    return impl_->exportTensor(ExportID::FullTeamPolicyAssignments,
+  return impl_->exportTensor(ExportID::FullTeamPolicyAssignments,
+                             TensorElementType::Int32,
+                             {
+                                 impl_->cfg.numWorlds * consts::numTeams,
+                                 1,
+                             });
+}
+
+Tensor Manager::worldCurriculumTensor() const
+{
+    return impl_->exportTensor(ExportID::WorldCurriculum,
                                TensorElementType::Int32,
                                {
-                                   impl_->cfg.numWorlds * consts::numTeams,
-                                   1,
+                                   impl_->cfg.numWorlds,
+                                   sizeof(WorldCurriculum) / sizeof(int32_t),
                                });
 }
 
 TrainInterface Manager::trainInterface() const
 {
+  return TrainInterface {
+    {
+      .actions = {
+        { "discrete", pvpDiscreteActionTensor() },
+        { "aim", pvpAimActionTensor() },
+      },
+      .resets = resetTensor(),
+      .simCtrl = simControlTensor(),
+      .pbt = {
+        { "policy_assignments", policyAssignmentTensor() },
+        { "world_curriculum", worldCurriculumTensor() },
+      },
+    },
+    {
+      .observations = {
+        { "fwd_lidar", fwdLidarTensor() },
+        { "rear_lidar", rearLidarTensor() },
+        { "hp", hpTensor() },
+        { "magazine", magazineTensor() },
+        { "alive", aliveTensor() },
+
+        { "self", selfObservationTensor() },
+        { "filters_state", filtersStateObservationTensor() },
+        { "teammates", teammateObservationsTensor() },
+        { "opponents", opponentObservationsTensor() },
+        { "opponents_last_known", opponentLastKnownObservationsTensor() },
+
+        { "self_pos", selfPositionTensor() },
+        { "teammate_positions",
+            teammatePositionObservationsTensor() },
+        { "opponent_positions",
+            opponentPositionObservationsTensor() },
+        { "opponent_last_known_positions", 
+            opponentLastKnownPositionObservationsTensor() },
+
+        { "opponent_masks", opponentMasksTensor() },
+
+        { "agent_map", agentMapTensor() },
+        { "unmasked_agent_map", agentMapTensor() },
+        { "reward_coefs", rewardHyperParamsTensor() },
+      },
+      .rewards = rewardTensor(),
+      .dones = doneTensor(),
+      .pbt = {
+        { "episode_results", matchResultTensor() },
+      },
+    },
+  };
+
+#if 0
     if ((impl_->cfg.simFlags & SimFlags::FullTeamPolicy) ==
         SimFlags::FullTeamPolicy) {
         auto pbt_inputs = std::to_array<NamedTensor>({
             { "policy_assignments", fullTeamPolicyAssignmentTensor() },
-            { "reward_hyper_params", rewardHyperParamsTensor() },
         });
 
         return TrainInterface {
@@ -2333,57 +2293,7 @@ TrainInterface Manager::trainInterface() const
             },
         };
     } else {
-        auto pbt_inputs = std::to_array<NamedTensor>({
-            { "policy_assignments", policyAssignmentTensor() },
-            { "reward_hyper_params", rewardHyperParamsTensor() },
-        });
-
-        return TrainInterface {
-            {
-                .actions = {
-                  { "discrete", pvpDiscreteActionTensor() },
-                  { "aim", pvpAimActionTensor() },
-                },
-                .resets = resetTensor(),
-                .simCtrl = simControlTensor(),
-                .pbt = impl_->cfg.numPBTPolicies > 0 ?
-                    pbt_inputs : Span<const NamedTensor>(nullptr, 0),
-            },
-            {
-                .observations = {
-                    { "fwd_lidar", fwdLidarTensor() },
-                    { "rear_lidar", rearLidarTensor() },
-                    { "hp", hpTensor() },
-                    { "magazine", magazineTensor() },
-                    { "alive", aliveTensor() },
-
-                    { "self", selfObservationTensor() },
-                    { "filters_state", filtersStateObservationTensor() },
-                    { "teammates", teammateObservationsTensor() },
-                    { "opponents", opponentObservationsTensor() },
-                    { "opponents_last_known", opponentLastKnownObservationsTensor() },
-
-                    { "self_pos", selfPositionTensor() },
-                    { "teammate_positions",
-                        teammatePositionObservationsTensor() },
-                    { "opponent_positions",
-                        opponentPositionObservationsTensor() },
-                    { "opponent_last_known_positions", 
-                        opponentLastKnownPositionObservationsTensor() },
-
-                    { "opponent_masks", opponentMasksTensor() },
-
-                    { "agent_map", agentMapTensor() },
-                    { "unmasked_agent_map", agentMapTensor() },
-                },
-                .rewards = rewardTensor(),
-                .dones = doneTensor(),
-                .pbt = {
-                    { "episode_results", matchResultTensor() },
-                },
-            },
-        };
-    }
+#endif
 }
 
 ExecMode Manager::execMode() const

@@ -511,6 +511,8 @@ void Sim::registerTypes(ECSRegistry &registry,
     registry.registerArchetype<BreadcrumbEntity>();
 
     registry.registerSingleton<WorldReset>();
+    registry.registerSingleton<WorldCurriculum>();
+
     registry.registerSingleton<TeamRewardState>();
     registry.registerSingleton<MatchResult>();
     registry.registerSingleton<MatchInfo>();
@@ -531,6 +533,9 @@ void Sim::registerTypes(ECSRegistry &registry,
 
     registry.exportSingleton<WorldReset>(
         (uint32_t)ExportID::Reset);
+
+    registry.exportSingleton<WorldCurriculum>(
+        (uint32_t)ExportID::WorldCurriculum);
 
     registry.exportSingleton<MatchResult>(
         (uint32_t)ExportID::MatchResult);
@@ -573,6 +578,7 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerSingleton<ZoneState>();
 
         registry.registerComponent<FiltersStateObservation>();
+        registry.registerComponent<RewardHyperParams>();
 
         registry.registerArchetype<CamEntity>();
         registry.registerArchetype<PvPAgent>();
@@ -618,6 +624,8 @@ void Sim::registerTypes(ECSRegistry &registry,
             (uint32_t)ExportID::RearLidar);
         registry.exportColumn<PvPAgent, Reward>(
             (uint32_t)ExportID::Reward);
+        registry.exportColumn<PvPAgent, RewardHyperParams>(
+            (uint32_t)ExportID::RewardHyperParams);
         registry.exportColumn<PvPAgent, Done>(
             (uint32_t)ExportID::Done);
         registry.exportColumn<PvPAgent, AgentPolicy>(
@@ -3223,6 +3231,7 @@ static bool anyOpponentsVisible(
 }
 #endif
 
+#if 0
 static RewardHyperParams getRewardHyperParamsForPolicy(
   Engine &ctx,
   AgentPolicy agent_policy)
@@ -3235,6 +3244,7 @@ static RewardHyperParams getRewardHyperParamsForPolicy(
 
   return ctx.data().rewardHyperParams[idx];
 }
+#endif
 
 inline void tdmRewardSystem(Engine &ctx,
                             Position pos,
@@ -3245,13 +3255,13 @@ inline void tdmRewardSystem(Engine &ctx,
                             CombatState &combat_state,
                             BreadcrumbAgentState &breadcrumb_state,
                             ExploreTracker &explore_tracker,
+                            RewardHyperParams reward_hyper_params,
                             Reward &out_reward)
 {
     (void)aim;
     (void)opponents;
-
-    const RewardHyperParams reward_hyper_params =
-        getRewardHyperParamsForPolicy(ctx, agent_policy);
+    (void)agent_policy;
+    (void)ctx;
 
     out_reward.v = 0.f;
 
@@ -3355,13 +3365,16 @@ inline void zoneRewardSystem(Engine &ctx,
                                CombatState &combat_state,
                                BreadcrumbAgentState &breadcrumb_state,
                                ExploreTracker &explore_tracker,
+                               RewardHyperParams reward_hyper_params,
                                Reward &out_reward)
 {
-  (void)aim;
-  (void)opponents;
+    (void)aim;
+    (void)opponents;
 
+#if 0
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
+#endif
 
     out_reward.v = 0.f;
 
@@ -3576,13 +3589,17 @@ inline void zoneCaptureDefendRewardSystem(
     const Opponents &opponents,
     CombatState &combat_state,
     ExploreTracker &explore_tracker,
+    RewardHyperParams reward_hyper_params,
     Reward &out_reward)
 {
     (void)aim;
     (void)opponents;
+    (void)agent_policy;
 
+#if 0
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
+#endif
 
     out_reward.v = 0.f;
 
@@ -3711,6 +3728,7 @@ inline void pvpTeamRewardSystem(Engine &ctx,
 inline void pvpFinalRewardSystem(Engine &ctx,
                                  TeamInfo team_info,
                                  AgentPolicy agent_policy,
+                                 RewardHyperParams reward_hyper_params,
                                  Reward &reward)
 {
     const TeamRewardState &team_rewards = ctx.singleton<TeamRewardState>();
@@ -3721,8 +3739,11 @@ inline void pvpFinalRewardSystem(Engine &ctx,
     float team_reward = team_rewards.teamRewards[my_team];
     float other_team_reward = team_rewards.teamRewards[my_team ^ 1];
 
+    (void)agent_policy;
+#if 0
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
+#endif
 
     float team_spirit = reward_hyper_params.teamSpirit;
 
@@ -5093,6 +5114,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 CombatState,
                 BreadcrumbAgentState,
                 ExploreTracker,
+                RewardHyperParams,
                 Reward 
             >>({explore_visit});
     } else if (cfg.task == Task::Zone) {
@@ -5108,6 +5130,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 CombatState,
                 BreadcrumbAgentState,
                 ExploreTracker,
+                RewardHyperParams,
                 Reward 
             >>({explore_visit});
     } else if (cfg.task == Task::ZoneCaptureDefend) {
@@ -5121,6 +5144,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 Opponents,
                 CombatState,
                 ExploreTracker,
+                RewardHyperParams,
                 Reward 
             >>({explore_visit});
     } else {
@@ -5136,6 +5160,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
         pvpFinalRewardSystem,
             TeamInfo,
             AgentPolicy,
+            RewardHyperParams,
             Reward
         >>({reward_sys});
   } else if (cfg.task == Task::Turret) {
@@ -5249,8 +5274,6 @@ Sim::Sim(Engine &ctx,
     };
 
     zones = cfg.zones;
-
-    rewardHyperParams = cfg.rewardHyperParams;
 
     if (cfg.recordLog != nullptr) {
         recordLog = cfg.recordLog + ctx.worldID().idx;

@@ -359,6 +359,25 @@ void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
     ExploreTracker &explore_tracker = 
         ctx.get<ExploreTracker>(agent_entity);
     explore_tracker.numNewCellsVisited = 0;
+
+    auto sampleCoef =
+      [&base_rng]
+    (float a, float b)
+    {
+      return a + (b - a) * base_rng.sampleUniform();
+    };
+
+    ctx.get<RewardHyperParams>(agent_entity) = {
+      .teamSpirit   = sampleCoef(0, 1),
+      .shotScale    = sampleCoef(0.01, 0.2),
+      .exploreScale = sampleCoef(0.0001, 0.005),
+      .inZoneScale  = sampleCoef(0.0, 0.05),
+      .zoneTeamContestScale = sampleCoef(0.0, 0.01),
+      .zoneTeamCtrlScale = sampleCoef(0.0, 0.1),
+      .zoneDistScale = sampleCoef(0.0, 0.01),
+      .zoneEarnedPointScale = sampleCoef(0.1, 2.0),
+      .breadcrumbScale = sampleCoef(0.01, 0.5),
+    };
   }
 
   for (int32_t i = 0; i < (int32_t)ctx.data().numTurrets; i++) {

@@ -154,62 +154,62 @@ if args.pbt_ensemble_size != 1 or args.pbt_past_policies != 0:
         #self_play_portion = 0.125 if not args.static_past else 0,
         #cross_play_portion = 0.5 if not args.static_past else 0,
         #past_play_portion = 0.375 if not args.static_past else 1,
-        reward_hyper_params_explore = {
-            'team_spirit': ParamExplore(
-                base = 1.0,
-                min_scale = 0.0,
-                max_scale = 1.0,
-                clip_perturb = True,
-            ),
-            'shot_scale': ParamExplore(
-                base = 0.05,
-                min_scale = 0.1,
-                max_scale = 10,
-                log10_scale = True,
-            ),
-            'explore_scale': ParamExplore(
-                base = 0.001,
-                min_scale = 0.1,
-                max_scale = 10,
-                log10_scale = True,
-            ),
-            'in_zone_scale': ParamExplore(
-                base = 0.05,
-                min_scale = 0.1,
-                max_scale = 10,
-                log10_scale = True,
-            ),
-            'zone_team_context_scale': ParamExplore(
-                base = 0.01,
-                min_scale = 0.1,
-                max_scale = 10,
-                log10_scale = True,
-            ),
-            'zone_team_ctrl_scale': ParamExplore(
-                base = 0.1,
-                min_scale = 0.1,
-                max_scale = 10,
-                log10_scale = True,
-            ),
-            'zone_team_dist_scale': ParamExplore(
-                base = 0.005,
-                min_scale = 0.1,
-                max_scale = 10,
-                log10_scale = True,
-            ),
-            'zone_earned_point_scale': ParamExplore(
-                base = 1.0,
-                min_scale = 0.5,
-                max_scale = 5,
-                log10_scale = True,
-            ),
-            'breadcrumb_scale': ParamExplore(
-                base = 0.1,
-                min_scale = 0.1,
-                max_scale = 10,
-                log10_scale = True,
-            ),
-        }
+        #reward_hyper_params_explore = {
+        #    'team_spirit': ParamExplore(
+        #        base = 1.0,
+        #        min_scale = 0.0,
+        #        max_scale = 1.0,
+        #        clip_perturb = True,
+        #    ),
+        #    'shot_scale': ParamExplore(
+        #        base = 0.05,
+        #        min_scale = 0.1,
+        #        max_scale = 10,
+        #        log10_scale = True,
+        #    ),
+        #    'explore_scale': ParamExplore(
+        #        base = 0.001,
+        #        min_scale = 0.1,
+        #        max_scale = 10,
+        #        log10_scale = True,
+        #    ),
+        #    'in_zone_scale': ParamExplore(
+        #        base = 0.05,
+        #        min_scale = 0.1,
+        #        max_scale = 10,
+        #        log10_scale = True,
+        #    ),
+        #    'zone_team_context_scale': ParamExplore(
+        #        base = 0.01,
+        #        min_scale = 0.1,
+        #        max_scale = 10,
+        #        log10_scale = True,
+        #    ),
+        #    'zone_team_ctrl_scale': ParamExplore(
+        #        base = 0.1,
+        #        min_scale = 0.1,
+        #        max_scale = 10,
+        #        log10_scale = True,
+        #    ),
+        #    'zone_team_dist_scale': ParamExplore(
+        #        base = 0.005,
+        #        min_scale = 0.1,
+        #        max_scale = 10,
+        #        log10_scale = True,
+        #    ),
+        #    'zone_earned_point_scale': ParamExplore(
+        #        base = 1.0,
+        #        min_scale = 0.5,
+        #        max_scale = 5,
+        #        log10_scale = True,
+        #    ),
+        #    'breadcrumb_scale': ParamExplore(
+        #        base = 0.1,
+        #        min_scale = 0.1,
+        #        max_scale = 10,
+        #        log10_scale = True,
+        #    ),
+        #}
     )
 else:
     pbt_cfg = None
@@ -257,7 +257,7 @@ cfg = TrainConfig(
         #value_loss_coef = args.value_loss_coef,
         value_loss_coef = 0.5,
         entropy_coef = entropy_coef,
-        max_grad_norm = 5.0,
+        max_grad_norm = 0.5,
         clip_value_loss = args.clip_value_loss,
         huber_value_loss = True,
     ),
