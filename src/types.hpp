@@ -762,6 +762,8 @@ struct TrajectoryCurriculum {
   CurriculumSnapshot *snapshots;
 };
 
+struct PolicyWeights;
+
 struct TaskConfig {
     bool autoReset;
     bool showSpawns;
@@ -806,6 +808,8 @@ struct TaskConfig {
     TrainControl * trainControl;
 
     TrajectoryCurriculum trajectoryCurriculum;
+
+    PolicyWeights *policyWeights = nullptr;
 };
 
 /* ECS Archetypes for the game */

@@ -173,6 +173,7 @@ struct Sim : public madrona::WorldBase {
     Entity teamInterfaces[consts::numTeams];
 
     TrainControl *trainControl;
+    PolicyWeights *policyWeights;
 
     TrajectoryCurriculum trajectoryCurriculum;
 

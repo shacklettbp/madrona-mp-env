@@ -9,6 +9,10 @@
 #include "utils.hpp"
 #include "level_gen.hpp"
 
+#ifndef MADRONA_GPU_MODE
+#include "dnn.hpp"
+#endif
+
 using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::phys;
@@ -5190,6 +5194,12 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
     >>({});
 
   resetAndObsTasks(builder, cfg, {done_sys});
+
+#ifndef MADRONA_GPU_MODE
+  if (cfg.policyWeights) {
+    addPolicyEvalTasks(builder);
+  }
+#endif
 }
 
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
@@ -5214,117 +5224,118 @@ Sim::Sim(Engine &ctx,
       curEpisodeIdx(0),
       worldEpisodeCounter(0)
 {
-    trainControl = cfg.trainControl;
+  trainControl = cfg.trainControl;
+  policyWeights = cfg.policyWeights;
 
-    {
-        float aspect = 16.f / 9.f;
-        float f = 1.f / tanf(math::toRadians(90.f / 2.f));
+  {
+      float aspect = 16.f / 9.f;
+      float f = 1.f / tanf(math::toRadians(90.f / 2.f));
 
-        Vector2 w = { f / aspect, 1.f };
-        Vector2 h = {          f, 1.f };
-        w *= w.invLength();
-        h *= h.invLength();
+      Vector2 w = { f / aspect, 1.f };
+      Vector2 h = {          f, 1.f };
+      w *= w.invLength();
+      h *= h.invLength();
 
-        frustumData = {
-            w.x, w.y,
-            h.x, h.y,
-        };
-    }
+      frustumData = {
+          w.x, w.y,
+          h.x, h.y,
+      };
+  }
 
-    ctx.singleton<WorldReset>() = WorldReset { 0 };
+  ctx.singleton<WorldReset>() = WorldReset { 0 };
 
-    if (cfg.viz) {
+  if (cfg.viz) {
 #ifndef MADRONA_GPU_MODE
-      VizSystem::initWorld(ctx, cfg.viz);
+    VizSystem::initWorld(ctx, cfg.viz);
 #endif
-      enableVizRender = true;
-    } else {
-      enableVizRender = false;
-    }
+    enableVizRender = true;
+  } else {
+    enableVizRender = false;
+  }
 
-    ctx.singleton<LevelData>() = {
-        .navmesh = cfg.navmesh,
-        .aStarLookup = cfg.aStarLookup,
-    };
+  ctx.singleton<LevelData>() = {
+      .navmesh = cfg.navmesh,
+      .aStarLookup = cfg.aStarLookup,
+  };
 
-    ctx.singleton<StandardSpawns>() = cfg.standardSpawns;
-    ctx.singleton<SpawnCurriculum>() = cfg.spawnCurriculum;
+  ctx.singleton<StandardSpawns>() = cfg.standardSpawns;
+  ctx.singleton<SpawnCurriculum>() = cfg.spawnCurriculum;
 
 #if 0
-    ctx.singleton<CurriculumState>() = {
-        .useCurriculumSpawnProb = 0.75f,
-        .tierProbabilities = {
-            0.2f,
-            0.2f,
-            0.2f,
-            0.2f,
-            0.2f,
-        },
-    };
+  ctx.singleton<CurriculumState>() = {
+      .useCurriculumSpawnProb = 0.75f,
+      .tierProbabilities = {
+          0.2f,
+          0.2f,
+          0.2f,
+          0.2f,
+          0.2f,
+      },
+  };
 #endif
-    ctx.singleton<CurriculumState>() = {
-        .useCurriculumSpawnProb = 1.0f,
-        .tierProbabilities = {
-            0.f,
-            0.f,
-            0.3f,
-            0.3f,
-            0.4f,
-        },
-    };
+  ctx.singleton<CurriculumState>() = {
+      .useCurriculumSpawnProb = 1.0f,
+      .tierProbabilities = {
+          0.f,
+          0.f,
+          0.3f,
+          0.3f,
+          0.4f,
+      },
+  };
 
-    zones = cfg.zones;
+  zones = cfg.zones;
 
-    if (cfg.recordLog != nullptr) {
-        recordLog = cfg.recordLog + ctx.worldID().idx;
-    } else {
-        recordLog = nullptr;
-    }
+  if (cfg.recordLog != nullptr) {
+      recordLog = cfg.recordLog + ctx.worldID().idx;
+  } else {
+      recordLog = nullptr;
+  }
 
-    if (cfg.replayLog != nullptr) {
-        replayLog = cfg.replayLog + ctx.worldID().idx;
-    } else {
-        replayLog = nullptr;
-    }
+  if (cfg.replayLog != nullptr) {
+      replayLog = cfg.replayLog + ctx.worldID().idx;
+  } else {
+      replayLog = nullptr;
+  }
 
-    autoReset = cfg.autoReset;
-    simFlags = cfg.simFlags;
+  autoReset = cfg.autoReset;
+  simFlags = cfg.simFlags;
 
-    goalRegions = cfg.goalRegions;
-    numGoalRegions = cfg.numGoalRegions;
+  goalRegions = cfg.goalRegions;
+  numGoalRegions = cfg.numGoalRegions;
 
-    numEpisodes = cfg.numEpisodes;
-    episodes = cfg.episodes;
+  numEpisodes = cfg.numEpisodes;
+  episodes = cfg.episodes;
 
-    numWeaponTypes = cfg.numWeaponTypes;
-    weaponTypeStats = cfg.weaponTypeStats;
+  numWeaponTypes = cfg.numWeaponTypes;
+  weaponTypeStats = cfg.weaponTypeStats;
 
-    trajectoryCurriculum = cfg.trajectoryCurriculum;
+  trajectoryCurriculum = cfg.trajectoryCurriculum;
 
-    assert(numWeaponTypes <= consts::maxNumWeaponTypes);
+  assert(numWeaponTypes <= consts::maxNumWeaponTypes);
 
-    // Creates agents, walls, etc.
-    createPersistentEntities(ctx, cfg);
+  // Creates agents, walls, etc.
+  createPersistentEntities(ctx, cfg);
 
-    // Generate initial world state
-    initWorld(ctx, true);
+  // Generate initial world state
+  initWorld(ctx, true);
 
-    for (CountT i = 0; i < consts::maxZones; i++) {
-        ctx.data().zoneStats[i].numSwaps = 0;
-        ctx.data().zoneStats[i].numTeamCapturedSteps = { 0, 0 };
-        ctx.data().zoneStats[i].numContestedSteps = 0;
-        ctx.data().zoneStats[i].numTotalActiveSteps = 0;
-    }
+  for (CountT i = 0; i < consts::maxZones; i++) {
+      ctx.data().zoneStats[i].numSwaps = 0;
+      ctx.data().zoneStats[i].numTeamCapturedSteps = { 0, 0 };
+      ctx.data().zoneStats[i].numContestedSteps = 0;
+      ctx.data().zoneStats[i].numTotalActiveSteps = 0;
+  }
 
-    matchID = ~0_u64;
+  matchID = ~0_u64;
 
-    eventGlobalState = cfg.eventGlobalState;
-    eventLoggedInStep = 0;
+  eventGlobalState = cfg.eventGlobalState;
+  eventLoggedInStep = 0;
 
-    for (int team = 0; team < 2; team++) {
-      filtersState[team].active = 0;
-      filtersLastMatchedStep[team] = -1;
-    }
+  for (int team = 0; team < 2; team++) {
+    filtersState[team].active = 0;
+    filtersLastMatchedStep[team] = -1;
+  }
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, TaskConfig, Sim::WorldInit);
