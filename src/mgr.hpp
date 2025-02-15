@@ -47,6 +47,7 @@ public:
         const char *recordLogPath = nullptr;
         const char *eventLogPath = nullptr;
         const char *curriculumDataPath = nullptr;
+        const char *policyWeightsPath = nullptr;
     };
 
     Manager(

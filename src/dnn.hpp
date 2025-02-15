@@ -1,7 +1,6 @@
 #pragma once
 
 #include "types.hpp"
-#include "sim.hpp"
 
 namespace madronaMPEnv {
 

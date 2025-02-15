@@ -1,6 +1,7 @@
 #include "mgr.hpp"
 #include "sim.hpp"
 #include "map_importer.hpp"
+#include "dnn.hpp"
 
 #include <madrona/utils.hpp>
 #include <madrona/importer.hpp>
@@ -1588,6 +1589,11 @@ Manager::Impl * Manager::Impl::init(
     RandKey sim_init_key = rand::split_i(init_key, 0);
     RandKey stagger_shuffle_key = rand::split_i(init_key, 1);
 
+    PolicyWeights *policy_weights = nullptr;
+    if (mgr_cfg.policyWeightsPath) {
+      policy_weights = loadPolicyWeights(mgr_cfg.policyWeightsPath);
+    }
+
     TaskConfig task_cfg {
         .autoReset = mgr_cfg.autoReset,
         .showSpawns = true,
@@ -1619,6 +1625,7 @@ Manager::Impl * Manager::Impl::init(
         .weaponTypeStats = weapon_type_stats,
         .trainControl = train_ctrl,
         .trajectoryCurriculum = trajectory_curriculum,
+        .policyWeights = policy_weights,
     };
 
     switch (mgr_cfg.execMode) {

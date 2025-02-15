@@ -60,6 +60,7 @@ int main(int argc, char *argv[])
     char *analytics_db_path = nullptr;
     char *trajectories_db_path = nullptr;
     char *curriculum_data_path = nullptr;
+    char *policy_weights_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
       char *arg = argv[i];
@@ -158,6 +159,17 @@ int main(int argc, char *argv[])
           }
 
           curriculum_data_path = argv[i];
+        } else if (!strcmp("dnn-weights", arg)) {
+          if (policy_weights_path != nullptr) {
+            usageErr();
+          }
+
+          i += 1;
+          if (i == argc) {
+            usageErr();
+          }
+
+          policy_weights_path = argv[i];
         }
       } else {
         if (num_worlds_set) {
@@ -233,6 +245,7 @@ int main(int argc, char *argv[])
         .replayLogPath = replay_log_path,
         .recordLogPath = record_log_path,
         .curriculumDataPath = curriculum_data_path,
+        .policyWeightsPath = policy_weights_path,
     }, viz);
     mgr.init();
 
