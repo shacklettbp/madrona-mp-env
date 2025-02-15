@@ -150,6 +150,11 @@ struct WorldReset {
     int32_t reset;
 };
 
+enum class WorldCurriculum : uint32_t {
+    FullMatch,
+    LearnShooting,
+};
+
 struct TrainControl {
     int32_t evalMode;
     int32_t randomizeEpisodeLengthAfterReset;
@@ -495,10 +500,6 @@ struct ShotVizRemaining {
     int32_t numStepsRemaining;
 };
 
-struct ShotVizCleanupTracker {
-    Entity e;
-};
-
 struct TurretState {
     madrona::RNG rng;
     int32_t offset;
@@ -720,14 +721,6 @@ struct BreadcrumbAgentState {
     int32_t stepsSinceLastNewBreadcrumb;
 };
 
-struct BreadcrumbDelete {
-    Entity e;
-};
-
-struct BreadcrumbDeleteEntity : madrona::Archetype<
-    BreadcrumbDelete
-> {};
-
 struct BreadcrumbEntity : madrona::Archetype<
     Position,
     Rotation,
@@ -769,6 +762,8 @@ struct TrajectoryCurriculum {
   CurriculumSnapshot *snapshots;
 };
 
+struct PolicyWeights;
+
 struct TaskConfig {
     bool autoReset;
     bool showSpawns;
@@ -797,8 +792,6 @@ struct TaskConfig {
 
     VizState *viz;
 
-    RewardHyperParams *rewardHyperParams;
-
     StepLog *recordLog;
     StepLog *replayLog;
 
@@ -815,6 +808,8 @@ struct TaskConfig {
     TrainControl * trainControl;
 
     TrajectoryCurriculum trajectoryCurriculum;
+
+    PolicyWeights *policyWeights = nullptr;
 };
 
 /* ECS Archetypes for the game */
@@ -926,7 +921,8 @@ struct PvPAgent : public madrona::Archetype<
     // Training metadata
     Reward,
     Done,
-    AgentPolicy
+    AgentPolicy,
+    RewardHyperParams
 > {};
 
 struct StaticGeometry : public madrona::Archetype<
@@ -947,10 +943,6 @@ struct ShotVizState {
 struct ShotViz : public madrona::Archetype<
     ShotVizState,
     ShotVizRemaining
-> {};
-
-struct ShotVizCleanup : public madrona::Archetype<
-    ShotVizCleanupTracker
 > {};
 
 struct Turret : public madrona::Archetype<

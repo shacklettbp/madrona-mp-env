@@ -59,6 +59,7 @@ endif ()
 
 add_library(madrona_mp_env_mgr STATIC
     mgr.hpp mgr.cpp
+    dnn.hpp dnn.cpp
 )
 
 target_link_libraries(madrona_mp_env_mgr 

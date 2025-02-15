@@ -9,6 +9,10 @@
 #include "utils.hpp"
 #include "level_gen.hpp"
 
+#ifndef MADRONA_GPU_MODE
+#include "dnn.hpp"
+#endif
+
 using namespace madrona;
 using namespace madrona::math;
 using namespace madrona::phys;
@@ -510,10 +514,9 @@ void Sim::registerTypes(ECSRegistry &registry,
     registry.registerComponent<Breadcrumb>();
     registry.registerArchetype<BreadcrumbEntity>();
 
-    registry.registerComponent<BreadcrumbDelete>();
-    registry.registerArchetype<BreadcrumbDeleteEntity>();
-
     registry.registerSingleton<WorldReset>();
+    registry.registerSingleton<WorldCurriculum>();
+
     registry.registerSingleton<TeamRewardState>();
     registry.registerSingleton<MatchResult>();
     registry.registerSingleton<MatchInfo>();
@@ -535,6 +538,9 @@ void Sim::registerTypes(ECSRegistry &registry,
     registry.exportSingleton<WorldReset>(
         (uint32_t)ExportID::Reset);
 
+    registry.exportSingleton<WorldCurriculum>(
+        (uint32_t)ExportID::WorldCurriculum);
+
     registry.exportSingleton<MatchResult>(
         (uint32_t)ExportID::MatchResult);
 
@@ -555,7 +561,6 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerComponent<CombatState>();
         registry.registerComponent<ShotVizState>();
         registry.registerComponent<ShotVizRemaining>();
-        registry.registerComponent<ShotVizCleanupTracker>();
 
         registry.registerComponent<Teammates>();
         registry.registerComponent<Opponents>();
@@ -577,11 +582,11 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerSingleton<ZoneState>();
 
         registry.registerComponent<FiltersStateObservation>();
+        registry.registerComponent<RewardHyperParams>();
 
         registry.registerArchetype<CamEntity>();
         registry.registerArchetype<PvPAgent>();
         registry.registerArchetype<ShotViz>();
-        registry.registerArchetype<ShotVizCleanup>();
         registry.registerArchetype<ZoneViz>();
 
         if (cfg.highlevelMove) {
@@ -623,6 +628,8 @@ void Sim::registerTypes(ECSRegistry &registry,
             (uint32_t)ExportID::RearLidar);
         registry.exportColumn<PvPAgent, Reward>(
             (uint32_t)ExportID::Reward);
+        registry.exportColumn<PvPAgent, RewardHyperParams>(
+            (uint32_t)ExportID::RewardHyperParams);
         registry.exportColumn<PvPAgent, Done>(
             (uint32_t)ExportID::Done);
         registry.exportColumn<PvPAgent, AgentPolicy>(
@@ -1888,19 +1895,12 @@ inline void cleanupShotVizSystem(Engine &ctx,
                                  Entity e,
                                  ShotVizRemaining &remaining)
 {
-    int32_t num_remaining = --remaining.numStepsRemaining;
-    if (num_remaining > 0) {
-        return;
-    }
+  int32_t num_remaining = --remaining.numStepsRemaining;
+  if (num_remaining > 0) {
+      return;
+  }
 
-    Loc l = ctx.makeTemporary<ShotVizCleanup>();
-    ctx.get<ShotVizCleanupTracker>(l).e = e;
-}
-
-inline void destroyShotVizSystem(Engine &ctx,
-                                 ShotVizCleanupTracker tracker)
-{
-    ctx.destroyEntity(tracker.e);
+  ctx.destroyEntity(e);
 }
 
 inline void applyBotActionsSystem(Engine &ctx,
@@ -3235,6 +3235,7 @@ static bool anyOpponentsVisible(
 }
 #endif
 
+#if 0
 static RewardHyperParams getRewardHyperParamsForPolicy(
   Engine &ctx,
   AgentPolicy agent_policy)
@@ -3247,6 +3248,7 @@ static RewardHyperParams getRewardHyperParamsForPolicy(
 
   return ctx.data().rewardHyperParams[idx];
 }
+#endif
 
 inline void tdmRewardSystem(Engine &ctx,
                             Position pos,
@@ -3257,13 +3259,13 @@ inline void tdmRewardSystem(Engine &ctx,
                             CombatState &combat_state,
                             BreadcrumbAgentState &breadcrumb_state,
                             ExploreTracker &explore_tracker,
+                            RewardHyperParams reward_hyper_params,
                             Reward &out_reward)
 {
     (void)aim;
     (void)opponents;
-
-    const RewardHyperParams reward_hyper_params =
-        getRewardHyperParamsForPolicy(ctx, agent_policy);
+    (void)agent_policy;
+    (void)ctx;
 
     out_reward.v = 0.f;
 
@@ -3367,13 +3369,16 @@ inline void zoneRewardSystem(Engine &ctx,
                                CombatState &combat_state,
                                BreadcrumbAgentState &breadcrumb_state,
                                ExploreTracker &explore_tracker,
+                               RewardHyperParams reward_hyper_params,
                                Reward &out_reward)
 {
-  (void)aim;
-  (void)opponents;
+    (void)aim;
+    (void)opponents;
 
+#if 0
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
+#endif
 
     out_reward.v = 0.f;
 
@@ -3588,13 +3593,17 @@ inline void zoneCaptureDefendRewardSystem(
     const Opponents &opponents,
     CombatState &combat_state,
     ExploreTracker &explore_tracker,
+    RewardHyperParams reward_hyper_params,
     Reward &out_reward)
 {
     (void)aim;
     (void)opponents;
+    (void)agent_policy;
 
+#if 0
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
+#endif
 
     out_reward.v = 0.f;
 
@@ -3723,6 +3732,7 @@ inline void pvpTeamRewardSystem(Engine &ctx,
 inline void pvpFinalRewardSystem(Engine &ctx,
                                  TeamInfo team_info,
                                  AgentPolicy agent_policy,
+                                 RewardHyperParams reward_hyper_params,
                                  Reward &reward)
 {
     const TeamRewardState &team_rewards = ctx.singleton<TeamRewardState>();
@@ -3733,8 +3743,11 @@ inline void pvpFinalRewardSystem(Engine &ctx,
     float team_reward = team_rewards.teamRewards[my_team];
     float other_team_reward = team_rewards.teamRewards[my_team ^ 1];
 
+    (void)agent_policy;
+#if 0
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
+#endif
 
     float team_spirit = reward_hyper_params.teamSpirit;
 
@@ -4244,21 +4257,6 @@ inline void pvpReplaySystem(Engine &ctx,
     }
 }
 
-#ifdef MADRONA_GPU_MODE
-    template <typename ArchetypeT>
-TaskGraph::NodeID queueSortByWorld(TaskGraph::Builder &builder,
-                                   Span<const TaskGraph::NodeID> deps)
-{
-    auto sort_sys =
-        builder.addToGraph<SortArchetypeNode<ArchetypeT, WorldID>>(
-            deps);
-    auto post_sort_reset_tmp =
-        builder.addToGraph<ResetTmpAllocNode>({sort_sys});
-
-    return post_sort_reset_tmp;
-}
-#endif
-
 inline void leaveBreadcrumbsSystem(Engine &ctx,
                                    Position pos,
                                    TeamInfo team_info,
@@ -4338,15 +4336,8 @@ inline void accumulateBreadcrumbPenaltiesSystem(Engine &ctx,
     breadcrumb.penalty -= 0.025f;
 
     if (breadcrumb.penalty <= 0.f) {
-        Loc loc = ctx.makeTemporary<BreadcrumbDeleteEntity>();
-        ctx.get<BreadcrumbDelete>(loc).e = e;
+        ctx.destroyEntity(e);
     }
-}
-
-inline void deleteBreadcrumbsSystem(Engine &ctx,
-                                    BreadcrumbDelete del)
-{
-    ctx.destroyEntity(del.e);
 }
 
 void readFullTeamActionsPolicies(Engine &ctx,
@@ -4732,26 +4723,6 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
             >>({post_reset});
     }
 
-#ifdef MADRONA_GPU_MODE
-    auto sort_geo = queueSortByWorld<StaticGeometry>(
-        builder, {lidar, collect_obs});
-
-    if (cfg.task == Task::Explore) {
-        queueSortByWorld<ExploreAgent>(builder, {sort_geo});
-    } else if (cfg.task == Task::TDM ||
-               cfg.task == Task::Zone ||
-               cfg.task == Task::ZoneCaptureDefend ||
-               cfg.task == Task::Turret) {
-        queueSortByWorld<PvPAgent>(builder, {sort_geo});
-    }
-
-
-    queueSortByWorld<FullTeamInterface>(builder, {});
-#else
-    (void)lidar;
-    (void)collect_obs;
-#endif
-
 #ifndef MADRONA_GPU_MODE
     if (cfg.viz) {
       VizSystem::setupGameTasks(cfg.viz, builder);
@@ -4773,15 +4744,26 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
           AgentPolicy
       >>({});
 
-#ifdef MADRONA_GPU_MODE
-  queueSortByWorld<GameEventEntity>(builder, {});
-  queueSortByWorld<PackedStepSnapshotEntity>(builder, {});
-#endif
+  builder.addToGraph<CompactArchetypeNode<GameEventEntity>>({});
+  builder.addToGraph<CompactArchetypeNode<PackedStepSnapshotEntity>>({});
 }
 
 static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
   resetAndObsTasks(builder, cfg, {});
+
+  builder.addToGraph<CompactArchetypeNode<StaticGeometry>>({});
+
+  if (cfg.task == Task::Explore) {
+    builder.addToGraph<CompactArchetypeNode<ExploreAgent>>({});
+  } else if (cfg.task == Task::TDM ||
+             cfg.task == Task::Zone ||
+             cfg.task == Task::ZoneCaptureDefend ||
+             cfg.task == Task::Turret) {
+    builder.addToGraph<CompactArchetypeNode<PvPAgent>>({});
+  }
+
+  builder.addToGraph<CompactArchetypeNode<FullTeamInterface>>({});
 }
 
 static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
@@ -4978,10 +4960,8 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
             BreadcrumbAgentState
     >>({sim_done});
 
-#ifdef MADRONA_GPU_MODE
-    sim_done = queueSortByWorld<BreadcrumbEntity>(
-        builder, {sim_done});
-#endif
+    sim_done = builder.addToGraph<CompactArchetypeNode<BreadcrumbEntity>>(
+        {sim_done});
 
     sim_done = builder.addToGraph<ParallelForNode<Engine,
         accumulateBreadcrumbPenaltiesSystem,
@@ -4989,18 +4969,8 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
             Breadcrumb
         >>({sim_done});
 
-
-    sim_done = builder.addToGraph<ParallelForNode<Engine,
-        deleteBreadcrumbsSystem,
-            BreadcrumbDelete 
-        >>({sim_done});
-
-    sim_done = builder.addToGraph<ClearTmpNode<BreadcrumbDeleteEntity>>({sim_done});
-
-#ifdef MADRONA_GPU_MODE
-    sim_done = queueSortByWorld<BreadcrumbEntity>(
-        builder, {sim_done});
-#endif
+    sim_done = builder.addToGraph<CompactArchetypeNode<BreadcrumbEntity>>(
+        {sim_done});
 
     return sim_done;
   };
@@ -5079,21 +5049,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                   ShotVizRemaining
               >>({sim_done});
 
-          auto destroy_shot_viz_sys = builder.addToGraph<ParallelForNode<Engine,
-              destroyShotVizSystem,
-                  ShotVizCleanupTracker
-              >>({cleanup_shot_viz_sys});
-
-          auto destroy_trackers = builder.addToGraph<ClearTmpNode<ShotVizCleanup>>(
-              {destroy_shot_viz_sys});
-          sim_done = destroy_trackers;
-
-#ifdef MADRONA_GPU_MODE
-          auto sort_shot_viz = queueSortByWorld<ShotViz>(
-              builder, {destroy_trackers});
-
-          sim_done = sort_shot_viz;
-#endif
+          sim_done = builder.addToGraph<CompactArchetypeNode<ShotViz>>({sim_done});
         }
   } else {
       assert(false);
@@ -5162,6 +5118,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 CombatState,
                 BreadcrumbAgentState,
                 ExploreTracker,
+                RewardHyperParams,
                 Reward 
             >>({explore_visit});
     } else if (cfg.task == Task::Zone) {
@@ -5177,6 +5134,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 CombatState,
                 BreadcrumbAgentState,
                 ExploreTracker,
+                RewardHyperParams,
                 Reward 
             >>({explore_visit});
     } else if (cfg.task == Task::ZoneCaptureDefend) {
@@ -5190,6 +5148,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 Opponents,
                 CombatState,
                 ExploreTracker,
+                RewardHyperParams,
                 Reward 
             >>({explore_visit});
     } else {
@@ -5205,6 +5164,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
         pvpFinalRewardSystem,
             TeamInfo,
             AgentPolicy,
+            RewardHyperParams,
             Reward
         >>({reward_sys});
   } else if (cfg.task == Task::Turret) {
@@ -5234,6 +5194,12 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
     >>({});
 
   resetAndObsTasks(builder, cfg, {done_sys});
+
+#ifndef MADRONA_GPU_MODE
+  if (cfg.policyWeights) {
+    addPolicyEvalTasks(builder);
+  }
+#endif
 }
 
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
@@ -5258,119 +5224,118 @@ Sim::Sim(Engine &ctx,
       curEpisodeIdx(0),
       worldEpisodeCounter(0)
 {
-    trainControl = cfg.trainControl;
+  trainControl = cfg.trainControl;
+  policyWeights = cfg.policyWeights;
 
-    {
-        float aspect = 16.f / 9.f;
-        float f = 1.f / tanf(math::toRadians(90.f / 2.f));
+  {
+      float aspect = 16.f / 9.f;
+      float f = 1.f / tanf(math::toRadians(90.f / 2.f));
 
-        Vector2 w = { f / aspect, 1.f };
-        Vector2 h = {          f, 1.f };
-        w *= w.invLength();
-        h *= h.invLength();
+      Vector2 w = { f / aspect, 1.f };
+      Vector2 h = {          f, 1.f };
+      w *= w.invLength();
+      h *= h.invLength();
 
-        frustumData = {
-            w.x, w.y,
-            h.x, h.y,
-        };
-    }
+      frustumData = {
+          w.x, w.y,
+          h.x, h.y,
+      };
+  }
 
-    ctx.singleton<WorldReset>() = WorldReset { 0 };
+  ctx.singleton<WorldReset>() = WorldReset { 0 };
 
-    if (cfg.viz) {
+  if (cfg.viz) {
 #ifndef MADRONA_GPU_MODE
-      VizSystem::initWorld(ctx, cfg.viz);
+    VizSystem::initWorld(ctx, cfg.viz);
 #endif
-      enableVizRender = true;
-    } else {
-      enableVizRender = false;
-    }
+    enableVizRender = true;
+  } else {
+    enableVizRender = false;
+  }
 
-    ctx.singleton<LevelData>() = {
-        .navmesh = cfg.navmesh,
-        .aStarLookup = cfg.aStarLookup,
-    };
+  ctx.singleton<LevelData>() = {
+      .navmesh = cfg.navmesh,
+      .aStarLookup = cfg.aStarLookup,
+  };
 
-    ctx.singleton<StandardSpawns>() = cfg.standardSpawns;
-    ctx.singleton<SpawnCurriculum>() = cfg.spawnCurriculum;
+  ctx.singleton<StandardSpawns>() = cfg.standardSpawns;
+  ctx.singleton<SpawnCurriculum>() = cfg.spawnCurriculum;
 
 #if 0
-    ctx.singleton<CurriculumState>() = {
-        .useCurriculumSpawnProb = 0.75f,
-        .tierProbabilities = {
-            0.2f,
-            0.2f,
-            0.2f,
-            0.2f,
-            0.2f,
-        },
-    };
+  ctx.singleton<CurriculumState>() = {
+      .useCurriculumSpawnProb = 0.75f,
+      .tierProbabilities = {
+          0.2f,
+          0.2f,
+          0.2f,
+          0.2f,
+          0.2f,
+      },
+  };
 #endif
-    ctx.singleton<CurriculumState>() = {
-        .useCurriculumSpawnProb = 1.0f,
-        .tierProbabilities = {
-            0.f,
-            0.f,
-            0.3f,
-            0.3f,
-            0.4f,
-        },
-    };
+  ctx.singleton<CurriculumState>() = {
+      .useCurriculumSpawnProb = 1.0f,
+      .tierProbabilities = {
+          0.f,
+          0.f,
+          0.3f,
+          0.3f,
+          0.4f,
+      },
+  };
 
-    zones = cfg.zones;
+  zones = cfg.zones;
 
-    rewardHyperParams = cfg.rewardHyperParams;
+  if (cfg.recordLog != nullptr) {
+      recordLog = cfg.recordLog + ctx.worldID().idx;
+  } else {
+      recordLog = nullptr;
+  }
 
-    if (cfg.recordLog != nullptr) {
-        recordLog = cfg.recordLog + ctx.worldID().idx;
-    } else {
-        recordLog = nullptr;
-    }
+  if (cfg.replayLog != nullptr) {
+      replayLog = cfg.replayLog + ctx.worldID().idx;
+  } else {
+      replayLog = nullptr;
+  }
 
-    if (cfg.replayLog != nullptr) {
-        replayLog = cfg.replayLog + ctx.worldID().idx;
-    } else {
-        replayLog = nullptr;
-    }
+  autoReset = cfg.autoReset;
+  simFlags = cfg.simFlags;
 
-    autoReset = cfg.autoReset;
-    simFlags = cfg.simFlags;
+  goalRegions = cfg.goalRegions;
+  numGoalRegions = cfg.numGoalRegions;
 
-    goalRegions = cfg.goalRegions;
-    numGoalRegions = cfg.numGoalRegions;
+  numEpisodes = cfg.numEpisodes;
+  episodes = cfg.episodes;
 
-    numEpisodes = cfg.numEpisodes;
-    episodes = cfg.episodes;
+  numWeaponTypes = cfg.numWeaponTypes;
+  weaponTypeStats = cfg.weaponTypeStats;
 
-    numWeaponTypes = cfg.numWeaponTypes;
-    weaponTypeStats = cfg.weaponTypeStats;
+  trajectoryCurriculum = cfg.trajectoryCurriculum;
 
-    trajectoryCurriculum = cfg.trajectoryCurriculum;
+  assert(numWeaponTypes <= consts::maxNumWeaponTypes);
 
-    assert(numWeaponTypes <= consts::maxNumWeaponTypes);
+  // Creates agents, walls, etc.
+  createPersistentEntities(ctx, cfg);
 
-    // Creates agents, walls, etc.
-    createPersistentEntities(ctx, cfg);
+  // Generate initial world state
+  initWorld(ctx, true);
 
-    // Generate initial world state
-    initWorld(ctx, true);
+  for (CountT i = 0; i < consts::maxZones; i++) {
+      ctx.data().zoneStats[i].numSwaps = 0;
+      ctx.data().zoneStats[i].numTeamCapturedSteps = { 0, 0 };
+      ctx.data().zoneStats[i].numContestedSteps = 0;
+      ctx.data().zoneStats[i].numTotalActiveSteps = 0;
+  }
 
-    for (CountT i = 0; i < consts::maxZones; i++) {
-        ctx.data().zoneStats[i].numSwaps = 0;
-        ctx.data().zoneStats[i].numTeamCapturedSteps = { 0, 0 };
-        ctx.data().zoneStats[i].numContestedSteps = 0;
-        ctx.data().zoneStats[i].numTotalActiveSteps = 0;
-    }
+  matchID = ~0_u64;
 
-    matchID = ~0_u64;
+  eventGlobalState = cfg.eventGlobalState;
+  eventLoggedInStep = 0;
 
-    eventGlobalState = cfg.eventGlobalState;
-    eventLoggedInStep = 0;
-
-    for (int team = 0; team < 2; team++) {
-      filtersState[team].active = 0;
-      filtersLastMatchedStep[team] = -1;
-    }
+  for (int team = 0; team < 2; team++) {
+    filtersState[team].active = 0;
+    filtersLastMatchedStep[team] = -1;
+  }
 }
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, TaskConfig, Sim::WorldInit);

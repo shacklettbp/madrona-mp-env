@@ -14,6 +14,7 @@ class Engine;
 // for each component exported to the training code.
 enum class ExportID : uint32_t {
     Reset,
+    WorldCurriculum,
     ExploreAction,
     PvPDiscreteAction,
     PvPAimAction,
@@ -57,6 +58,8 @@ enum class ExportID : uint32_t {
     PackedStepSnapshot,
 
     FiltersStateObservation,
+
+    RewardHyperParams,
 
     NumExports,
 };
@@ -170,6 +173,7 @@ struct Sim : public madrona::WorldBase {
     Entity teamInterfaces[consts::numTeams];
 
     TrainControl *trainControl;
+    PolicyWeights *policyWeights;
 
     TrajectoryCurriculum trajectoryCurriculum;
 

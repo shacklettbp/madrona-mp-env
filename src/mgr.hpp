@@ -47,6 +47,7 @@ public:
         const char *recordLogPath = nullptr;
         const char *eventLogPath = nullptr;
         const char *curriculumDataPath = nullptr;
+        const char *policyWeightsPath = nullptr;
     };
 
     Manager(
@@ -78,6 +79,7 @@ public:
     madrona::py::Tensor rewardTensor() const;
     madrona::py::Tensor doneTensor() const;
     madrona::py::Tensor policyAssignmentTensor() const;
+    madrona::py::Tensor worldCurriculumTensor() const;
 
     madrona::py::Tensor selfObservationTensor() const;
     madrona::py::Tensor filtersStateObservationTensor() const;
