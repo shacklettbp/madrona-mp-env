@@ -10,6 +10,7 @@
 #include <madrona/mw_cpu.hpp>
 
 #include <array>
+#include <cstring>
 #include <cassert>
 #include <charconv>
 #include <iostream>
@@ -1144,13 +1145,12 @@ static AStarLookup buildAStarLookup(const Navmesh &navmesh, const char *navmesh_
 	// Build the filename by stripping the extension and adding .astar
 	const unsigned int MAX_PATH = 1024;
     char cachedFilename[MAX_PATH];
-	strcpy_s(cachedFilename, MAX_PATH, navmesh_filename);
+	strncpy(cachedFilename, navmesh_filename, MAX_PATH);
 	char* ext = strrchr(cachedFilename, '.');
 	if (ext)
 		*ext = '\0';
-	strcat_s(cachedFilename, MAX_PATH, ".astar");
-    FILE* file = nullptr;
-    fopen_s(&file, cachedFilename, "rb");
+	strncat(cachedFilename, ".astar", MAX_PATH);
+  FILE* file = fopen( cachedFilename, "rb");
 	if (file)
 	{
 		fseek(file, 0, SEEK_END);
@@ -1184,7 +1184,7 @@ static AStarLookup buildAStarLookup(const Navmesh &navmesh, const char *navmesh_
 	printf("100%%\n");
 
 	// Cache the lookup table to disk.
-	fopen_s(&file, cachedFilename, "wb");
+	file = fopen(cachedFilename, "wb");
     if (file != nullptr)
     {
         fwrite(lookup_tbl, 1, num_tris * num_tris * sizeof(u32), file);
