@@ -133,7 +133,9 @@ void evalAgentPolicy(
   const OpponentMasks &opponent_masks,
   const FiltersStateObservation &filters_state_obs,
   const FwdLidar &fwd_lidar,
-  const RearLidar &read_lidar)
+  const RearLidar &read_lidar,
+  PvPDiscreteAction &discrete_action,
+  PvPAimAction &aim_action)
 {
 
 }
@@ -548,7 +550,9 @@ void addPolicyEvalTasks(TaskGraphBuilder &builder)
       OpponentMasks,
       FiltersStateObservation,
       FwdLidar,
-      RearLidar
+      RearLidar,
+      PvPDiscreteAction,
+      PvPAimAction
     >>({});
 }
 
