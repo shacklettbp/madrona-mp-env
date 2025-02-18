@@ -114,8 +114,36 @@ struct NormalizeObParameters {
   RewardHyperParamsNorm rewardCoefs;
 };
 
+struct FullyConnectedParams {
+  float *weights;
+  float *bias;
+  int numInputs;
+  int numFeatures;
+};
+
+struct LayerNormParams {
+  float *bias;
+  float *scale;
+  int numFeatures;
+};
+
+struct FullyConnectedLayer {
+  FullyConnectedParams params;
+  LayerNormParams layerNorm;
+};
+
 struct PolicyWeights {
   NormalizeObParameters normOb;
+
+  FullyConnectedLayer selfEmbed;
+  FullyConnectedLayer teammatesEmbed;
+  FullyConnectedLayer opponentsEmbed;
+  FullyConnectedLayer opponentsLastKnownEmbed;
+
+  std::array<FullyConnectedLayer, 3> mlp;
+
+  FullyConnectedParams discreteHead;
+  FullyConnectedParams aimHead;
 };
 
 void evalAgentPolicy(
@@ -337,6 +365,63 @@ static int loadWeightFile(const char *dir, const char *name,
   return ndim;
 }
 
+static FullyConnectedParams loadFullyConnectedParams(
+  const char *dir, const char *path)
+{
+  std::string kernel_path = path;
+  kernel_path += "_kernel";
+
+  std::string bias_path = path;
+  bias_path += "_bias";
+
+  FullyConnectedParams params;
+
+  int32_t *shape;
+  int ndim = loadWeightFile(
+    dir, kernel_path.c_str(), &params.weights, &shape);
+
+  assert(ndim == 2);
+
+  params.numInputs = shape[0];
+  params.numFeatures = shape[1];
+
+  ndim = loadWeightFile(
+    dir, bias_path.c_str(), &params.bias, &shape);
+
+  assert(ndim == 1);
+  assert(shape[0] == params.numFeatures);
+
+  return params;
+}
+
+static LayerNormParams loadLayerNormParams(
+  const char *dir, const char *path)
+{
+  std::string scale_path = path;
+  scale_path += "_scale";
+
+  std::string bias_path = path;
+  bias_path += "_bias";
+
+  LayerNormParams params;
+
+  int32_t *shape;
+  int ndim = loadWeightFile(
+    dir, scale_path.c_str(), &params.scale, &shape);
+
+  assert(ndim == 1);
+
+  params.numFeatures = shape[0];
+
+  ndim = loadWeightFile(
+    dir, bias_path.c_str(), &params.bias, &shape);
+
+  assert(ndim == 1);
+  assert(shape[0] == params.numFeatures);
+
+  return params;
+}
+
 PolicyWeights * loadPolicyWeights(const char *path)
 {
   PolicyWeights *weights = new PolicyWeights {};
@@ -528,6 +613,61 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
     free(inv_std);
     free(inv_std_shape);
+  }
+
+  {
+    weights->selfEmbed.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_self_embed");
+
+    weights->selfEmbed.layerNorm = loadLayerNormParams(
+        path, "params_backbone_prefix_LayerNorm_0_impl");
+  }
+
+  {
+    weights->teammatesEmbed.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_teammates_embed");
+
+    weights->teammatesEmbed.layerNorm = loadLayerNormParams(
+        path, "params_backbone_prefix_LayerNorm_1_impl");
+  }
+
+  {
+    weights->opponentsEmbed.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_opponents_embed");
+
+    weights->opponentsEmbed.layerNorm = loadLayerNormParams(
+        path, "params_backbone_prefix_LayerNorm_2_impl");
+  }
+
+  {
+    weights->opponentsLastKnownEmbed.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_opponents_last_known_embed");
+
+    weights->opponentsLastKnownEmbed.layerNorm = loadLayerNormParams(
+        path, "params_backbone_prefix_LayerNorm_3_impl");
+  }
+
+  for (int i = 0; i < 3; i++) {
+    std::string param_path =
+        "params_backbone_actor_encoder_net_MaxPoolNet_0_MLP_0_Dense_";
+
+    param_path += std::to_string(i);
+    std::string layernorm_path =
+        "params_backbone_actor_encoder_net_MaxPoolNet_0_MLP_0_LayerNorm_";
+    layernorm_path += std::to_string(i) + "_impl";
+        
+    weights->mlp[i].params = loadFullyConnectedParams(
+        path, param_path.c_str());
+    weights->mlp[i].layerNorm = loadLayerNormParams(
+        path, layernorm_path.c_str());
+  }
+
+
+  {
+    weights->discreteHead = loadFullyConnectedParams(
+        path, "params_actor_DenseLayerDiscreteActor_0_impl");
+    weights->aimHead = loadFullyConnectedParams(
+        path, "params_actor_aim_head");
   }
 
   return weights;
