@@ -106,6 +106,9 @@ class PrefixCommon(nn.Module):
                 name = 'fwd_lidar_embed',
             )(fwd_lidar.reshape(*fwd_lidar.shape[:-3], -1))
 
+        fwd_lidar = LayerNorm(dtype=self.dtype)(fwd_lidar)
+        fwd_lidar = nn.leaky_relu(fwd_lidar)
+
         rear_lidar = nn.Dense(
                 self.num_embed_channels,
                 use_bias = True,
@@ -114,6 +117,9 @@ class PrefixCommon(nn.Module):
                 dtype = self.dtype,
                 name = 'rear_lidar_embed',
             )(rear_lidar.reshape(*rear_lidar.shape[:-3], -1))
+
+        rear_lidar = LayerNorm(dtype=self.dtype)(rear_lidar)
+        rear_lidar = nn.leaky_relu(rear_lidar)
 
         obs, teammates = obs.pop('teammates')
         obs, opponents = obs.pop('opponents')
@@ -133,6 +139,7 @@ class PrefixCommon(nn.Module):
 
         self_features = jnp.concatenate([
                 self_ob,
+                reward_coefs,
                 self_pos_enc.astype(self.dtype),
             ], axis=-1)
 
@@ -184,7 +191,6 @@ class PrefixCommon(nn.Module):
 
         return FrozenDict({
             'self': self_features,
-            'reward_coefs': reward_coefs,
             'fwd_lidar': fwd_lidar,
             'rear_lidar': rear_lidar,
 
@@ -259,7 +265,6 @@ class MaxPoolNet(nn.Module):
 
         obs_vec = jnp.concatenate([
             obs['self'],
-            obs['reward_coefs'],
             obs['fwd_lidar'],
             obs['rear_lidar'],
             jnp.max(obs['teammates'], axis=-2),

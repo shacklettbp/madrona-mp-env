@@ -132,13 +132,21 @@ struct FullyConnectedLayer {
   LayerNormParams layerNorm;
 };
 
+struct EmbedModule {
+  FullyConnectedLayer fc;
+};
+
 struct PolicyWeights {
   NormalizeObParameters normOb;
 
-  FullyConnectedLayer selfEmbed;
-  FullyConnectedLayer teammatesEmbed;
-  FullyConnectedLayer opponentsEmbed;
-  FullyConnectedLayer opponentsLastKnownEmbed;
+  EmbedModule selfEmbed;
+
+  EmbedModule fwdLidarEmbed;
+  EmbedModule rearLidarEmbed;
+
+  EmbedModule teammatesEmbed;
+  EmbedModule opponentsEmbed;
+  EmbedModule opponentsLastKnownEmbed;
 
   std::array<FullyConnectedLayer, 3> mlp;
 
@@ -422,10 +430,8 @@ static LayerNormParams loadLayerNormParams(
   return params;
 }
 
-PolicyWeights * loadPolicyWeights(const char *path)
+static void loadNormParams(PolicyWeights *weights, const char *path)
 {
-  PolicyWeights *weights = new PolicyWeights {};
-
   {
     float *self_mu;
     int32_t *self_mu_shape;
@@ -615,39 +621,60 @@ PolicyWeights * loadPolicyWeights(const char *path)
     free(inv_std_shape);
   }
 
+}
+
+PolicyWeights * loadPolicyWeights(const char *path)
+{
+  PolicyWeights *weights = new PolicyWeights {};
   {
-    weights->selfEmbed.params = loadFullyConnectedParams(
+    weights->selfEmbed.fc.params = loadFullyConnectedParams(
         path, "params_backbone_prefix_self_embed");
 
-    weights->selfEmbed.layerNorm = loadLayerNormParams(
+    weights->selfEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_0_impl");
   }
 
   {
-    weights->teammatesEmbed.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_teammates_embed");
+    weights->fwdLidarEmbed.fc.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_fwd_lidar_embed");
 
-    weights->teammatesEmbed.layerNorm = loadLayerNormParams(
+    weights->fwdLidarEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_1_impl");
   }
 
   {
-    weights->opponentsEmbed.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_opponents_embed");
+    weights->rearLidarEmbed.fc.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_rear_lidar_embed");
 
-    weights->opponentsEmbed.layerNorm = loadLayerNormParams(
+    weights->rearLidarEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_2_impl");
   }
 
   {
-    weights->opponentsLastKnownEmbed.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_opponents_last_known_embed");
+    weights->teammatesEmbed.fc.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_teammates_embed");
 
-    weights->opponentsLastKnownEmbed.layerNorm = loadLayerNormParams(
+    weights->teammatesEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_3_impl");
   }
 
-  for (int i = 0; i < 3; i++) {
+  {
+    weights->opponentsEmbed.fc.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_opponents_embed");
+
+    weights->opponentsEmbed.fc.layerNorm = loadLayerNormParams(
+        path, "params_backbone_prefix_LayerNorm_4_impl");
+  }
+
+  {
+    weights->opponentsLastKnownEmbed.fc.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_opponents_last_known_embed");
+
+    weights->opponentsLastKnownEmbed.fc.layerNorm = loadLayerNormParams(
+        path, "params_backbone_prefix_LayerNorm_5_impl");
+  }
+
+  for (int i = 0; i < (int)weights->mlp.size(); i++) {
     std::string param_path =
         "params_backbone_actor_encoder_net_MaxPoolNet_0_MLP_0_Dense_";
 
@@ -668,6 +695,46 @@ PolicyWeights * loadPolicyWeights(const char *path)
         path, "params_actor_DenseLayerDiscreteActor_0_impl");
     weights->aimHead = loadFullyConnectedParams(
         path, "params_actor_aim_head");
+  }
+
+  {
+    printf("selfEmbed %d %d\n",
+           weights->selfEmbed.fc.params.numInputs, 
+           weights->selfEmbed.fc.params.numFeatures);
+
+    printf("fwdLidarEmbed %d %d\n",
+           weights->fwdLidarEmbed.fc.params.numInputs, 
+           weights->fwdLidarEmbed.fc.params.numFeatures);
+
+    printf("rearLidarEmbed %d %d\n",
+           weights->rearLidarEmbed.fc.params.numInputs, 
+           weights->rearLidarEmbed.fc.params.numFeatures);
+
+    printf("teammatesEmbed %d %d\n",
+           weights->teammatesEmbed.fc.params.numInputs, 
+           weights->teammatesEmbed.fc.params.numFeatures);
+
+    printf("opponentsEmbed %d %d\n",
+           weights->opponentsEmbed.fc.params.numInputs, 
+           weights->opponentsEmbed.fc.params.numFeatures);
+
+    printf("opponentsLastKnownEmbed %d %d\n",
+           weights->opponentsLastKnownEmbed.fc.params.numInputs, 
+           weights->opponentsLastKnownEmbed.fc.params.numFeatures);
+
+    for (int i = 0; i < (int)weights->mlp.size(); i++) {
+      printf("mlp_%d %d %d\n", i,
+        weights->mlp[i].params.numInputs, 
+        weights->mlp[i].params.numFeatures);
+    }
+
+    printf("discreteHead %d %d\n",
+           weights->discreteHead.numInputs, 
+           weights->discreteHead.numFeatures );
+
+    printf("aimHead %d %d\n",
+           weights->aimHead.numInputs, 
+           weights->aimHead.numFeatures);
   }
 
   return weights;
