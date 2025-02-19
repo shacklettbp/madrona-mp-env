@@ -214,7 +214,7 @@ static float * normalizePlayerCommonOb(PlayerCommonObservation &ob,
 
   out = normalizeStandOb(ob.stand, params.stand, out);
 
-  *out++ = params.isValid.invStd * (ob.isValid - params.isValid.mean);
+  *out++ = params.inZone.invStd * (ob.inZone - params.inZone.mean);
 
   for (int i = 0; i < (int)consts::maxNumWeaponTypes; i++) {
     *out++ = params.weaponTypeObs[i].invStd *
@@ -363,15 +363,15 @@ static void positionFrequencyEmbedding(NormalizedPositionObservation p,
   for (int i = 0; i < num_freqs; i++) {
     float x_scaled = p.x * float(1 << i) * math::pi;
     float x_sin_embedding = sinf(x_scaled);
-    float x_cos_embedding = sinf(x_scaled);
+    float x_cos_embedding = cosf(x_scaled);
 
     float y_scaled = p.y * float(1 << i) * math::pi;
     float y_sin_embedding = sinf(y_scaled);
-    float y_cos_embedding = sinf(y_scaled);
+    float y_cos_embedding = cosf(y_scaled);
 
     float z_scaled = p.z * float(1 << i) * math::pi;
     float z_sin_embedding = sinf(z_scaled);
-    float z_cos_embedding = sinf(z_scaled);
+    float z_cos_embedding = cosf(z_scaled);
     
     out[(2 * i) * 3 + 0] = x_sin_embedding;
     out[(2 * i) * 3 + 1] = y_sin_embedding;
@@ -707,7 +707,7 @@ void evalAgentPolicy(
 
     auto sampleGaussian2D =
       [&combat_state]
-    (Vector2 mean, Vector2 std, float lo = -1.f, float hi = 1.f)
+    (Vector2 mean, Vector2 std, float lo, float hi)
     {
       auto sigmoid = []
       (float v)
@@ -736,22 +736,14 @@ void evalAgentPolicy(
     Vector2 mean { aim_out[0], aim_out[1] };
     Vector2 std { aim_out[2], aim_out[3] };
 
-    auto softplus = []
-    (float v)
-    {
-      return logf(1.f + expf(v));
-    };
+    constexpr float MIN_STDDEV = 0.001;
+    constexpr float MAX_STDDEV = 1.f;
 
-    float init_std_offset = -1.f;
-    std.x = softplus(std.x + init_std_offset) + 1e-6f;
-    std.y = softplus(std.y + init_std_offset) + 1e-6f;
-
-    Vector2 sample = sampleGaussian2D(mean, std);
+    Vector2 sample = sampleGaussian2D(mean, std, MIN_STDDEV, MAX_STDDEV);
 
     aim_action.yaw = sample.x;
     aim_action.pitch = sample.y;
   }
-  
 }
 
 static RewardHyperParamsNorm setupRewardCoefsNorm(
@@ -976,6 +968,19 @@ static FullyConnectedParams loadFullyConnectedParams(
 
   assert(ndim == 1);
   assert(shape[0] == params.numFeatures);
+
+  // Transpose weights to be output, input row major
+  float *transposed = (float *)malloc(
+      sizeof(float) * params.numFeatures * params.numInputs);
+  for (int row = 0; row < params.numInputs; row++) {
+    for (int col = 0; col < params.numFeatures; col++) {
+      transposed[col * params.numInputs + row] =
+          params.weights[row * params.numFeatures + col];
+    }
+  }
+
+  free(params.weights);
+  params.weights = transposed;
 
   return params;
 }

@@ -39,7 +39,7 @@ actions_config = {
         ),
     'aim': ContinuousActionsConfig(
             props = [
-                ContinuousActionProps(-1, 1),
+                ContinuousActionProps(0.001, 1.0),
             ],
         ),
 }
@@ -218,51 +218,6 @@ class MaxPoolNet(nn.Module):
         obs,
         train,
     ):
-        #num_batch_dims = len(obs['self'].shape) - 1
-        #num_embed_channels = self.num_embed_channels
-        #embed_init = self.embed_init
-        #dtype = self.dtype
-
-        #def make_embed(name):
-        #    def embed(x):
-        #        o = nn.Dense(
-        #            num_embed_channels,
-        #            use_bias = True,
-        #            kernel_init = embed_init,
-        #            bias_init = jax.nn.initializers.constant(0),
-        #            dtype = dtype,
-        #            name = name,
-        #        )(x)
-
-        #        o = LayerNorm(dtype=self.dtype)(o)
-        #        o = nn.leaky_relu(o)
-
-        #        return o
-
-        #    return embed
-
-        #obs, self = obs.pop('self')
-        #obs, teammates = obs.pop('teammates')
-        #obs, opponents = obs.pop('opponents')
-        #obs, opponents_last_known = obs.pop('opponents_last_known')
-        ##obs, zones = obs.pop('zones')
-        ##obs, map_data = obs.pop('map')
-
-        #self_embed = make_embed('self_embed')(self)
-        #teammates_embed = make_embed('teammates_embed')(teammates)
-        #opponents_embed = make_embed('opponents_embed')(opponents)
-        #opponents_last_known_embed = make_embed('opponents_last_known_embed')(
-        #    opponents_last_known)
-        ##zones_embed = make_embed('zones_embed')(zones)
-        ##map_embed = make_embed('map_embed')(map_data)
-
-        #teammates_embed = jnp.max(teammates_embed, axis=-2)
-        #opponents_embed = jnp.max(opponents_embed, axis=-2)
-        #opponents_last_known_embed = jnp.max(opponents_last_known_embed, axis=-2)
-        ##zones_embed = jnp.max(zones_embed, axis=-2)
-
-        ##assert len(obs) == 0
-
         obs_vec = jnp.concatenate([
             obs['self'],
             obs['fwd_lidar'],
@@ -288,30 +243,6 @@ class ActorNet(nn.Module):
         obs,
         train,
     ):
-        #minimap = build_map(obs['self'],
-        #                    obs['teammates'],
-        #                    obs['opponents'],
-        #                    obs['opponents_last_known'],
-        #                    obs['self_pos'],
-        #                    obs['teammates_positions'],
-        #                    obs['opponents_positions'],
-        #                    obs['opponents_last_known_positions'],
-        #                    obs['opponent_masks'])
-
-
-        #minimap_encoded = build_conv_backbone(minimap, self.dtype)
-
-        #encoded_features = jnp.concatenate([
-        #        minimap_encoded,
-        #        obs['self'],
-        #    ], axis=-1)
-
-        #return MLP(
-        #        num_channels = 256,
-        #        num_layers = 2,
-        #        dtype = self.dtype,
-        #    )(encoded_features, train)
-
         obs, opponents = obs.pop('opponents')
 
         opponents = jnp.where(obs['opponent_masks'] == 1.0, opponents, 0.0)
@@ -419,10 +350,6 @@ class ActorHead(nn.Module):
 
         aim_means = aim_out[..., 0:1, :]
         aim_stds = aim_out[..., 1:2, :]
-
-        init_std_offset = -1.0
-
-        aim_stds = nn.softplus(aim_stds + init_std_offset) + 1e-6
 
         aim_dist = ContinuousActionDistributions(
             props = actions_config['aim'].props,
