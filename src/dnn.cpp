@@ -127,13 +127,13 @@ struct LayerNormParams {
   int numFeatures;
 };
 
-struct FullyConnectedLayer {
+struct FullyConnectedLayerWithLayerNormWithActivation {
   FullyConnectedParams params;
   LayerNormParams layerNorm;
 };
 
 struct EmbedModule {
-  FullyConnectedLayer fc;
+  FullyConnectedLayerWithLayerNormWithActivation fc;
 };
 
 struct PolicyWeights {
@@ -148,32 +148,610 @@ struct PolicyWeights {
   EmbedModule opponentsEmbed;
   EmbedModule opponentsLastKnownEmbed;
 
-  std::array<FullyConnectedLayer, 3> mlp;
+  std::array<FullyConnectedLayerWithLayerNormWithActivation, 3> mlp;
+
+  static constexpr inline auto discreteActionsNumBuckets =
+      std::to_array<int32_t>({ 3, 8, 2, 2, 3 });
 
   FullyConnectedParams discreteHead;
   FullyConnectedParams aimHead;
 };
 
+constexpr int totalNumDiscreteActionBuckets()
+{
+  int sum = 0;
+  for (int i = 0; i < (int)PolicyWeights::discreteActionsNumBuckets.size();
+       i++) {
+    sum += PolicyWeights::discreteActionsNumBuckets[i];
+  }
+
+  return sum;
+}
+
+static float * normalizeCombatOb(CombatStateObservation &ob,
+                                 CombatStateObNormalize &params,
+                                 float *out)
+{
+  *out++ = params.hp.invStd * (ob.hp - params.hp.mean);
+  *out++ = params.magazine.invStd * (ob.magazine - params.magazine.mean);
+  *out++ = params.reloading.invStd * (ob.isReloading - params.reloading.mean);
+  *out++ = params.autohealTime.invStd *
+      (ob.timeBeforeAutoheal - params.autohealTime.mean);
+
+  return out;
+}
+
+static float * normalizeStandOb(StandObservation &ob,
+                                StandObNormalize &params,
+                                float *out)
+{
+  *out++ = params.curStanding.invStd * (ob.curStanding - params.curStanding.mean);
+  *out++ = params.curCrouching.invStd * (ob.curCrouching - params.curCrouching.mean);
+  *out++ = params.curProning.invStd * (ob.curProning - params.curProning.mean);
+  *out++ = params.tgtStanding.invStd * (ob.tgtStanding - params.tgtStanding.mean);
+  *out++ = params.tgtCrouching.invStd * (ob.tgtCrouching - params.tgtCrouching.mean);
+  *out++ = params.tgtProning.invStd * (ob.tgtProning - params.tgtProning.mean);
+  *out++ = params.transitionRemaining.invStd *
+      (ob.transitionRemaining - params.transitionRemaining.mean);
+
+  return out;
+}
+
+static float * normalizePlayerCommonOb(PlayerCommonObservation &ob,
+                                       PlayerCommonObNormalize &params,
+                                       float *out)
+{
+  *out++ = params.isValid.invStd * (ob.isValid - params.isValid.mean);
+  *out++ = params.isAlive.invStd * (ob.isAlive - params.isAlive.mean);
+  *out++ = params.globalX.invStd * (ob.globalX - params.globalX.mean);
+  *out++ = params.globalY.invStd * (ob.globalY - params.globalY.mean);
+  *out++ = params.globalZ.invStd * (ob.globalZ - params.globalZ.mean);
+  *out++ = params.facingYaw.invStd * (ob.facingYaw - params.facingYaw.mean);
+  *out++ = params.facingPitch.invStd * (ob.facingPitch - params.facingPitch.mean);
+  *out++ = params.velocityX.invStd * (ob.velocityX - params.velocityX.mean);
+  *out++ = params.velocityY.invStd * (ob.velocityY - params.velocityY.mean);
+  *out++ = params.velocityZ.invStd * (ob.velocityZ - params.velocityZ.mean);
+
+  out = normalizeStandOb(ob.stand, params.stand, out);
+
+  *out++ = params.isValid.invStd * (ob.isValid - params.isValid.mean);
+
+  for (int i = 0; i < (int)consts::maxNumWeaponTypes; i++) {
+    *out++ = params.weaponTypeObs[i].invStd *
+        (ob.weaponTypeObs[i] - params.weaponTypeObs[i].mean);
+  }
+
+  return out;
+}
+
+static float * normalizeZoneOb(ZoneObservation &ob,
+                               ZoneObNormalize &params,
+                               float *out)
+{
+  *out++ = params.centerX.invStd * (ob.centerX - params.centerX.mean);
+  *out++ = params.centerY.invStd * (ob.centerY - params.centerY.mean);
+  *out++ = params.centerZ.invStd * (ob.centerZ - params.centerZ.mean);
+  *out++ = params.toCenterDist.invStd * (ob.toCenterDist - params.toCenterDist.mean);
+  *out++ = params.toCenterYaw.invStd * (ob.toCenterYaw - params.toCenterYaw.mean);
+  *out++ = params.toCenterPitch.invStd * (
+      ob.toCenterPitch - params.toCenterPitch.mean);
+  *out++ = params.myTeamControlling.invStd * (
+      ob.myTeamControlling - params.myTeamControlling.mean);
+  *out++ = params.enemyTeamControlling.invStd * (
+      ob.enemyTeamControlling - params.enemyTeamControlling.mean);
+  *out++ = params.isContested.invStd * (
+      ob.isContested - params.isContested.mean);
+  *out++ = params.isCaptured.invStd * (ob.isCaptured - params.isCaptured.mean);
+  *out++ = params.stepsUntilPoint.invStd * (ob.stepsUntilPoint - params.stepsUntilPoint.mean);
+  *out++ = params.stepsRemaining.invStd * (ob.stepsRemaining - params.stepsRemaining.mean);
+
+  for (int i = 0; i < (int)ob.id.size(); i++) {
+    *out++ = params.id[i].invStd * (ob.id[i] - params.id[i].mean);
+  }
+
+  return out;
+}
+
+static float * normalizeOtherPlayerCommonOb(
+    OtherPlayerCommonObservation &ob,
+    OtherPlayerCommonObNormalize &params,
+    float *out)
+{
+  out = normalizePlayerCommonOb(ob, params, out);
+
+  *out++ = params.toPlayerDist.invStd * (
+      ob.toPlayerDist - params.toPlayerDist.mean);
+  *out++ = params.toPlayerYaw.invStd * (
+      ob.toPlayerYaw - params.toPlayerYaw.mean);
+  *out++ = params.toPlayerPitch.invStd * (
+      ob.toPlayerPitch - params.toPlayerPitch.mean);
+  *out++ = params.relativeFacingYaw.invStd * (
+      ob.relativeFacingYaw - params.relativeFacingYaw.mean);
+  *out++ = params.relativeFacingPitch.invStd * (
+      ob.relativeFacingPitch - params.relativeFacingPitch.mean);
+
+  return out;
+}
+
+static void normalizeSelfOb(SelfObservation &ob,
+                            SelfObNormalize &params,
+                            float *out)
+{
+  float *out_start = out;
+
+  out = normalizePlayerCommonOb(ob, params, out);
+  out = normalizeCombatOb(ob.combat, params.combat, out);
+  *out++ = params.fractionRemaining.invStd * (
+      ob.fractionMatchRemaining - params.fractionRemaining.mean);
+
+  out = normalizeZoneOb(ob.zone, params.zone, out);
+
+  assert(out - out_start == sizeof(SelfObservation) / sizeof(float));
+}
+
+static void normalizeLidarOb(LidarData *ob,
+                             int width, int height,
+                             LidarDataNormalize &params,
+                             float *out)
+{
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      LidarData in = ob[y * width + x];
+
+      *out++ = params.depth.invStd * (in.depth - params.depth.mean);
+      *out++ = params.isWall.invStd * (in.isWall - params.isWall.mean);
+      *out++ =
+          params.isTeammate.invStd * (in.isTeammate - params.isTeammate.mean);
+      *out++ =
+          params.isOpponent.invStd * (in.isOpponent - params.isOpponent.mean);
+    }
+  }
+}
+
+static void normalizeTeammateOb(TeammateObservation &ob,
+                                TeammateObNormalize &params,
+                                float *out)
+{
+  float *out_start = out;
+
+  out = normalizeOtherPlayerCommonOb(ob, params, out);
+  out = normalizeCombatOb(ob.combat, params.combat, out);
+
+  assert(out - out_start == sizeof(TeammateObservation) / sizeof(float));
+}
+
+static void normalizeOpponentOb(OpponentObservation &ob,
+                                OpponentObNormalize &params,
+                                float *out)
+{
+  float *out_start = out;
+
+  out = normalizeOtherPlayerCommonOb(ob, params, out);
+
+  *out++ = params.wasHit.invStd * (ob.wasHit - params.wasHit.mean);
+  *out++ = params.firedShot.invStd * (ob.firedShot - params.firedShot.mean);
+  *out++ = params.hasLOS.invStd * (ob.hasLOS - params.hasLOS.mean);
+  *out++ = params.teamKnowsLocation.invStd * (
+      ob.teamKnowsLocation - params.teamKnowsLocation.mean);
+
+  assert(out - out_start == sizeof(OpponentObservation) / sizeof(float));
+}
+
+static void normalizeRewardCoefs(RewardHyperParams &coefs,
+                                 RewardHyperParamsNorm &params,
+                                 float *out)
+{
+  float *out_start = out;
+
+  *out++ = params.teamSpirit.invStd * (coefs.teamSpirit - params.teamSpirit.mean);
+  *out++ = params.shotScale.invStd * (coefs.shotScale - params.shotScale.mean);
+  *out++ = params.exploreScale.invStd * (coefs.exploreScale - params.exploreScale.mean);
+  *out++ = params.inZoneScale.invStd * (coefs.inZoneScale - params.inZoneScale.mean);
+  *out++ = params.zoneTeamContestScale.invStd * (coefs.zoneTeamContestScale - params.zoneTeamContestScale.mean);
+  *out++ = params.zoneTeamCtrlScale.invStd * (coefs.zoneTeamCtrlScale - params.zoneTeamCtrlScale.mean);
+  *out++ = params.zoneDistScale.invStd * (coefs.zoneDistScale - params.zoneDistScale.mean);
+  *out++ = params.zoneEarnedPointScale.invStd * (coefs.zoneEarnedPointScale - params.zoneEarnedPointScale.mean);
+  *out++ = params.breadcrumbScale.invStd * (coefs.breadcrumbScale - params.breadcrumbScale.mean);
+
+  assert(out - out_start == sizeof(RewardHyperParams) / sizeof(float));
+}
+
+static void positionFrequencyEmbedding(NormalizedPositionObservation p,
+                                          int num_freqs,
+                                          float *out)
+{
+  for (int i = 0; i < num_freqs; i++) {
+    float x_scaled = p.x * float(1 << i) * math::pi;
+    float x_sin_embedding = sinf(x_scaled);
+    float x_cos_embedding = sinf(x_scaled);
+
+    float y_scaled = p.y * float(1 << i) * math::pi;
+    float y_sin_embedding = sinf(y_scaled);
+    float y_cos_embedding = sinf(y_scaled);
+
+    float z_scaled = p.z * float(1 << i) * math::pi;
+    float z_sin_embedding = sinf(z_scaled);
+    float z_cos_embedding = sinf(z_scaled);
+    
+    out[(2 * i) * 3 + 0] = x_sin_embedding;
+    out[(2 * i) * 3 + 1] = y_sin_embedding;
+    out[(2 * i) * 3 + 2] = z_sin_embedding;
+
+    out[(2 * i + 1) * 3 + 0] = x_cos_embedding;
+    out[(2 * i + 1) * 3 + 1] = y_cos_embedding;
+    out[(2 * i + 1) * 3 + 2] = z_cos_embedding;
+  }
+}
+
+static void evalFullyConnectedStandalone(
+    float *output,
+    float *input,
+    FullyConnectedParams &params)
+{
+  int num_inputs = params.numInputs;
+  int num_features = params.numFeatures;
+
+  for (int out_idx = 0; out_idx < num_features; out_idx++) {
+    float y = 0;
+    for (int in_idx = 0; in_idx < num_inputs; in_idx++) {
+      float a = params.weights[num_inputs * out_idx + in_idx];
+      y += a * input[in_idx];
+    }
+
+    y += params.bias[out_idx];
+    output[out_idx] = y;
+  }
+}
+
+static void evalFullyConnectedLayerWithLayerNormWithActivation(
+    float *output,
+    float *input,
+    FullyConnectedLayerWithLayerNormWithActivation &layer)
+{
+  int num_inputs = layer.params.numInputs;
+  int num_features = layer.params.numFeatures;
+
+  float mean = 0.f;
+  float m2 = 0.f;
+
+  for (int out_idx = 0; out_idx < num_features; out_idx++) {
+    float y = 0;
+    for (int in_idx = 0; in_idx < num_inputs; in_idx++) {
+      float x = input[in_idx];
+
+      float a = layer.params.weights[num_inputs * out_idx + in_idx];
+      y += a * x;
+    }
+
+    y += layer.params.bias[out_idx];
+
+    output[out_idx] = y;
+
+    float delta = y - mean;
+    mean = fmaf(delta, 1.f / (out_idx + 1), mean);
+    float delta2 = y - mean;
+    m2 = fmaf(delta, delta2, m2);
+  }
+
+  float sigma = sqrtf(m2 / num_features);
+
+  for (int out_idx = 0; out_idx < num_features; out_idx++) {
+    float rescaled = fmaf(
+        layer.layerNorm.scale[out_idx] / sigma,
+        output[out_idx] - mean,
+        layer.layerNorm.bias[out_idx]);
+
+    constexpr float leaky_relu_slope = 1e-2f;
+
+    float activation =
+        rescaled >= 0.f ? rescaled : (leaky_relu_slope * rescaled);
+
+    output[out_idx] = activation;
+  }
+}
+
+static void embedInput(float *output,
+                       float *input,
+                       EmbedModule &module)
+{
+  evalFullyConnectedLayerWithLayerNormWithActivation(output, input, module.fc);
+}
+
+// Gumbel-max trick
+static int32_t sampleLogits(float *logits, int32_t num_buckets, RandKey rnd)
+{
+  int32_t sampled = 0;
+  float max_score = -INFINITY;
+    
+  for (int32_t i = 0; i < num_buckets; i++) {
+    float u = rand::sampleUniform(rand::split_i(rnd, i));
+    float g = -logf(-logf(u));
+
+    float score = logits[i] + g;
+    if (score > max_score) {
+        max_score = score;
+        sampled = i;
+    }
+  }
+
+  return sampled;
+}
+
 void evalAgentPolicy(
   Engine &ctx,
-  const SelfObservation &self_ob,
-  const TeammateObservations &teammate_obs,
-  const OpponentObservations &opponent_obs,
-  const OpponentLastKnownObservations &opponent_last_known_obs,
+  SelfObservation &self_ob,
+  RewardHyperParams &reward_coefs,
+  TeammateObservations &teammate_obs,
+  OpponentObservations &opponent_obs,
+  OpponentLastKnownObservations &opponent_last_known_obs,
 
-  const SelfPositionObservation &self_pos_ob,
-  const TeammatePositionObservations &teammate_pos_obs,
-  const OpponentPositionObservations &opponent_pos_obs,
-  const OpponentLastKnownPositionObservations &opponent_last_known_pos_obs,
+  SelfPositionObservation &self_pos_ob,
+  TeammatePositionObservations &teammate_pos_obs,
+  OpponentPositionObservations &opponent_pos_obs,
+  OpponentLastKnownPositionObservations &opponent_last_known_pos_obs,
 
-  const OpponentMasks &opponent_masks,
-  const FiltersStateObservation &filters_state_obs,
-  const FwdLidar &fwd_lidar,
-  const RearLidar &read_lidar,
+  OpponentMasks &opponent_masks,
+  FiltersStateObservation &filters_state_obs,
+  FwdLidar &fwd_lidar,
+  RearLidar &rear_lidar,
+  CombatState &combat_state,
   PvPDiscreteAction &discrete_action,
   PvPAimAction &aim_action)
 {
+  (void)teammate_pos_obs;
+  (void)opponent_pos_obs;
+  (void)opponent_last_known_pos_obs;
+  (void)filters_state_obs;
 
+  PolicyWeights *weights = ctx.data().policyWeights;
+
+  constexpr int EMBED_SIZE = 64;
+  constexpr int NUM_POSITION_EMBEDDING_FREQUENCIES = 8;
+
+  std::array<float, 384> mlp_input_buffer;
+  float *cur_mlp_input = mlp_input_buffer.data();
+  {
+    constexpr int SELF_INPUT_SIZE =
+        sizeof(SelfObservation) / sizeof(float) +
+        sizeof(RewardHyperParams) / sizeof(float) +
+        3 * NUM_POSITION_EMBEDDING_FREQUENCIES * 2;
+        
+    std::array<float, SELF_INPUT_SIZE> self_input;
+    float *cur_self_input = self_input.data();
+    normalizeSelfOb(self_ob, weights->normOb.self, cur_self_input);
+
+    cur_self_input += sizeof(SelfObservation) / sizeof(float);
+
+    normalizeRewardCoefs(reward_coefs, weights->normOb.rewardCoefs,
+                         cur_self_input);
+
+    cur_self_input += sizeof(RewardHyperParams) / sizeof(float);
+
+    positionFrequencyEmbedding(
+        self_pos_ob.ob,
+        NUM_POSITION_EMBEDDING_FREQUENCIES,
+        cur_self_input);
+
+    cur_self_input += 2 * NUM_POSITION_EMBEDDING_FREQUENCIES * 3;
+
+    assert(cur_self_input - self_input.data() == SELF_INPUT_SIZE);
+
+    embedInput(
+        cur_mlp_input, self_input.data(), weights->selfEmbed);
+
+    cur_mlp_input += EMBED_SIZE;
+  }
+
+  {
+    std::array<float, sizeof(FwdLidar) / sizeof(float)> lidar_norm;
+    normalizeLidarOb(&fwd_lidar.data[0][0],
+                     consts::fwdLidarWidth, consts::fwdLidarHeight,
+                     weights->normOb.fwdLidar, lidar_norm.data());
+
+    embedInput(
+        cur_mlp_input, lidar_norm.data(), weights->fwdLidarEmbed);
+
+    cur_mlp_input += EMBED_SIZE;
+  }
+
+  {
+    std::array<float, sizeof(RearLidar) / sizeof(float)> lidar_norm;
+    normalizeLidarOb(&rear_lidar.data[0][0],
+                     consts::rearLidarWidth, consts::rearLidarHeight,
+                     weights->normOb.rearLidar, lidar_norm.data());
+
+    embedInput(
+        cur_mlp_input, lidar_norm.data(), weights->rearLidarEmbed);
+
+    cur_mlp_input += EMBED_SIZE;
+  }
+
+  {
+    for (int i = 0; i < EMBED_SIZE; i++) {
+      cur_mlp_input[i] = -INFINITY;
+    }
+
+    for (int teammate_idx = 0; teammate_idx < consts::maxTeamSize - 1;
+         teammate_idx++) {
+      std::array<float, sizeof(TeammateObservation) / sizeof(float)>
+          team_ob_norm;
+      normalizeTeammateOb(
+          teammate_obs.obs[teammate_idx],
+          weights->normOb.teammate, team_ob_norm.data());
+
+      std::array<float, EMBED_SIZE> embed_out;
+      embedInput(embed_out.data(), team_ob_norm.data(), weights->teammatesEmbed);
+
+      for (int i = 0; i < EMBED_SIZE; i++) {
+        cur_mlp_input[i] = fmaxf(cur_mlp_input[i], embed_out[i]);
+      }
+    }
+
+    cur_mlp_input += EMBED_SIZE;
+  }
+
+  {
+    for (int i = 0; i < EMBED_SIZE; i++) {
+      cur_mlp_input[i] = -INFINITY;
+    }
+
+    for (int opponent_idx = 0; opponent_idx < consts::maxTeamSize;
+         opponent_idx++) {
+      std::array<float, sizeof(OpponentObservation) / sizeof(float)>
+          opponent_ob_norm;
+
+      normalizeOpponentOb(
+          opponent_obs.obs[opponent_idx],
+          weights->normOb.opponent, opponent_ob_norm.data());
+
+      std::array<float, EMBED_SIZE> embed_out;
+      embedInput(embed_out.data(), opponent_ob_norm.data(),
+                 weights->opponentsEmbed);
+
+      float mask = opponent_masks.masks[opponent_idx];
+
+      for (int i = 0; i < EMBED_SIZE; i++) {
+        cur_mlp_input[i] = fmaxf(cur_mlp_input[i], mask * embed_out[i]);
+      }
+    }
+
+    cur_mlp_input += EMBED_SIZE;
+  }
+
+  {
+    for (int i = 0; i < EMBED_SIZE; i++) {
+      cur_mlp_input[i] = -INFINITY;
+    }
+
+    for (int opponent_idx = 0; opponent_idx < consts::maxTeamSize;
+         opponent_idx++) {
+      std::array<float, sizeof(OpponentObservation) / sizeof(float)>
+          opponent_ob_norm;
+
+      normalizeOpponentOb(
+          opponent_last_known_obs.obs[opponent_idx],
+          weights->normOb.opponentLastKnown, opponent_ob_norm.data());
+
+      std::array<float, EMBED_SIZE> embed_out;
+      embedInput(embed_out.data(), opponent_ob_norm.data(),
+                 weights->opponentsLastKnownEmbed);
+
+      for (int i = 0; i < EMBED_SIZE; i++) {
+        cur_mlp_input[i] = fmaxf(cur_mlp_input[i], embed_out[i]);
+      }
+    }
+
+    cur_mlp_input += EMBED_SIZE;
+  }
+
+  assert(cur_mlp_input - mlp_input_buffer.data() == mlp_input_buffer.size());
+
+  constexpr int MLP_BUFFER_SIZE = 512;
+  std::array<float, MLP_BUFFER_SIZE * 2> mlp_buffer;
+  {
+    assert(weights->mlp[0].params.numInputs == mlp_input_buffer.size());
+    assert(weights->mlp[0].params.numFeatures == MLP_BUFFER_SIZE);
+
+    evalFullyConnectedLayerWithLayerNormWithActivation(
+        mlp_buffer.data(), mlp_input_buffer.data(), weights->mlp[0]);
+  }
+
+  cur_mlp_input = mlp_buffer.data();
+  float *cur_mlp_output = mlp_buffer.data() + MLP_BUFFER_SIZE;
+  for (int i = 1; i < (int)weights->mlp.size(); i++) {
+    assert(weights->mlp[i].params.numInputs == MLP_BUFFER_SIZE);
+    assert(weights->mlp[i].params.numFeatures == MLP_BUFFER_SIZE);
+
+    evalFullyConnectedLayerWithLayerNormWithActivation(
+        cur_mlp_output, cur_mlp_input, weights->mlp[i]);
+    std::swap(cur_mlp_input, cur_mlp_output);
+  }
+  cur_mlp_output = cur_mlp_input;
+
+  {
+    std::array<float, totalNumDiscreteActionBuckets()> logits;
+    assert(MLP_BUFFER_SIZE == weights->discreteHead.numInputs);
+    assert(logits.size() == weights->discreteHead.numFeatures);
+
+    evalFullyConnectedStandalone(
+        logits.data(), cur_mlp_output, weights->discreteHead);
+
+    std::array<int32_t, sizeof(PvPDiscreteAction) / sizeof(int32_t)> int_actions;
+    float *cur_logits = logits.data();
+    for (int i = 0; i < (int)PolicyWeights::discreteActionsNumBuckets.size();
+         i++) {
+      int num_buckets = PolicyWeights::discreteActionsNumBuckets[i];
+
+      int_actions[i] = sampleLogits(
+          cur_logits, num_buckets, combat_state.rng.randKey());
+
+      cur_logits += num_buckets;
+    }
+
+    assert(cur_logits - logits.data() == logits.size());
+
+    discrete_action.moveAmount = int_actions[0];
+    discrete_action.moveAngle = int_actions[1];
+    discrete_action.fire = int_actions[2];
+    discrete_action.reload = int_actions[3];
+    discrete_action.stand = int_actions[4];
+  }
+
+  {
+    std::array<float, 4> aim_out;
+    assert(aim_out.size() == weights->aimHead.numFeatures);
+    assert(MLP_BUFFER_SIZE == weights->aimHead.numInputs);
+
+    evalFullyConnectedStandalone(
+        aim_out.data(), cur_mlp_output, weights->aimHead);
+
+    auto sampleGaussian2D =
+      [&combat_state]
+    (Vector2 mean, Vector2 std, float lo = -1.f, float hi = 1.f)
+    {
+      auto sigmoid = []
+      (float v)
+      {
+        return 1.f / (1.f + expf(-v));
+      };
+
+      mean.x = tanhf(mean.x);
+      mean.y = tanhf(mean.y);
+
+      std.x = (hi - lo) * sigmoid(std.x + 2.f) + lo;
+      std.y = (hi - lo) * sigmoid(std.y + 2.f) + lo;
+
+      float u1 = combat_state.rng.sampleUniform();
+      float u2 = combat_state.rng.sampleUniform();
+
+      float z1 = sqrtf(-2.f * logf(u1)) * cosf(2.f * math::pi * u2);
+      float z2 = sqrtf(-2.f * logf(u1)) * sinf(2.f * math::pi * u2);
+
+      return Vector2 {
+        .x = z1 * std.x + mean.x,
+        .y = z2 * std.y + mean.y,
+      };
+    };
+
+    Vector2 mean { aim_out[0], aim_out[1] };
+    Vector2 std { aim_out[2], aim_out[3] };
+
+    auto softplus = []
+    (float v)
+    {
+      return logf(1.f + expf(v));
+    };
+
+    float init_std_offset = -1.f;
+    std.x = softplus(std.x + init_std_offset) + 1e-6f;
+    std.y = softplus(std.y + init_std_offset) + 1e-6f;
+
+    Vector2 sample = sampleGaussian2D(mean, std);
+
+    aim_action.yaw = sample.x;
+    aim_action.pitch = sample.y;
+  }
+  
 }
 
 static RewardHyperParamsNorm setupRewardCoefsNorm(
@@ -626,6 +1204,8 @@ static void loadNormParams(PolicyWeights *weights, const char *path)
 PolicyWeights * loadPolicyWeights(const char *path)
 {
   PolicyWeights *weights = new PolicyWeights {};
+  loadNormParams(weights, path);
+
   {
     weights->selfEmbed.fc.params = loadFullyConnectedParams(
         path, "params_backbone_prefix_self_embed");
@@ -745,6 +1325,7 @@ void addPolicyEvalTasks(TaskGraphBuilder &builder)
   builder.addToGraph<ParallelForNode<Engine,
     evalAgentPolicy,
       SelfObservation,
+      RewardHyperParams,
       TeammateObservations,
       OpponentObservations,
       OpponentLastKnownObservations,
@@ -758,6 +1339,7 @@ void addPolicyEvalTasks(TaskGraphBuilder &builder)
       FiltersStateObservation,
       FwdLidar,
       RearLidar,
+      CombatState,
       PvPDiscreteAction,
       PvPAimAction
     >>({});
