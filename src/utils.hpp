@@ -12,11 +12,18 @@ bool traceRayAgainstWorld(Engine &ctx,
                           float *hit_t_out,
                           Entity *hit_entity_out);
 
+float sphereCastWorld(Engine& ctx,
+                      Vector3 o,
+                      Vector3 d,
+                      float r,
+                      Entity* hit_entity_out);
+
 float sphereCastWorld(Engine &ctx,
                       Vector3 o,
                       Vector3 d,
                       float r,
-                      Entity *hit_entity_out);
+                      Entity *hit_entity_out,
+                      Vector3 &normal);
 
 
 Aim computeAim(float yaw, float pitch);

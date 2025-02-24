@@ -242,6 +242,7 @@ struct Camera {
   Vector3 right;
 
   bool perspective = true;
+  bool fine_aim = false;
   float fov = 60.f;
   float orthoHeight = 5.f;
 };
@@ -761,7 +762,7 @@ namespace VizSystem {
 
 static void vizStep(VizState *viz, Manager &mgr);
 
-static constexpr inline f32 MOUSE_SPEED = 1e-1f;
+static constexpr inline f32 MOUSE_SPEED = 2.0f;// 1e-1f;
 // FIXME
 
 #ifdef DB_SUPPORT
@@ -2068,8 +2069,8 @@ VizState * init(const VizConfig &cfg)
   VizState *viz = new VizState {};
 
   viz->ui = UISystem::init(UISystem::Config {
-    .enableValidation = true,
-    .runtimeErrorsAreFatal = true,
+    .enableValidation = false,
+    .runtimeErrorsAreFatal = false,
   });
 
   viz->window = viz->ui->createMainWindow(
@@ -2378,6 +2379,7 @@ static void handleCamera(VizState *viz, float delta_t)
   if (input.isDown(InputID::MouseRight) ||
       input.isDown(InputID::Shift)) {
     viz->ui->enableRawMouseInput(viz->window);
+    cam.fine_aim = false;
 
     Vector2 mouse_delta = input.mouseDelta();
 
@@ -2801,11 +2803,19 @@ void loop(VizState *viz, Manager &mgr)
 
       Entity agent = ctx.data().agents[viz->curControl - 1];
 
-      const float mouse_aim_sensitivity = 50.f;
+      const float mouse_aim_sensitivity = 1500.f;
+      const float fine_aim_multiplier = 0.3f;
 
+      Vector2 mouse_delta = mouse_move * mouse_aim_sensitivity * frontend_delta_t;
+      // If we're holding right-mouse, do fine aim.
+      viz->flyCam.fine_aim = false;
+      if (input.isDown(InputID::MouseRight)) {
+        mouse_delta *= fine_aim_multiplier;
+        viz->flyCam.fine_aim = true;
+      }
       Aim aim = ctx.get<Aim>(agent);
-      aim.yaw -= frontend_delta_t * mouse_aim_sensitivity * mouse_move.x;
-      aim.pitch -= frontend_delta_t * mouse_aim_sensitivity * mouse_move.y;
+      aim.yaw -= mouse_delta.x;
+      aim.pitch -= mouse_delta.y;
 
       ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
       ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
@@ -3304,7 +3314,8 @@ static void setupViewData(Engine &ctx,
 
   float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
 
-  float fov_scale = 1.f / tanf(math::toRadians(cam.fov * 0.5f));
+  float fov = cam.fine_aim ? cam.fov * 0.5f : cam.fov;
+  float fov_scale = 1.f / tanf(math::toRadians(fov * 0.5f));
 
   float screen_x_scale = fov_scale / aspect_ratio;
   float screen_y_scale = fov_scale;
@@ -3859,6 +3870,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
           .fwd = aim.rot.rotateVec(math::fwd),
           .up = aim.rot.rotateVec(math::up),
           .right = aim.rot.rotateVec(math::right),
+          .fine_aim = viz->flyCam.fine_aim,
         };
       }
     }

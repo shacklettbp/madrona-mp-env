@@ -74,12 +74,12 @@ float sphereCastWorld(Engine &ctx,
                       Vector3 o,
                       Vector3 d,
                       float r,
-                      Entity *hit_entity_out)
+                      Entity *hit_entity_out,
+                      Vector3 &normal)
 {
     MeshBVH &world_bvh = ctx.data().staticMeshes[0];
 
-    Vector3 hit_normal;
-    float hit_t = world_bvh.sphereCast(o, d, r, &hit_normal);
+    float hit_t = world_bvh.sphereCast(o, d, r, &normal);
     Entity hit_entity = Entity::none();
 
 #if 0
@@ -123,6 +123,16 @@ float sphereCastWorld(Engine &ctx,
 
     *hit_entity_out = hit_entity;
     return hit_t;
+}
+
+float sphereCastWorld(Engine& ctx,
+                      Vector3 o,
+                      Vector3 d,
+                      float r,
+                      Entity* hit_entity_out)
+{
+  Vector3 normal;
+  return sphereCastWorld(ctx, o, d, r, hit_entity_out, normal);
 }
 
 Aim computeAim(float yaw, float pitch)

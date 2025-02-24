@@ -836,6 +836,13 @@ inline void resetSystem(Engine &ctx, WorldReset &reset)
     } 
 }
 
+static Vector3 Rotate2D(Vector3 dir, float radians)
+{
+  float c = cosf(radians);
+  float s = sinf(radians);
+  return Vector3(c * dir.x - s * dir.y, s * dir.x + c * dir.y, 0);
+}
+
 // Provide forces for entities which are controlled by actions (the two agents in this case).
 inline void exploreMovementSystem(Engine &,
                                   ExploreAction &, 
@@ -847,99 +854,143 @@ inline void exploreMovementSystem(Engine &,
 inline void applyVelocitySystem(Engine &ctx,
                                 const Position &pos,
                                 const AgentVelocity &vel,
-                                StandState &,
+                                StandState &stand,
                                 IntermediateMoveState &move_state)
 {
-    Vector3 x = pos;
-    Vector3 v = vel;
-    v.z = 0;
+  Vector3 x = pos;
+  Vector3 v = vel;
+  v.z = 0;
 
-    float v_len = v.length();
+  move_state.newPosition = x;
+  move_state.newVelocity = Vector3::zero();
 
-    if (v_len == 0.f) {
-        move_state.newPosition = x;
-        move_state.newVelocity = Vector3::zero();
-        return;
+  float v_len = v.length();
+  if (v_len == 0.f) {
+    return;
+  }
+  Vector3 v_norm = v / v_len;
+  float move_dist = v_len * consts::deltaT;
+
+  // Cast a ray at the minimum step-up, and the max height.
+  // If we're prone, there is no second cast.
+  const float spherecast_buffer = 0.05f * consts::agentRadius;
+  const float spherecast_r = consts::agentRadius;
+  float top_of_capsule = consts::standHeight - spherecast_r;
+  float low_check_height = consts::proneHeight;
+  if (stand.curPose == Pose::Crouch) {
+    top_of_capsule = consts::crouchHeight - spherecast_r;
+  }
+  else if (stand.curPose == Pose::Prone) {
+    top_of_capsule = low_check_height;
+    low_check_height = consts::proneHeight - spherecast_r + spherecast_buffer;
+  }
+
+  // Unfortunately we need a downward ray to find the slope of the ground we're on.
+  // To prevent us from sliding up steep slopes.
+  Vector3 ray_o = x;
+  ray_o.z += top_of_capsule;
+  Vector3 normal;
+  Entity hit_entity;
+  sphereCastWorld(ctx, ray_o, -math::up, spherecast_r, &hit_entity, normal);
+  if ( normal.z > 0.0f && normal.z < 0.7 && math::dot(normal, v_norm) < 0.0f) {
+    return;
+  }
+
+  // Do the two primary raycasts.
+  ray_o = x + v_norm * spherecast_buffer * 0.5f;
+  ray_o.z += low_check_height;
+  float low_dist = sphereCastWorld(ctx, ray_o, v_norm, spherecast_r, &hit_entity, normal);
+  float high_dist = low_dist;
+  bool high_hit = false;
+  if (stand.curPose != Pose::Prone) {
+    ray_o.z = x.z + top_of_capsule;
+    Vector3 high_normal;
+    high_dist = sphereCastWorld(ctx, ray_o, v_norm, spherecast_r, &hit_entity, high_normal);
+    if (high_dist < low_dist) {
+      low_dist = high_dist;
+      normal = high_normal;
+      high_hit = true;
     }
+  }
+  // If we get literal zeros from any raycasts, it means we're stuck in something and we'll have to unstick.
+  bool stuck = low_dist == 0.0f || high_dist == 0.0f;
+  low_dist = fmaxf(0.0f, low_dist - spherecast_buffer);
+  high_dist = fmaxf(0.0f, high_dist - spherecast_buffer);
+  Vector3 hit_pos = x + v_norm * fminf(low_dist, move_dist);
 
-    Vector3 v_norm = v / v_len;
-
-    float move_dist = v_len * consts::deltaT;
-
-    constexpr float low_high_check_delta = 3.f * consts::agentRadius;
-    constexpr float low_check_height =
-        consts::standHeight - low_high_check_delta;
-
-    Vector3 ray_o = x;
-    ray_o.z += low_check_height;
-
-    Entity hit_entity;
-
-    const float spherecast_buffer = 0.02f * consts::agentRadius;
-    const float spherecast_r = consts::agentRadius - spherecast_buffer;
-
-    float safe_dist_low = sphereCastWorld(
-        ctx, ray_o, v_norm, spherecast_r, &hit_entity);
-
-    ray_o.z += low_high_check_delta;
-    float safe_dist_high = sphereCastWorld(
-        ctx, ray_o, v_norm, spherecast_r, &hit_entity);
-
-    float safe_dist = fminf(safe_dist_low, safe_dist_high);
-    safe_dist -= spherecast_buffer;
-
-    if (move_dist <= safe_dist) {
-        v = v_norm * v_len;
-        move_state.newPosition = x + v * consts::deltaT;
-        move_state.newVelocity = v;
-        return;
+  // Enable one step of wall-sliding by doing a secondary cast along the normal of the hit surface.
+  // Fire a ray parallel to the hit normal on the X/Y plane.
+  if (move_dist > low_dist) {
+    Vector3 slide_dir = math::normalize(math::cross(math::up, normal));
+    if (math::dot(slide_dir, v_norm) < 0) {
+      slide_dir = -slide_dir;
     }
-
-    Vector3 hit_pos = x + v_norm * safe_dist;
-
-    Vector3 ground_check_pos = hit_pos;
-    ground_check_pos.z += consts::agentRadius;
-
-    float ground_dist = sphereCastWorld(
-        ctx, ground_check_pos, -math::up, spherecast_r, &hit_entity);
-
-    if (ground_dist == FLT_MAX) {
-        move_state.newPosition = x;
-        move_state.newVelocity = Vector3::zero();
-
-        return;
+    ray_o = x + v_norm * low_dist;
+    ray_o.z += high_hit ? top_of_capsule : low_check_height;
+    float slide_dist = sphereCastWorld(ctx, ray_o, slide_dir, spherecast_r, &hit_entity);
+    slide_dist = fmaxf(0.0f, slide_dist - spherecast_buffer);
+    float max_move = move_dist - low_dist;
+    slide_dist = fminf(slide_dist, max_move);
+    if (slide_dist > 0.0f)
+    {
+      hit_pos = hit_pos + slide_dir * slide_dist;
     }
+  }
 
-    float fall_dist = ground_dist - consts::agentRadius + spherecast_r;
-    Vector3 new_pos = ground_check_pos;
-    new_pos.z -= fall_dist;
+  // Find the ground under where we ended up.
+  Vector3 ground_check_pos = hit_pos;
+  ground_check_pos.z += top_of_capsule;
+  float ground_dist = sphereCastWorld(ctx, ground_check_pos, -math::up, spherecast_r, &hit_entity);
+  if (ground_dist == FLT_MAX) {
+    return;
+  }
 
-    Vector3 to_new_pos = new_pos - x;
-    float to_new_dist = to_new_pos.length();
-    if (to_new_dist == 0.f) {
-        move_state.newPosition = x;
-        move_state.newVelocity = Vector3::zero();
-
-        return;
+  // Uh oh, we're in something.
+  if (ground_dist <= 0.0f || stuck) {
+    // Try raycasting from all directions to find a way out.
+    float furthest_hit = 0.0f;
+    int best_dir = -1;
+    for (int dir = 0; dir < 4; dir++)
+    {
+      Vector3 dir_vec = Rotate2D(v_norm, dir * 3.14159f * 0.5f);
+      ray_o = x - dir_vec * spherecast_r * 2.0f;
+      ray_o.z += low_check_height;
+      float hit_dist = sphereCastWorld(ctx, ray_o, dir_vec, spherecast_r, &hit_entity);
+      if (hit_dist > furthest_hit)
+      {
+        furthest_hit = hit_dist;
+        best_dir = dir;
+      }
     }
+    // If we found a direction to teleport, do that, but redo the ground check.
+    if (best_dir != -1)
+    {
+      Vector3 dir_vec = Rotate2D(v_norm, best_dir * 3.14159f * 0.5f);
+      hit_pos = x + dir_vec * (fminf(furthest_hit - spherecast_r * 2.0f, -spherecast_buffer));
+      ground_check_pos = hit_pos;
+      ground_check_pos.z += top_of_capsule;
+      ground_dist = sphereCastWorld(ctx, ground_check_pos, -math::up, spherecast_r, &hit_entity);
+      if (ground_dist == FLT_MAX) {
+        return;
+      }
+    }
+  }
 
-    to_new_pos /= to_new_dist;
+  // Move to the new location.
+  // Don't drop to the ground, the fall system will take care of that.
+  float fall_dist = fminf(ground_dist, top_of_capsule) + spherecast_r;
+  Vector3 new_pos = ground_check_pos;
+  new_pos.z -= fall_dist;
 
-    ray_o = x;
-    ray_o.z += low_check_height;
-    safe_dist_low = sphereCastWorld(
-        ctx, ray_o, to_new_pos, spherecast_r, &hit_entity);
-    ray_o.z += low_high_check_delta;
-    safe_dist_high = sphereCastWorld(
-        ctx, ray_o, to_new_pos, spherecast_r, &hit_entity);
+  Vector3 to_new_pos = new_pos - x;
+  float to_new_dist = to_new_pos.length();
+  if (to_new_dist == 0.f) {
+    return;
+  }
+  to_new_pos /= to_new_dist;
 
-    safe_dist = fminf(safe_dist_low, safe_dist_high);
-    safe_dist -= spherecast_buffer;
-
-    to_new_dist = fminf(to_new_dist, safe_dist);
-
-    move_state.newPosition = x + to_new_pos * to_new_dist;
-    move_state.newVelocity = Vector3::zero();
+  move_state.newPosition = new_pos;
+  move_state.newVelocity = to_new_pos / consts::deltaT;
 }
 
 inline void updateMoveStateSystem(
@@ -964,6 +1015,7 @@ inline void fallSystem(Engine &ctx,
     }
 
     const float start_offset = 2.f * consts::agentRadius;
+    const float fallRate = 386.08858267717f;
 
     Vector3 ray_o = pos;
     ray_o.z += start_offset;
@@ -976,12 +1028,12 @@ inline void fallSystem(Engine &ctx,
     float ground_dist = sphereCastWorld(
         ctx, ray_o, -math::up, spherecast_r, &hit_entity);
 
-    if (ground_dist == FLT_MAX) {
+    if (ground_dist == FLT_MAX || ground_dist < start_offset ) {
         move_state.newPosition = pos;
         return;
     }
 
-    float fall_dist = ground_dist - start_offset + spherecast_r;
+    float fall_dist = fminf( ground_dist - start_offset + spherecast_r, fallRate * consts::deltaT);
 
     Vector3 new_pos = pos;
     new_pos.z -= fall_dist;

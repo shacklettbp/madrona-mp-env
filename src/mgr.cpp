@@ -935,11 +935,11 @@ namespace {
 
 namespace NavUtils
 {
-using madrona::math::Vector3;
-using madrona::Navmesh;
+  using madrona::math::Vector3;
+  using madrona::Navmesh;
 
-struct Node
-{
+  struct Node
+  {
     int idx;
     int cameFrom;
     float startDist;
@@ -947,253 +947,255 @@ struct Node
 
     void Clear(int index)
     {
-        idx = index;
-        cameFrom = -1;
-        startDist = FLT_MAX;
-        score = FLT_MAX;
+      idx = index;
+      cameFrom = -1;
+      startDist = FLT_MAX;
+      score = FLT_MAX;
     }
-};
+  };
 
-Vector3 CenterOfTri(const Navmesh& navmesh, int tri)
-{
+  Vector3 CenterOfTri(const Navmesh& navmesh, int tri)
+  {
     Vector3 center = { 0.0f, 0.0f, 0.0f };
     for (int i = 0; i < 3; i++)
     {
-        center += navmesh.vertices[navmesh.triIndices[tri * 3 + i]] / 3.0f;
+      center += navmesh.vertices[navmesh.triIndices[tri * 3 + i]] / 3.0f;
     }
     return center;
-}
+  }
 
-bool VisitCell(const Navmesh& navmesh, int cell, int targetCell, std::vector<int> &path, std::vector<bool> &visited)
-{
+  bool VisitCell(const Navmesh& navmesh, int cell, int targetCell, std::vector<int>& path, std::vector<bool>& visited)
+  {
     if (visited[cell])
-        return false;
+      return false;
     path.push_back(cell);
     visited[cell] = true;
 
     if (cell == targetCell)
-        return true;
+      return true;
 
     for (int i = 0; i < 3; i++)
     {
-        int neighbor = navmesh.triAdjacency[cell * 3 + i];
-        if (neighbor < 0 )
-            continue;
-        if (VisitCell(navmesh, neighbor, targetCell, path, visited))
-            return true;
+      int neighbor = navmesh.triAdjacency[cell * 3 + i];
+      if (neighbor < 0)
+        continue;
+      if (VisitCell(navmesh, neighbor, targetCell, path, visited))
+        return true;
     }
     path.pop_back();
     return false;
-}
+  }
 
-struct EarlyOutData
-{
+  struct EarlyOutData
+  {
     int earlyOutForDir[9];
     float totalDistance;
     float reasonableDistance2;
     bool enabled;
 
-    int GetEarlyOutPath(Vector3 start, Vector3 target)
-	{
-		if(!enabled)
-			return -1;
-		if ((start - target).length2() < reasonableDistance2)
-			return -1;
-		Vector3 dir = (target - start).normalize();
-		int dirX = (int)(dir.x* 1.9f);
-		int dirY = (int)(dir.y* 1.9f);
-		return earlyOutForDir[(dirX + 1) + (dirY + 1) * 3];
-    }
-};
-static EarlyOutData earlyOut;
+    void Init(const Navmesh& navmesh)
+    {
+      // Because we build an exhaustive look-up table, navmesh processing is O(n^2).
+      // For a navmesh with a significant number of triangles, we need to be
+      // prepared to early-out of pathfinding by just using a common destination
+      // for any cell that's far away.
+      const int reasonableNavTriCount = 400;
+      if (navmesh.numTris <= reasonableNavTriCount)
+      {
+        enabled = false;
+        return;
+      }
+      enabled = true;
 
-int AStarPathfindToTri(const Navmesh& navmesh, int startTri, int posTri)
-{
+      // Figure out the total bounds of the navmesh so we can partition it reasonably.
+      Vector3 mins(FLT_MAX, FLT_MAX, FLT_MAX);
+      Vector3 maxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+      for (unsigned int i = 0; i < navmesh.numVerts; i++)
+      {
+        mins = mins.min(mins, navmesh.vertices[i]);
+        maxs = maxs.max(maxs, navmesh.vertices[i]);
+      }
+      float thisTotalDist = (maxs - mins).length();
+
+      // If we get out close enough to the goal that we've likely crossed
+      // the reasonable number of tris, we're done.
+      totalDistance = thisTotalDist;
+      reasonableDistance2 = thisTotalDist * (float)reasonableNavTriCount / (float)navmesh.numTris;
+      reasonableDistance2 *= reasonableDistance2;
+    }
+
+    void PrepareForStartTri(const Navmesh& navmesh, int startTri);
+
+    int GetEarlyOutPath(Vector3 start, Vector3 target)
+    {
+      if (!enabled)
+        return -1;
+      if ((start - target).length2() < reasonableDistance2)
+        return -1;
+      Vector3 dir = (target - start).normalize();
+      int dirX = (int)(dir.x * 1.9f);
+      int dirY = (int)(dir.y * 1.9f);
+      return earlyOutForDir[(dirX + 1) + (dirY + 1) * 3];
+    }
+  };
+  static EarlyOutData earlyOut;
+
+  int AStarPathfindToTri(const Navmesh& navmesh, int startTri, int posTri)
+  {
     Vector3 start = CenterOfTri(navmesh, startTri);
     Vector3 pos = CenterOfTri(navmesh, posTri);
 
-	int earlyOutTri = earlyOut.GetEarlyOutPath(start, pos);
-	if (earlyOutTri != -1)
-		return earlyOutTri;
+    int earlyOutTri = earlyOut.GetEarlyOutPath(start, pos);
+    if (earlyOutTri != -1)
+      return earlyOutTri;
 
     static std::vector<Node> state(navmesh.numTris);
     for (int tri = 0; tri < (int)navmesh.numTris; tri++)
-        state[tri].Clear(tri);
+      state[tri].Clear(tri);
     state[startTri].startDist = 0.0f;
 
-    auto sortHeap = [](const int &lhs, const int &rhs)
+    auto sortHeap = [](const int& lhs, const int& rhs)
     {
-        return state[lhs].score < state[rhs].score;
+      return state[lhs].score < state[rhs].score;
     };
     std::set<int, decltype(sortHeap)> heap(sortHeap);
     heap.insert(startTri);
 
     while (!heap.empty())
     {
-        int thisTri = *heap.begin();
-        if (thisTri == posTri)
+      int thisTri = *heap.begin();
+      if (thisTri == posTri)
+      {
+        int goal = thisTri;
+        while (goal != startTri && goal != -1)
         {
-            int goal = thisTri;
-            while (goal != startTri && goal != -1)
-            {
-                if (state[goal].cameFrom == startTri)
-                    return goal;
-                goal = state[goal].cameFrom;
-            }
-            return posTri;
+          if (state[goal].cameFrom == startTri)
+            return goal;
+          goal = state[goal].cameFrom;
         }
+        return posTri;
+      }
 
-        heap.erase(heap.begin());
-        Vector3 center;
-        if (thisTri == startTri)
-            center = start;
-        else
-            center = CenterOfTri(navmesh, thisTri);
-        for (int i = 0; i < 3; i++)
+      heap.erase(heap.begin());
+      Vector3 center;
+      if (thisTri == startTri)
+        center = start;
+      else
+        center = CenterOfTri(navmesh, thisTri);
+      for (int i = 0; i < 3; i++)
+      {
+        int neighbor = navmesh.triAdjacency[thisTri * 3 + i];
+        if (neighbor == -1)
+          continue;
+        Vector3 neighpos = CenterOfTri(navmesh, neighbor);
+        float score = state[thisTri].startDist + center.distance(neighpos);
+        if (score < state[neighbor].startDist)
         {
-            int neighbor = navmesh.triAdjacency[thisTri * 3 + i];
-            if (neighbor == -1)
-                continue;
-            Vector3 neighpos = CenterOfTri(navmesh, neighbor);
-            float score = state[thisTri].startDist + center.distance(neighpos);
-            if (score < state[neighbor].startDist)
-            {
-                state[neighbor].cameFrom = thisTri;
-                state[neighbor].startDist = score;
-                state[neighbor].score = score + neighpos.distance(pos);
-                heap.insert(neighbor);
-            }
+          state[neighbor].cameFrom = thisTri;
+          state[neighbor].startDist = score;
+          state[neighbor].score = score + neighpos.distance(pos);
+          heap.insert(neighbor);
         }
+      }
     }
     return -1;
-}
+  }
 
-void PrepareEarlyOutForNavmesh(const Navmesh& navmesh)
-{
-    // Because we build an exhaustive look-up table, navmesh processing is O(n^2).
-    // For a navmesh with a significant number of triangles, we need to be
-    // prepared to early-out of pathfinding by just using a common destination
-    // for any cell that's far away.
-    const int reasonableNavTriCount = 400;
-    if (navmesh.numTris <= reasonableNavTriCount)
-    {
-        earlyOut.enabled = false;
-        return;
-    }
-    earlyOut.enabled = true;
-
-    // Figure out the total bounds of the navmesh so we can partition it reasonably.
-    Vector3 mins(FLT_MAX, FLT_MAX, FLT_MAX);
-    Vector3 maxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
-    for (unsigned int i = 0; i < navmesh.numVerts; i++)
-    {
-        mins = mins.min(mins, navmesh.vertices[i]);
-        maxs = maxs.max(maxs, navmesh.vertices[i]);
-    }
-    float totalDist = (maxs - mins).length();
-
-    // If we get out close enough to the goal that we've likely crossed
-    // the reasonable number of tris, we're done.
-	earlyOut.totalDistance = totalDist;
-    earlyOut.reasonableDistance2 = totalDist * (float)reasonableNavTriCount / (float)navmesh.numTris;
-    earlyOut.reasonableDistance2 *= earlyOut.reasonableDistance2;
-}
-
-void PrepareEarlyOutForStartTri(const Navmesh& navmesh, int startTri)
-{
-	if (!earlyOut.enabled)
-		return;
+  void EarlyOutData::PrepareForStartTri(const Navmesh& navmesh, int startTri)
+  {
+    if (!enabled)
+      return;
 
     // Look for the furthest triangle away from our start triangle in each major direction.
     // We'll use this as our destination for anything unreasonably far away.
-    earlyOut.enabled = false;
+    enabled = false;
     for (int dirX = -1; dirX <= 1; dirX++)
     {
-        for (int dirY = -1; dirY <= 1; dirY++)
-		{
-			if(dirX == 0 && dirY == 0)
-			    continue;
-			Vector3 dir((float)dirX, (float)dirY, 0.0f);
-			dir = dir.normalize();
-			Vector3 start = CenterOfTri(navmesh, startTri);
-			Vector3 end = start + dir * earlyOut.totalDistance * 2.0f;
-			float bestDist = FLT_MAX;
-			int bestTri = -1;
-			for (int tri = 0; tri < (int)navmesh.numTris; tri++)
-			{
-				Vector3 center = CenterOfTri(navmesh, tri);
-				float dist = (center - end).length();
-                if (dist < bestDist)
-				{
-					bestDist = dist;
-					bestTri = tri;
-				}
-			}
-			earlyOut.earlyOutForDir[(dirX + 1) + (dirY + 1) * 3] = AStarPathfindToTri(navmesh, startTri, bestTri );
+      for (int dirY = -1; dirY <= 1; dirY++)
+      {
+        if (dirX == 0 && dirY == 0)
+          continue;
+        Vector3 dir((float)dirX, (float)dirY, 0.0f);
+        dir = dir.normalize();
+        Vector3 start = CenterOfTri(navmesh, startTri);
+        Vector3 end = start + dir * totalDistance * 2.0f;
+        float bestDist = FLT_MAX;
+        int bestTri = -1;
+        for (int tri = 0; tri < (int)navmesh.numTris; tri++)
+        {
+          Vector3 center = CenterOfTri(navmesh, tri);
+          float dist = (center - end).length();
+          if (dist < bestDist)
+          {
+            bestDist = dist;
+            bestTri = tri;
+          }
         }
+        earlyOutForDir[(dirX + 1) + (dirY + 1) * 3] = AStarPathfindToTri(navmesh, startTri, bestTri);
+      }
     }
-    earlyOut.enabled = true;
-}
-}
-
+    enabled = true;
+  }
 }
 
-static AStarLookup buildAStarLookup(const Navmesh &navmesh, const char *navmesh_filename)
+}
+
+static AStarLookup buildAStarLookup(const Navmesh& navmesh, const char* navmesh_filename)
 {
-    // First, see if we've already cached this data on disk.
-	// Build the filename by stripping the extension and adding .astar
-	const unsigned int MAX_PATH = 1024;
-    char cachedFilename[MAX_PATH];
-	strcpy_s(cachedFilename, MAX_PATH, navmesh_filename);
-	char* ext = strrchr(cachedFilename, '.');
-	if (ext)
-		*ext = '\0';
-	strcat_s(cachedFilename, MAX_PATH, ".astar");
-    FILE* file = nullptr;
-    fopen_s(&file, cachedFilename, "rb");
-	if (file)
-	{
-		fseek(file, 0, SEEK_END);
-		long size = ftell(file);
-		fseek(file, 0, SEEK_SET);
-		assert(size == navmesh.numTris * navmesh.numTris * sizeof(u32));
-		u32* lookup_tbl = (u32*)malloc(size);
-		fread(lookup_tbl, 1, size, file);
-		fclose(file);
-		return AStarLookup{
-			.data = lookup_tbl,
-		};
-	}
-
-	// Looks like we haven't, go ahead and build it.
-    NavUtils::PrepareEarlyOutForNavmesh(navmesh);
-    u32 num_tris = navmesh.numTris;
-
-    u32 *lookup_tbl = (u32 *)malloc(sizeof(u32) * num_tris * num_tris);
-
-	printf("Building A* lookup table...\n");
-    for (u32 start = 0; start < num_tris; start++) {
-		if (start % 250 == 0)
-			printf("%d%%\n", (int)(100.0f * (float)start / (float)num_tris));
-        NavUtils::PrepareEarlyOutForStartTri(navmesh, start);
-        for (u32 goal = 0; goal < num_tris; goal++) {
-            lookup_tbl[start * num_tris + goal] =
-                NavUtils::AStarPathfindToTri(navmesh, start, goal);
-        }
-    }
-	printf("100%%\n");
-
-	// Cache the lookup table to disk.
-	fopen_s(&file, cachedFilename, "wb");
-    if (file != nullptr)
-    {
-        fwrite(lookup_tbl, 1, num_tris * num_tris * sizeof(u32), file);
-        fclose(file);
-    }
-
-    return AStarLookup {
-        .data = lookup_tbl,
+  // First, see if we've already cached this data on disk.
+// Build the filename by stripping the extension and adding .astar
+  const unsigned int MAX_PATH = 1024;
+  char cachedFilename[MAX_PATH];
+  strcpy_s(cachedFilename, MAX_PATH, navmesh_filename);
+  char* ext = strrchr(cachedFilename, '.');
+  if (ext)
+    *ext = '\0';
+  strcat_s(cachedFilename, MAX_PATH, ".astar");
+  FILE* file = nullptr;
+  fopen_s(&file, cachedFilename, "rb");
+  if (file)
+  {
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    assert(size == navmesh.numTris * navmesh.numTris * sizeof(u32));
+    u32* lookup_tbl = (u32*)malloc(size);
+    fread(lookup_tbl, 1, size, file);
+    fclose(file);
+    return AStarLookup{
+      .data = lookup_tbl,
     };
+  }
+
+  // Looks like we haven't, go ahead and build it.
+  NavUtils::earlyOut.Init(navmesh);
+  u32 num_tris = navmesh.numTris;
+
+  u32* lookup_tbl = (u32*)malloc(sizeof(u32) * num_tris * num_tris);
+
+  printf("Building A* lookup table...\n");
+  for (u32 start = 0; start < num_tris; start++) {
+    if (start % 250 == 0)
+      printf("%d%%\n", (int)(100.0f * (float)start / (float)num_tris));
+    NavUtils::earlyOut.PrepareForStartTri(navmesh, start);
+    for (u32 goal = 0; goal < num_tris; goal++) {
+      lookup_tbl[start * num_tris + goal] =
+        NavUtils::AStarPathfindToTri(navmesh, start, goal);
+    }
+  }
+  printf("100%%\n");
+
+  // Cache the lookup table to disk.
+  fopen_s(&file, cachedFilename, "wb");
+  if (file != nullptr)
+  {
+    fwrite(lookup_tbl, 1, num_tris * num_tris * sizeof(u32), file);
+    fclose(file);
+  }
+
+  return AStarLookup{
+      .data = lookup_tbl,
+  };
 }
 
 Manager::Impl * Manager::Impl::init(
