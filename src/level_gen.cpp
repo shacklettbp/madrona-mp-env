@@ -172,6 +172,16 @@ void createPersistentEntities(Engine &ctx, const TaskConfig &cfg)
 
         ctx.get<AgentPolicy>(agent).idx = 0;
         //ctx.get<AgentPolicy>(agent).idx = consts::aStarPolicyID;
+        
+        ctx.get<PvPAimAction>(agent) = {
+          .yaw = 0.f,
+          .pitch = 0.f,
+        };
+
+        ctx.get<PvPDiscreteAimAction>(agent) = {
+          .yaw = 0,
+          .pitch = 0,
+        };
     }
 
     if (cfg.task == Task::Explore) {
@@ -340,7 +350,6 @@ void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
         .moveAmount = 0,
         .moveAngle = 0,
         .fire = 0,
-        .reload = 0,
         .stand = 0,
       };
 

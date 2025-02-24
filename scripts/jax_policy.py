@@ -13,7 +13,7 @@ from functools import partial
 import madrona_learn
 from madrona_learn import (
     DiscreteActionDistributions, ContinuousActionDistributions,
-    DiscreteActionsConfig, ContinuousActionsConfig, ContinuousActionProps,
+    DiscreteActionsConfig, ContinuousActionsConfig,
     ActorCritic, TrainConfig, PPOConfig,
     BackboneShared, BackboneSeparate,
     BackboneEncoder, RecurrentBackboneEncoder,
@@ -38,10 +38,10 @@ actions_config = {
             actions_num_buckets = [ 3, 8, 2, 2, 3 ],
         ),
     'aim': ContinuousActionsConfig(
-            props = [
-                ContinuousActionProps(0.001, 1.0),
-            ],
-        ),
+        stddev_min = 0.001,
+        stddev_max = 1.0,
+        num_dims = 2,
+    ),
 }
 
 def assert_valid_input(tensor):
@@ -352,7 +352,7 @@ class ActorHead(nn.Module):
         aim_stds = aim_out[..., 1:2, :]
 
         aim_dist = ContinuousActionDistributions(
-            props = actions_config['aim'].props,
+            cfgs = [ actions_config['aim'] ],
             means = aim_means,
             stds = aim_stds,
         )

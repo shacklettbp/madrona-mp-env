@@ -151,8 +151,8 @@ struct WorldReset {
 };
 
 enum class WorldCurriculum : uint32_t {
-    FullMatch,
-    LearnShooting,
+    LearnShooting = 0,
+    FullMatch = 1,
 };
 
 struct TrainControl {
@@ -173,9 +173,13 @@ struct ExploreAction {
 struct PvPDiscreteAction {
     int32_t moveAmount; // [0, 2]
     int32_t moveAngle; // [0, 7]
-    int32_t fire;
-    int32_t reload;
+    int32_t fire; // [0, 1, 2]
     int32_t stand; // [0, 1, 2]
+};
+
+struct PvPDiscreteAimAction {
+    int32_t yaw;
+    int32_t pitch;
 };
 
 struct PvPAimAction {
@@ -896,6 +900,7 @@ struct PvPAgent : public madrona::Archetype<
     // Input
     PvPDiscreteAction,
     PvPAimAction,
+    PvPDiscreteAimAction,
     CoarsePvPAction,
     HardcodedBotAction,
 
