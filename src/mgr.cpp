@@ -10,6 +10,7 @@
 #include <madrona/mw_cpu.hpp>
 
 #include <array>
+#include <cstring>
 #include <cassert>
 #include <charconv>
 #include <iostream>
@@ -1143,27 +1144,57 @@ namespace NavUtils
 static AStarLookup buildAStarLookup(const Navmesh& navmesh, const char* navmesh_filename)
 {
   // First, see if we've already cached this data on disk.
-// Build the filename by stripping the extension and adding .astar
-  const unsigned int MAX_PATH = 1024;
+	// Build the filename by stripping the extension and adding .astar
+	const unsigned int MAX_PATH = 1024;
   char cachedFilename[MAX_PATH];
-  strcpy_s(cachedFilename, MAX_PATH, navmesh_filename);
-  char* ext = strrchr(cachedFilename, '.');
-  if (ext)
-    *ext = '\0';
-  strcat_s(cachedFilename, MAX_PATH, ".astar");
-  FILE* file = nullptr;
-  fopen_s(&file, cachedFilename, "rb");
-  if (file)
-  {
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    assert(size == navmesh.numTris * navmesh.numTris * sizeof(u32));
-    u32* lookup_tbl = (u32*)malloc(size);
-    fread(lookup_tbl, 1, size, file);
-    fclose(file);
-    return AStarLookup{
-      .data = lookup_tbl,
+	strncpy(cachedFilename, navmesh_filename, MAX_PATH);
+	char* ext = strrchr(cachedFilename, '.');
+	if (ext)
+		*ext = '\0';
+	strncat(cachedFilename, ".astar", MAX_PATH);
+  FILE* file = fopen( cachedFilename, "rb");
+	if (file)
+	{
+		fseek(file, 0, SEEK_END);
+		long size = ftell(file);
+		fseek(file, 0, SEEK_SET);
+		assert(size == navmesh.numTris * navmesh.numTris * sizeof(u32));
+		u32* lookup_tbl = (u32*)malloc(size);
+		fread(lookup_tbl, 1, size, file);
+		fclose(file);
+		return AStarLookup{
+			.data = lookup_tbl,
+		};
+	}
+
+	// Looks like we haven't, go ahead and build it.
+    NavUtils::PrepareEarlyOutForNavmesh(navmesh);
+    u32 num_tris = navmesh.numTris;
+
+    u32 *lookup_tbl = (u32 *)malloc(sizeof(u32) * num_tris * num_tris);
+
+	printf("Building A* lookup table...\n");
+    for (u32 start = 0; start < num_tris; start++) {
+		if (start % 250 == 0)
+			printf("%d%%\n", (int)(100.0f * (float)start / (float)num_tris));
+        NavUtils::PrepareEarlyOutForStartTri(navmesh, start);
+        for (u32 goal = 0; goal < num_tris; goal++) {
+            lookup_tbl[start * num_tris + goal] =
+                NavUtils::AStarPathfindToTri(navmesh, start, goal);
+        }
+    }
+	printf("100%%\n");
+
+	// Cache the lookup table to disk.
+	file = fopen(cachedFilename, "wb");
+    if (file != nullptr)
+    {
+        fwrite(lookup_tbl, 1, num_tris * num_tris * sizeof(u32), file);
+        fclose(file);
+    }
+
+    return AStarLookup {
+        .data = lookup_tbl,
     };
   }
 
