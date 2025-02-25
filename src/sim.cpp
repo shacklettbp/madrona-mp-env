@@ -987,7 +987,6 @@ inline void applyVelocitySystem(Engine &ctx,
   if (to_new_dist == 0.f) {
     return;
   }
-  to_new_pos /= to_new_dist;
 
   move_state.newPosition = new_pos;
   move_state.newVelocity = to_new_pos / consts::deltaT;
