@@ -1013,22 +1013,24 @@ inline void fallSystem(Engine &ctx,
         return;
     }
 
-    const float fallRate = 386.08858267717f;
+    const float FALL_RATE = 386.08858267717f;
+
+    const float cast_offset = consts::agentRadius;
 
     Vector3 ray_o = pos;
-    ray_o.z += consts::agentRadius;
+    ray_o.z += consts::agentRadius + cast_offset;
 
     Entity hit_entity;
 
     float ground_dist = sphereCastWorld(
         ctx, ray_o, -math::up, consts::agentRadius, &hit_entity);
 
-    if (ground_dist == FLT_MAX) {
+    if (ground_dist == FLT_MAX || ground_dist < cast_offset) {
         move_state.newPosition = pos;
         return;
     }
 
-    float fall_dist = fminf(ground_dist, fallRate * consts::deltaT);
+    float fall_dist = fminf(ground_dist - cast_offset, FALL_RATE * consts::deltaT);
 
     Vector3 new_pos = pos;
     new_pos.z -= fall_dist;

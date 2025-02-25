@@ -1151,7 +1151,7 @@ static AStarLookup buildAStarLookup(const Navmesh& navmesh, const char* navmesh_
   char* ext = strrchr(cachedFilename, '.');
   if (ext)
     *ext = '\0';
-  strncpy(cachedFilename, ".astar", MAX_PATH);
+  strncat(cachedFilename, ".astar", MAX_PATH);
   FILE* file = nullptr;
   file = fopen(cachedFilename, "rb");
   if (file)
