@@ -2801,7 +2801,9 @@ void loop(VizState *viz, Manager &mgr)
 
       Entity agent = ctx.data().agents[viz->curControl - 1];
 
-      const float mouse_aim_sensitivity = 1500.f;
+      const float mouse_aim_sensitivity = 300.f;
+      const float mouse_max_move = 1000.f;
+      const float mouse_accelleration = 0.8f;
       const float fine_aim_multiplier = 0.3f;
 
       Vector2 mouse_delta = mouse_move * mouse_aim_sensitivity * frontend_delta_t;
@@ -2811,6 +2813,15 @@ void loop(VizState *viz, Manager &mgr)
         mouse_delta *= fine_aim_multiplier;
         viz->flyCam.fine_aim = true;
       }
+
+      // Mouse accelleration.
+      static Vector2 prev_mouse_delta = { 0.f, 0.f };
+      float mouse_delta_len = fmaxf(mouse_delta.length(), 0.01f);
+      mouse_delta = mouse_delta / mouse_delta_len;
+      mouse_delta_len = fminf(mouse_delta_len + fmaxf(0.0f, prev_mouse_delta.dot(mouse_delta)) * mouse_accelleration, mouse_max_move);
+      mouse_delta *= mouse_delta_len;
+      prev_mouse_delta = mouse_delta;
+
       Aim aim = ctx.get<Aim>(agent);
       aim.yaw -= mouse_delta.x;
       aim.pitch -= mouse_delta.y;
