@@ -1981,6 +1981,17 @@ Tensor Manager::pvpAimActionTensor() const
                                });
 }
 
+
+Tensor Manager::pvpDiscreteAimActionTensor() const
+{
+    return impl_->exportTensor(ExportID::PvPAimAction,
+                               TensorElementType::Int32,
+                               {
+                                   impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
+                                   (sizeof(PvPDiscreteAimAction) / sizeof(int32_t)),
+                               });
+}
+
 Tensor Manager::exploreActionTensor() const
 {
     return impl_->exportTensor(ExportID::ExploreAction,

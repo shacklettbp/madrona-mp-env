@@ -802,7 +802,25 @@ void spawnAgents(Engine &ctx, bool is_respawn)
                                  match_info, spawn_curriculum,
                                  spawning_agent,
                                  &spawn_pt, &spawn_yaw);
-        }  else {
+        } else if (ctx.data().episodeCurriculum == WorldCurriculum::LearnShooting) {
+            standardSpawnPoint(ctx, spawning_agent, standard_spawns, match_info,
+                               is_respawn, standard_use_middle_spawn, episode,
+                               &spawn_pt, &spawn_yaw);
+
+            if (spawn_pt.y > 0.f) {
+              spawn_pt = {
+                -1000.f + base_rng.sampleUniform() * 2000.f,
+                base_rng.sampleUniform() * 400.f,
+                0.f,
+              };
+            } else {
+              spawn_pt = {
+                -1000.f + base_rng.sampleUniform() * 2000.f,
+                -base_rng.sampleUniform() * 400.f,
+                0.f,
+              };
+            }
+        } else {
             standardSpawnPoint(ctx, spawning_agent, standard_spawns, match_info,
                                is_respawn, standard_use_middle_spawn, episode,
                                &spawn_pt, &spawn_yaw);

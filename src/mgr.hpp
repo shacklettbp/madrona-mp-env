@@ -75,6 +75,7 @@ public:
     madrona::py::Tensor matchResultTensor() const;
     madrona::py::Tensor pvpDiscreteActionTensor() const;
     madrona::py::Tensor pvpAimActionTensor() const;
+    madrona::py::Tensor pvpDiscreteAimActionTensor() const;
     madrona::py::Tensor exploreActionTensor() const;
     madrona::py::Tensor rewardTensor() const;
     madrona::py::Tensor doneTensor() const;

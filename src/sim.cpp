@@ -567,6 +567,7 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerComponent<OpponentsVisibility>();
         registry.registerComponent<PvPDiscreteAction>();
         registry.registerComponent<PvPAimAction>();
+        registry.registerComponent<PvPDiscreteAimAction>();
         registry.registerComponent<CoarsePvPAction>();
         registry.registerComponent<HardcodedBotAction>();
 
@@ -597,6 +598,9 @@ void Sim::registerTypes(ECSRegistry &registry,
                 (uint32_t)ExportID::PvPDiscreteAction);
             registry.exportColumn<PvPAgent, PvPAimAction>(
                 (uint32_t)ExportID::PvPAimAction);
+
+            registry.exportColumn<PvPAgent, PvPDiscreteAimAction>(
+                (uint32_t)ExportID::PvPDiscreteAimAction);
         }
 
         registry.exportColumn<PvPAgent, SelfObservation>(
@@ -722,6 +726,8 @@ void Sim::registerTypes(ECSRegistry &registry,
 
 static inline void initWorld(Engine &ctx, bool triggered_reset)
 {
+    ctx.data().episodeCurriculum = ctx.singleton<WorldCurriculum>();
+
     ctx.data().matchID = 
       (((u64)ctx.worldID().idx) << 32) |
       ((u64)ctx.data().curEpisodeIdx);
@@ -1429,7 +1435,7 @@ inline void fireSystem(Engine &ctx,
     return;
   }
 
-  if (action.reload == 1) {
+  if (action.fire == 2) {
     logEvent(ctx, GameEvent {
       .type = EventType::Reload,
       .matchID = ctx.data().matchID,
@@ -1967,7 +1973,6 @@ inline void applyBotActionsSystem(Engine &ctx,
     .moveAmount = hardcoded.moveAmount,
     .moveAngle = hardcoded.moveAngle,
     .fire = hardcoded.fire,
-    .reload = hardcoded.reload,
     .stand = hardcoded.stand,
   };
 
@@ -2169,9 +2174,9 @@ inline void pvpTurnSystem(Engine &,
     if (alive.mask == 0.f) {
         return;
     }
-    
-    aim.yaw += action.yaw * consts::deltaT;
-    aim.pitch += action.pitch * consts::deltaT;
+
+    aim.yaw += 10.f * action.yaw * consts::deltaT;
+    aim.pitch += 2.f * action.pitch * consts::deltaT;
 
     aim = computeAim(aim.yaw, aim.pitch);
 
@@ -3407,20 +3412,56 @@ inline void tdmRewardSystem(Engine &ctx,
 #endif
 }
 
-inline void zoneRewardSystem(Engine &ctx,
-                               Position pos,
-                               AgentPolicy agent_policy,
-                               TeamInfo team_info,
-                               Aim aim,
-                               const Alive &alive,
-                               const Teammates &teammates,
-                               const Opponents &opponents,
-                               CombatState &combat_state,
-                               BreadcrumbAgentState &breadcrumb_state,
-                               ExploreTracker &explore_tracker,
-                               RewardHyperParams reward_hyper_params,
-                               Reward &out_reward)
+static void learnShootingRewardSystem(
+    Engine &ctx,
+    CombatState &combat_state,
+    ExploreTracker &explore_tracker,
+    Reward &out_reward)
 {
+  (void)ctx;
+
+  if (combat_state.landedShotOn != Entity::none()) {
+    out_reward.v += 0.5f;
+  } else if (combat_state.firedShotT >= 0.f) {
+    out_reward.v -= 0.05f;
+  }
+
+  if (combat_state.reloadedFullMag) {
+      out_reward.v -= 0.5f;
+  }
+
+  //uint32_t num_new_cells = explore_tracker.numNewCellsVisited;
+  //explore_tracker.numNewCellsVisited = 0;
+
+  //if (num_new_cells > 0) {
+  //    out_reward.v += float(num_new_cells) * 0.001f;
+  //}
+  (void)explore_tracker;
+}
+
+inline void zoneRewardSystem(Engine &ctx,
+                             Position pos,
+                             AgentPolicy agent_policy,
+                             TeamInfo team_info,
+                             Aim aim,
+                             const Alive &alive,
+                             const Teammates &teammates,
+                             const Opponents &opponents,
+                             CombatState &combat_state,
+                             BreadcrumbAgentState &breadcrumb_state,
+                             ExploreTracker &explore_tracker,
+                             RewardHyperParams reward_hyper_params,
+                             Reward &out_reward)
+{
+    out_reward.v = 0.f;
+
+    if (ctx.singleton<WorldCurriculum>() ==
+        WorldCurriculum::LearnShooting) {
+      learnShootingRewardSystem(ctx, combat_state,
+                                explore_tracker, out_reward);
+      return;
+    }
+
     (void)aim;
     (void)opponents;
 
@@ -3428,8 +3469,6 @@ inline void zoneRewardSystem(Engine &ctx,
     const RewardHyperParams reward_hyper_params =
         getRewardHyperParamsForPolicy(ctx, agent_policy);
 #endif
-
-    out_reward.v = 0.f;
 
     out_reward.v -= reward_hyper_params.breadcrumbScale * breadcrumb_state.totalPenalty;
 
@@ -5365,6 +5404,8 @@ Sim::Sim(Engine &ctx,
 
   // Creates agents, walls, etc.
   createPersistentEntities(ctx, cfg);
+
+  ctx.singleton<WorldCurriculum>() = WorldCurriculum::LearnShooting;
 
   // Generate initial world state
   initWorld(ctx, true);

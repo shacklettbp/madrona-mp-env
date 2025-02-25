@@ -2567,8 +2567,7 @@ void planAI(Engine& ctx, VizState* viz, int world, int player)
   actions[world * viz->numViews + player] = PvPDiscreteAction{
     .moveAmount = move_amount,
     .moveAngle = move_angle,
-    .fire = f,
-    .reload = r,
+    .fire = r > 0 ? 2 : f,
     .stand = stand,
   };
 
@@ -2742,8 +2741,7 @@ void loop(VizState *viz, Manager &mgr)
         mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
           .moveAmount = move_amount,
           .moveAngle = move_angle,
-          .fire = f,
-          .reload = r,
+          .fire = r > 0 ? 2 : f,
           .stand = stand,
         }, PvPAimAction {
           .yaw = 0,

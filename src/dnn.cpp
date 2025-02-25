@@ -151,7 +151,7 @@ struct PolicyWeights {
   std::array<FullyConnectedLayerWithLayerNormWithActivation, 3> mlp;
 
   static constexpr inline auto discreteActionsNumBuckets =
-      std::to_array<int32_t>({ 3, 8, 2, 2, 3 });
+      std::to_array<int32_t>({ 3, 8, 3, 3 });
 
   FullyConnectedParams discreteHead;
   FullyConnectedParams aimHead;
@@ -693,8 +693,7 @@ void evalAgentPolicy(
     discrete_action.moveAmount = int_actions[0];
     discrete_action.moveAngle = int_actions[1];
     discrete_action.fire = int_actions[2];
-    discrete_action.reload = int_actions[3];
-    discrete_action.stand = int_actions[4];
+    discrete_action.stand = int_actions[3];
   }
 
   {

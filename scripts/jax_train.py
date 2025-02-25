@@ -230,12 +230,13 @@ if pbt_cfg:
         log10_scale = True,
     )
 
-    entropy_coef = ParamExplore(
-        base = args.entropy_loss_coef,
-        min_scale = 0.1,
-        max_scale = 10.0,
-        log10_scale = True,
-    )
+    #entropy_coef = ParamExplore(
+    #    base = args.entropy_loss_coef,
+    #    min_scale = 0.1,
+    #    max_scale = 10.0,
+    #    log10_scale = True,
+    #)
+    entropy_coef = args.entropy_loss_coef
 else:
     lr = args.lr
     entropy_coef = args.entropy_loss_coef
@@ -256,7 +257,10 @@ cfg = TrainConfig(
         clip_coef = 0.2,
         #value_loss_coef = args.value_loss_coef,
         value_loss_coef = 0.5,
-        entropy_coef = entropy_coef,
+        entropy_coef = {
+            'discrete': entropy_coef,
+            'aim': entropy_coef * 0.001,
+        },
         max_grad_norm = 0.5,
         clip_value_loss = args.clip_value_loss,
         huber_value_loss = True,
@@ -322,7 +326,7 @@ def _log_metrics_host_cb(training_mgr):
         num_train_policies = lrs.shape[0]
         for i in range(lrs.shape[0]):
             tb_writer.scalar(f"p{i}/lr", lrs[i], update_id)
-            tb_writer.scalar(f"p{i}/entropy_coef", entropy_coefs[i], update_id)
+            #tb_writer.scalar(f"p{i}/entropy_coef", entropy_coefs[i], update_id)
 
     training_mgr.log_metrics_tensorboard(tb_writer)
 
