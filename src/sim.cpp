@@ -5405,7 +5405,7 @@ Sim::Sim(Engine &ctx,
   // Creates agents, walls, etc.
   createPersistentEntities(ctx, cfg);
 
-  ctx.singleton<WorldCurriculum>() = WorldCurriculum::LearnShooting;
+  ctx.singleton<WorldCurriculum>() = WorldCurriculum::FullMatch;
 
   // Generate initial world state
   initWorld(ctx, true);
