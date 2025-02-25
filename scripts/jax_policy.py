@@ -35,7 +35,7 @@ from hash_encoder import HashGridEncoder
 
 actions_config = {
     'discrete': DiscreteActionsConfig(
-            actions_num_buckets = [ 3, 8, 2, 2, 3 ],
+            actions_num_buckets = [ 3, 8, 3, 3 ],
         ),
     'aim': ContinuousActionsConfig(
         stddev_min = 0.001,
