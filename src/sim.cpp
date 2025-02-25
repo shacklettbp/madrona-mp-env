@@ -568,6 +568,7 @@ void Sim::registerTypes(ECSRegistry &registry,
         registry.registerComponent<PvPDiscreteAction>();
         registry.registerComponent<PvPAimAction>();
         registry.registerComponent<PvPDiscreteAimAction>();
+        registry.registerComponent<PvPDiscreteAimState>();
         registry.registerComponent<CoarsePvPAction>();
         registry.registerComponent<HardcodedBotAction>();
 
@@ -2165,22 +2166,62 @@ inline void coarseMovementSystem(
 #endif
 }
 
-inline void pvpTurnSystem(Engine &,
-                          PvPAimAction action,
-                          Rotation &rot,
-                          Aim &aim,
-                          const Alive &alive)
+inline void pvpContinuousAimSystem(Engine &,
+                                   PvPAimAction action,
+                                   Rotation &rot,
+                                   Aim &aim,
+                                   const Alive &alive)
 {
-    if (alive.mask == 0.f) {
-        return;
-    }
+  if (alive.mask == 0.f) {
+    return;
+  }
 
-    aim.yaw += 10.f * action.yaw * consts::deltaT;
-    aim.pitch += 2.f * action.pitch * consts::deltaT;
+  aim.yaw += 10.f * action.yaw * consts::deltaT;
+  aim.pitch += 2.f * action.pitch * consts::deltaT;
 
-    aim = computeAim(aim.yaw, aim.pitch);
+  aim = computeAim(aim.yaw, aim.pitch);
 
-    rot = Quat::angleAxis(aim.yaw, math::up).normalize();
+  rot = Quat::angleAxis(aim.yaw, math::up).normalize();
+}
+
+inline void pvpDiscreteAimSystem(Engine &,
+                                 PvPDiscreteAimAction action,
+                                 PvPDiscreteAimState &aim_state,
+                                 Rotation &rot,
+                                 Aim &aim,
+                                 const Alive &alive)
+{
+  if (alive.mask == 0.f) {
+      return;
+  }
+
+  constexpr int32_t center_yaw_bucket = consts::discreteAimNumYawBuckets / 2;
+  constexpr int32_t center_pitch_bucket = consts::discreteAimNumPitchBuckets / 2;
+
+  constexpr float discrete_yaw_delta = 2.f * math::pi / center_yaw_bucket;
+
+  constexpr float discrete_pitch_delta = 1.f * math::pi / center_pitch_bucket;
+
+  constexpr float max_yaw_vel = 2.f * math::pi;
+  constexpr float max_pitch_vel = max_yaw_vel / 2;
+
+  float yaw_accel = discrete_yaw_delta * (action.yaw - center_yaw_bucket);
+  float pitch_accel = discrete_pitch_delta * (action.pitch - center_pitch_bucket);
+
+  aim_state.yawVelocity += yaw_accel * consts::deltaT;
+  aim_state.pitchVelocity += pitch_accel * consts::deltaT;
+
+  aim_state.yawVelocity = 
+      fminf(fmaxf(aim_state.yawVelocity, -max_yaw_vel), max_yaw_vel);
+  aim_state.pitchVelocity = 
+      fminf(fmaxf(aim_state.pitchVelocity, -max_pitch_vel), max_pitch_vel);
+
+  aim.yaw += aim_state.yawVelocity * consts::deltaT;
+  aim.pitch += aim_state.pitchVelocity * consts::deltaT;
+
+  aim = computeAim(aim.yaw, aim.pitch);
+
+  rot = Quat::angleAxis(aim.yaw, math::up).normalize();
 }
 
 #if 0
@@ -4906,8 +4947,17 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
             >>(deps);
 
         auto turn_sys = builder.addToGraph<ParallelForNode<Engine,
-            pvpTurnSystem,
+            pvpContinuousAimSystem,
                 PvPAimAction,
+                Rotation,
+                Aim,
+                Alive
+            >>({move_sys});
+
+        turn_sys = builder.addToGraph<ParallelForNode<Engine,
+            pvpDiscreteAimSystem,
+                PvPDiscreteAimAction,
+                PvPDiscreteAimState,
                 Rotation,
                 Aim,
                 Alive

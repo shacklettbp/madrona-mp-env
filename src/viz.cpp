@@ -2584,7 +2584,8 @@ void doAI(VizState* viz, Manager& mgr, int world, int player)
     mgr.setPvPAction(
         world, player,
         actions[world * viz->numViews + player],
-        aimActions[world * viz->numViews + player]);
+        aimActions[world * viz->numViews + player],
+        {});
 }
 
 void loop(VizState *viz, Manager &mgr)
@@ -2656,8 +2657,8 @@ void loop(VizState *viz, Manager &mgr)
       if (viz->curControl != 0) {
         int32_t x = 0;
         int32_t y = 0;
-        int32_t r_yaw = 2;
-        int32_t r_pitch = 2;
+        int32_t r_yaw = consts::discreteAimNumYawBuckets / 2;
+        int32_t r_pitch = consts::discreteAimNumPitchBuckets / 2;
         int32_t f = 0;
         int32_t r = 0;
 
@@ -2702,10 +2703,17 @@ void loop(VizState *viz, Manager &mgr)
         }
 
         if (input.isDown(InputID::Z)) {
-          r_pitch += shift_pressed ? 2 : 1;
+          r_pitch = shift_pressed ? 0 : 2;
         }
         if (input.isDown(InputID::X)) {
-          r_pitch -= shift_pressed ? 2 : 1;
+          r_pitch = shift_pressed ? 6 : 4;
+        }
+
+        if (input.isDown(InputID::Q)) {
+          r_yaw = shift_pressed ? 14 : 8;
+        }
+        if (input.isDown(InputID::E)) {
+          r_yaw = shift_pressed ? 0 : 6;
         }
 
         int32_t move_amount;
@@ -2746,6 +2754,9 @@ void loop(VizState *viz, Manager &mgr)
         }, PvPAimAction {
           .yaw = 0,
           .pitch = 0,
+        }, PvPDiscreteAimAction {
+          .yaw = r_yaw,
+          .pitch = r_pitch,
         });
 
         (void)r_yaw;

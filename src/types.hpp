@@ -43,103 +43,103 @@ struct TDMEpisode {
 };
 
 enum class Task : uint32_t {
-    Explore,
-    TDM,
-    Zone,
-    Turret,
-    ZoneCaptureDefend,
+  Explore,
+  TDM,
+  Zone,
+  Turret,
+  ZoneCaptureDefend,
 };
 
 struct WeaponStats {
-    i32 magSize;
-    i32 reloadTime;
-    f32 dmgPerBullet;
-    f32 accuracyScale;
+  i32 magSize;
+  i32 reloadTime;
+  f32 dmgPerBullet;
+  f32 accuracyScale;
 };
 
 struct Spawn {
-    AABB region;
-    float yawMin;
-    float yawMax;
+  AABB region;
+  float yawMin;
+  float yawMax;
 };
 
 struct NavmeshSpawn {
-    uint32_t aOffset;
-    uint32_t bOffset;
-    uint32_t numANavmeshPolys;
-    uint32_t numBNavmeshPolys;
-    float aBaseYaw;
-    float bBaseYaw;
+  uint32_t aOffset;
+  uint32_t bOffset;
+  uint32_t numANavmeshPolys;
+  uint32_t numBNavmeshPolys;
+  float aBaseYaw;
+  float bBaseYaw;
 };
 
 struct RespawnRegion {
-    uint32_t startOffset;
-    uint32_t numSpawns;
-    AABB aabb;
-    float rotation;
+  uint32_t startOffset;
+  uint32_t numSpawns;
+  AABB aabb;
+  float rotation;
 };
 
 struct StandardSpawns {
-    Spawn *aSpawns;
-    Spawn *bSpawns;
-    Spawn *commonRespawns;
-    uint32_t numDefaultASpawns;
-    uint32_t numDefaultBSpawns;
-    uint32_t numExtraASpawns;
-    uint32_t numExtraBSpawns;
-    uint32_t numCommonRespawns;
-    RespawnRegion *respawnRegions;
-    uint32_t numRespawnRegions;
+  Spawn *aSpawns;
+  Spawn *bSpawns;
+  Spawn *commonRespawns;
+  uint32_t numDefaultASpawns;
+  uint32_t numDefaultBSpawns;
+  uint32_t numExtraASpawns;
+  uint32_t numExtraBSpawns;
+  uint32_t numCommonRespawns;
+  RespawnRegion *respawnRegions;
+  uint32_t numRespawnRegions;
 };
 
 struct SpawnUsageCounter {
-    static constexpr CountT maxNumSpawns = 128;
-    uint32_t initASpawnsLastUsedTick[maxNumSpawns];
-    uint32_t initBSpawnsLastUsedTick[maxNumSpawns];
-    uint32_t respawnLastUsedTick[maxNumSpawns];
+  static constexpr CountT maxNumSpawns = 128;
+  uint32_t initASpawnsLastUsedTick[maxNumSpawns];
+  uint32_t initBSpawnsLastUsedTick[maxNumSpawns];
+  uint32_t respawnLastUsedTick[maxNumSpawns];
 };
 
 struct Zones {
-    AABB *bboxes;
-    float *rotations;
-    uint32_t numZones;
+  AABB *bboxes;
+  float *rotations;
+  uint32_t numZones;
 };
 
 struct SpawnCurriculum {
-    static inline constexpr uint32_t numCurriculumTiers = 5;
+  static inline constexpr uint32_t numCurriculumTiers = 5;
 
-    struct Tier {
-        uint32_t *spawnPolyData;
-        NavmeshSpawn *spawns;
+  struct Tier {
+    uint32_t *spawnPolyData;
+    NavmeshSpawn *spawns;
 
-        uint32_t numTotalSpawnPolys;
-        uint32_t numSpawns;
-    };
+    uint32_t numTotalSpawnPolys;
+    uint32_t numSpawns;
+  };
 
-    Tier tiers[numCurriculumTiers];
+  Tier tiers[numCurriculumTiers];
 };
 
 struct CurriculumState {
-    float useCurriculumSpawnProb;
-    float tierProbabilities[SpawnCurriculum::numCurriculumTiers];
+  float useCurriculumSpawnProb;
+  float tierProbabilities[SpawnCurriculum::numCurriculumTiers];
 };
 
 struct MatchInfo {
-    int32_t teamA;
-    int32_t curStep;
-    bool isFinished;
-    bool enableSpawnCurriculum;
-    uint32_t curCurriculumTier;
-    uint32_t curCurriculumSpawnIdx;
+  int32_t teamA;
+  int32_t curStep;
+  bool isFinished;
+  bool enableSpawnCurriculum;
+  uint32_t curCurriculumTier;
+  uint32_t curCurriculumSpawnIdx;
 };
 
 struct AStarLookup {
-    u32 *data;
+  u32 *data;
 };
 
 struct LevelData {
-    Navmesh navmesh;
-    AStarLookup aStarLookup;
+  Navmesh navmesh;
+  AStarLookup aStarLookup;
 };
 
 // WorldReset is a per-world singleton component that causes the current
@@ -147,150 +147,155 @@ struct LevelData {
 // (Singleton components like WorldReset can be accessed via Context::singleton
 // (eg ctx.singleton<WorldReset>().reset = 1)
 struct WorldReset {
-    int32_t reset;
+  int32_t reset;
 };
 
 enum class WorldCurriculum : uint32_t {
-    LearnShooting = 0,
-    FullMatch = 1,
+  LearnShooting = 0,
+  FullMatch = 1,
 };
 
 struct TrainControl {
-    int32_t evalMode;
-    int32_t randomizeEpisodeLengthAfterReset;
-    int32_t randomizeTeamSides;
+  int32_t evalMode;
+  int32_t randomizeEpisodeLengthAfterReset;
+  int32_t randomizeTeamSides;
 };
 
 // Discrete action component. Ranges are defined by consts::numMoveBuckets (5),
 // repeated here for clarity
 struct ExploreAction {
-    int32_t moveAmount; // [0, 3]
-    int32_t moveAngle; // [0, 7]
-    int32_t rotate; // [-2, 2]
-    int32_t mantle;
+  int32_t moveAmount; // [0, 3]
+  int32_t moveAngle; // [0, 7]
+  int32_t rotate; // [-2, 2]
+  int32_t mantle;
 };
 
 struct PvPDiscreteAction {
-    int32_t moveAmount; // [0, 2]
-    int32_t moveAngle; // [0, 7]
-    int32_t fire; // [0, 1, 2]
-    int32_t stand; // [0, 1, 2]
+  int32_t moveAmount; // [0, 2]
+  int32_t moveAngle; // [0, 7]
+  int32_t fire; // [0, 1, 2]
+  int32_t stand; // [0, 1, 2]
 };
 
 struct PvPDiscreteAimAction {
-    int32_t yaw;
-    int32_t pitch;
+  int32_t yaw; // [0, 14]
+  int32_t pitch; // [0, 6]
+};
+
+struct PvPDiscreteAimState {
+  float yawVelocity;
+  float pitchVelocity;
 };
 
 struct PvPAimAction {
-    float yaw;
-    float pitch;
+  float yaw;
+  float pitch;
 };
 
 struct HardcodedBotAction {
-    int32_t moveAmount; // [0, 3]
-    int32_t moveAngle; // [0, 7]
-    int32_t yawRotate; // [-2, 2]
-    int32_t pitchRotate; // [-2, 2]
-    int32_t fire;
-    int32_t reload;
-    int32_t stand; // [0, 1, 2]
+  int32_t moveAmount; // [0, 3]
+  int32_t moveAngle; // [0, 7]
+  int32_t yawRotate; // [-2, 2]
+  int32_t pitchRotate; // [-2, 2]
+  int32_t fire;
+  int32_t reload;
+  int32_t stand; // [0, 1, 2]
 };
 
 struct CoarsePvPAction {
-    int32_t moveAmount; // [0, 3]
-    int32_t moveAngle; // [0, 7]
-    int32_t facing; // [0, 15]
+  int32_t moveAmount; // [0, 3]
+  int32_t moveAngle; // [0, 7]
+  int32_t facing; // [0, 15]
 };
 
 struct Reward {
-    float v;
+  float v;
 };
 
 enum class Pose : int {
-    Stand = 0,
-    Crouch = 1,
-    Prone = 2,
+  Stand = 0,
+  Crouch = 1,
+  Prone = 2,
 };
 
 struct StandState {
-    Pose curPose;
-    Pose tgtPose;
-    int32_t transitionRemaining;
+  Pose curPose;
+  Pose tgtPose;
+  int32_t transitionRemaining;
 };
 
 struct TeamRewardState {
-    float teamRewards[2];
+  float teamRewards[2];
 };
 
 // Per-agent component that indicates that the agent's episode is finished
 // This is exported per-agent for simplicity in the training code
 struct Done {
-    // Currently bool components are not supported due to
-    // padding issues, so Done is an int32_t
-    int32_t v;
+  // Currently bool components are not supported due to
+  // padding issues, so Done is an int32_t
+  int32_t v;
 };
 
 struct ZoneStats {
-    int32_t numSwaps;
-    std::array<int32_t, 2> numTeamCapturedSteps;
-    int32_t numContestedSteps;
-    int32_t numTotalActiveSteps;
+  int32_t numSwaps;
+  std::array<int32_t, 2> numTeamCapturedSteps;
+  int32_t numContestedSteps;
+  int32_t numTotalActiveSteps;
 };
 
 struct MatchResult {
-    int32_t winResult;
-    int32_t teamTotalKills[2];
-    int32_t teamObjectivePoints[2];
+  int32_t winResult;
+  int32_t teamTotalKills[2];
+  int32_t teamObjectivePoints[2];
 
-    std::array<ZoneStats, consts::maxZones> zoneStats;
+  std::array<ZoneStats, consts::maxZones> zoneStats;
 };
 
 struct RewardHyperParams {
-    float teamSpirit = 0.f;
-    float shotScale = 0.05f;
-    float exploreScale = 0.001f;
-    float inZoneScale = 0.05f;
-    float zoneTeamContestScale = 0.01f;
-    float zoneTeamCtrlScale = 0.1f;
-    float zoneDistScale = 0.005f;
-    float zoneEarnedPointScale = 1.f;
-    float breadcrumbScale = 0.1f;
+  float teamSpirit = 0.f;
+  float shotScale = 0.05f;
+  float exploreScale = 0.001f;
+  float inZoneScale = 0.05f;
+  float zoneTeamContestScale = 0.01f;
+  float zoneTeamCtrlScale = 0.1f;
+  float zoneDistScale = 0.005f;
+  float zoneEarnedPointScale = 1.f;
+  float breadcrumbScale = 0.1f;
 };
 
 struct AgentPolicy {
-    int32_t idx;
+  int32_t idx;
 };
 
 struct TeamInfo {
-    int32_t team;
-    int32_t offset;
+  int32_t team;
+  int32_t offset;
 };
 
 struct StandObservation {
-    float curStanding = 0.f;
-    float curCrouching = 0.f;
-    float curProning = 0.f;
-    float tgtStanding = 0.f;
-    float tgtCrouching = 0.f;
-    float tgtProning = 0.f;
-    float transitionRemaining = 0.f;
+  float curStanding = 0.f;
+  float curCrouching = 0.f;
+  float curProning = 0.f;
+  float tgtStanding = 0.f;
+  float tgtCrouching = 0.f;
+  float tgtProning = 0.f;
+  float transitionRemaining = 0.f;
 };
 
 struct ZoneObservation {
-    float centerX = 0.f;
-    float centerY = 0.f;
-    float centerZ = 0.f;
-    float toCenterDist = 0.f;
-    float toCenterYaw = 0.f;
-    float toCenterPitch = 0.f;
-    float myTeamControlling = 0.f;
-    float enemyTeamControlling = 0.f;
-    float isContested = 0.f;
-    float isCaptured = 0.f;
-    float stepsUntilPoint = 0.f;
-    float stepsRemaining = 0.f;
-    std::array<float, 4> id = {};
+  float centerX = 0.f;
+  float centerY = 0.f;
+  float centerZ = 0.f;
+  float toCenterDist = 0.f;
+  float toCenterYaw = 0.f;
+  float toCenterPitch = 0.f;
+  float myTeamControlling = 0.f;
+  float enemyTeamControlling = 0.f;
+  float isContested = 0.f;
+  float isCaptured = 0.f;
+  float stepsUntilPoint = 0.f;
+  float stepsRemaining = 0.f;
+  std::array<float, 4> id = {};
 };
 
 struct PlayerCommonObservation {
@@ -344,21 +349,21 @@ struct OpponentObservation : public OtherPlayerCommonObservation {
 };
 
 struct TeammateObservations {
-    TeammateObservation obs[consts::maxTeamSize - 1];
+  TeammateObservation obs[consts::maxTeamSize - 1];
 };
 
 struct OpponentObservations {
-    OpponentObservation obs[consts::maxTeamSize];
+  OpponentObservation obs[consts::maxTeamSize];
 };
 
 struct OpponentLastKnownObservations {
-    OpponentObservation obs[consts::maxTeamSize];
+  OpponentObservation obs[consts::maxTeamSize];
 };
 
 struct NormalizedPositionObservation {
-    float x = -1000.f;
-    float y = -1000.f;
-    float z = -1000.f;
+  float x = -1000.f;
+  float y = -1000.f;
+  float z = -1000.f;
 };
 
 struct SelfPositionObservation {
@@ -366,19 +371,19 @@ struct SelfPositionObservation {
 };
 
 struct TeammatePositionObservations {
-    NormalizedPositionObservation obs[consts::maxTeamSize - 1];
+  NormalizedPositionObservation obs[consts::maxTeamSize - 1];
 };
 
 struct OpponentPositionObservations {
-    NormalizedPositionObservation obs[consts::maxTeamSize];
+  NormalizedPositionObservation obs[consts::maxTeamSize];
 };
 
 struct OpponentLastKnownPositionObservations {
-    NormalizedPositionObservation obs[consts::maxTeamSize];
+  NormalizedPositionObservation obs[consts::maxTeamSize];
 };
 
 struct OpponentMasks {
-    float masks[consts::maxTeamSize];
+  float masks[consts::maxTeamSize];
 };
 
 struct LidarData {
@@ -390,158 +395,156 @@ struct LidarData {
 
 // Linear depth values in a circle around the agent
 struct FwdLidar {
-    LidarData data[consts::fwdLidarHeight][consts::fwdLidarWidth];
+  LidarData data[consts::fwdLidarHeight][consts::fwdLidarWidth];
 };
 
 struct RearLidar {
-    LidarData data[consts::rearLidarHeight][consts::rearLidarWidth];
+  LidarData data[consts::rearLidarHeight][consts::rearLidarWidth];
 };
 
 struct MapItem {
-    float iAmPresent = 0;
-    float numTeammatesPresent = 0;
-    float numOpponentsPresent = 0;
-    float numPastOpponentsPresent = 0;
+  float iAmPresent = 0;
+  float numTeammatesPresent = 0;
+  float numOpponentsPresent = 0;
+  float numPastOpponentsPresent = 0;
 };
 
 struct AgentMap {
-    static constexpr inline int res = 16;
-    MapItem data[res][res];
+  static constexpr inline int res = 16;
+  MapItem data[res][res];
 };
 
 struct UnmaskedAgentMap {
-    MapItem data[AgentMap::res][AgentMap::res];
+  MapItem data[AgentMap::res][AgentMap::res];
 };
 
 // Per-agent component storing Entity IDs of the other agents. Used to
 // build the egocentric observations of their state.
 struct Teammates {
-    Entity e[consts::maxTeamSize - 1];
+  Entity e[consts::maxTeamSize - 1];
 };
 
 struct Opponents {
-    Entity e[consts::maxTeamSize];
+  Entity e[consts::maxTeamSize];
 };
 
 struct OpponentsVisibility {
-    bool canSee[consts::maxTeamSize];
+  bool canSee[consts::maxTeamSize];
 };
 
 struct Aim {
-    float yaw;
-    float pitch;
-    Quat rot;
+  float yaw;
+  float pitch;
+  Quat rot;
 };
 
 struct CamRef {
-    Entity camEntity;
+  Entity camEntity;
 };
 
 struct AgentVelocity : madrona::math::Vector3 {
-    inline AgentVelocity(madrona::math::Vector3 v)
-        : Vector3(v)
-    {}
+  inline AgentVelocity(madrona::math::Vector3 v)
+    : Vector3(v)
+  {}
 };
 
 struct IntermediateMoveState {
-    Vector3 newPosition;
-    Vector3 newVelocity;
-    float maxVelocity;
+  Vector3 newPosition;
+  Vector3 newVelocity;
+  float maxVelocity;
 };
 
 struct HP {
-    float hp;
+  float hp;
 };
 
 struct Magazine {
-    int32_t numBullets;
-    int32_t isReloading;
+  int32_t numBullets;
+  int32_t isReloading;
 };
 
 struct DamageDealt {
-    float dmg[consts::maxTeamSize];
+  float dmg[consts::maxTeamSize];
 };
 
 struct Alive {
-    float mask;
+  float mask;
 };
 
 struct StartPos : public Vector3 {
-    inline StartPos(Vector3 v)
-        : Vector3(v)
-    {}
+  inline StartPos(Vector3 v)
+    : Vector3(v)
+  {}
 };
 
 struct ExploreTracker {
-    static inline constexpr int32_t gridWidth = 81;
-    static inline constexpr int32_t gridMaxX = gridWidth / 2;
-    static inline constexpr int32_t gridHeight = 81;
-    static inline constexpr int32_t gridMaxY = gridHeight / 2;
+  static inline constexpr int32_t gridWidth = 81;
+  static inline constexpr int32_t gridMaxX = gridWidth / 2;
+  static inline constexpr int32_t gridHeight = 81;
+  static inline constexpr int32_t gridMaxY = gridHeight / 2;
 
-    uint32_t visited[gridHeight][gridWidth];
-    uint32_t numNewCellsVisited;
+  uint32_t visited[gridHeight][gridWidth];
+  uint32_t numNewCellsVisited;
 };
 
 struct CombatState {
-    madrona::RNG rng;
-    Entity landedShotOn;
-    int32_t remainingRespawnSteps;
-    int32_t remainingStepsBeforeAutoheal;
-    bool successfulKill;
-    int32_t wasShotCount;
-    bool wasKilled;
-    float firedShotT;
-    bool inZone;
-    float minDistToZone;
-    bool hasDiedDuringEpisode;
-    bool reloadedFullMag;
-    Vector3 immitationGoalPosition;
-    float minDistToImmitationGoal;
-    i32 weaponType;
+  madrona::RNG rng;
+  Entity landedShotOn;
+  int32_t remainingRespawnSteps;
+  int32_t remainingStepsBeforeAutoheal;
+  bool successfulKill;
+  int32_t wasShotCount;
+  bool wasKilled;
+  float firedShotT;
+  bool inZone;
+  float minDistToZone;
+  bool hasDiedDuringEpisode;
+  bool reloadedFullMag;
+  Vector3 immitationGoalPosition;
+  float minDistToImmitationGoal;
+  i32 weaponType;
 };
 
 struct ShotVizRemaining {
-    int32_t numStepsRemaining;
+  int32_t numStepsRemaining;
 };
 
 struct TurretState {
-    madrona::RNG rng;
-    int32_t offset;
+  madrona::RNG rng;
+  int32_t offset;
 };
 
 struct ZoneState {
-    int32_t curZone;
-    int32_t curControllingTeam;
-    bool isContested;
-    bool isCaptured;
-    bool earnedPoint;
+  int32_t curZone;
+  int32_t curControllingTeam;
+  bool isContested;
+  bool isCaptured;
+  bool earnedPoint;
 
-    int32_t zoneStepsRemaining;
-    int32_t stepsUntilPoint;
+  int32_t zoneStepsRemaining;
+  int32_t stepsUntilPoint;
 };
 
 struct AgentLogData {
-    Vector3 position;
-    Aim aim;
-    HP hp;
-    Magazine mag;
-    StandState standState;
-    int32_t shotAgentIdx;
-    float firedShotT;
-    bool wasKilled;
-    bool successfullKill;
+  Vector3 position;
+  Aim aim;
+  HP hp;
+  Magazine mag;
+  StandState standState;
+  int32_t shotAgentIdx;
+  float firedShotT;
+  bool wasKilled;
+  bool successfullKill;
 };
 
 struct StepLog {
-    AgentLogData agentData[consts::maxTeamSize * 2];
+  AgentLogData agentData[consts::maxTeamSize * 2];
 };
 
 struct EventLogGlobalState {
   u32 numEvents;
   u32 numStepStates;
 };
-
-
 
 enum class PackedPlayerStateFlags : u8 {
   None        = 0,
@@ -714,46 +717,46 @@ struct GameEventEntity : madrona::Archetype<
 > {};
 
 struct Breadcrumb {
-    Vector3 pos;
-    float penalty;
-    TeamInfo teamInfo;
+  Vector3 pos;
+  float penalty;
+  TeamInfo teamInfo;
 };
 
 struct BreadcrumbAgentState {
-    float totalPenalty;
-    Entity lastBreadcrumb;
-    int32_t stepsSinceLastNewBreadcrumb;
+  float totalPenalty;
+  Entity lastBreadcrumb;
+  int32_t stepsSinceLastNewBreadcrumb;
 };
 
 struct BreadcrumbEntity : madrona::Archetype<
-    Position,
-    Rotation,
-    Scale,
-    Breadcrumb
+  Position,
+  Rotation,
+  Scale,
+  Breadcrumb
 > {};
 
 struct ZOBB {
-    Vector3 pMin;
-    Vector3 pMax;
-    float rotation;
+  Vector3 pMin;
+  Vector3 pMax;
+  float rotation;
 };
 
 struct GoalRegion {
-    static constexpr int maxSubRegions = 3;
+  static constexpr int maxSubRegions = 3;
 
-    ZOBB subRegions[maxSubRegions];
-    int32_t numSubRegions = 1;
+  ZOBB subRegions[maxSubRegions];
+  int32_t numSubRegions = 1;
 
-    bool attackerTeam = true;
-    float rewardStrength = 1.f;
+  bool attackerTeam = true;
+  float rewardStrength = 1.f;
 };
 
 struct GoalRegionsState {
-    static constexpr int maxRegions = 10;
+  static constexpr int maxRegions = 10;
 
-    bool regionsActive[maxRegions];
-    float minDistToRegions[maxRegions];
-    float teamStepRewards[2];
+  bool regionsActive[maxRegions];
+  float minDistToRegions[maxRegions];
+  float teamStepRewards[2];
 };
 
 struct CurriculumSnapshot {
@@ -769,97 +772,97 @@ struct TrajectoryCurriculum {
 struct PolicyWeights;
 
 struct TaskConfig {
-    bool autoReset;
-    bool showSpawns;
-    SimFlags simFlags;
-    RandKey initRandKey;
-    uint32_t numPBTPolicies;
-    uint32_t policyHistorySize;
-    
-    AABB worldBounds;
-    uint32_t pTeamSize;
-    uint32_t eTeamSize;
+  bool autoReset;
+  bool showSpawns;
+  SimFlags simFlags;
+  RandKey initRandKey;
+  uint32_t numPBTPolicies;
+  uint32_t policyHistorySize;
+  
+  AABB worldBounds;
+  uint32_t pTeamSize;
+  uint32_t eTeamSize;
 
-    MeshBVH *staticMeshes;
-    uint32_t numStaticMeshes;
+  MeshBVH *staticMeshes;
+  uint32_t numStaticMeshes;
 
-    Navmesh navmesh;
-    AStarLookup aStarLookup;
+  Navmesh navmesh;
+  AStarLookup aStarLookup;
 
-    StandardSpawns standardSpawns;
-    SpawnCurriculum spawnCurriculum;
+  StandardSpawns standardSpawns;
+  SpawnCurriculum spawnCurriculum;
 
-    Zones zones;
+  Zones zones;
 
-    Task task;
-    bool highlevelMove;
+  Task task;
+  bool highlevelMove;
 
-    VizState *viz;
+  VizState *viz;
 
-    StepLog *recordLog;
-    StepLog *replayLog;
+  StepLog *recordLog;
+  StepLog *replayLog;
 
-    EventLogGlobalState *eventGlobalState;
+  EventLogGlobalState *eventGlobalState;
 
-    GoalRegion *goalRegions;
-    int32_t numGoalRegions;
+  GoalRegion *goalRegions;
+  int32_t numGoalRegions;
 
-    uint32_t numEpisodes;
-    TDMEpisode *episodes;
+  uint32_t numEpisodes;
+  TDMEpisode *episodes;
 
-    int32_t numWeaponTypes;
-    WeaponStats * weaponTypeStats;
-    TrainControl * trainControl;
+  int32_t numWeaponTypes;
+  WeaponStats * weaponTypeStats;
+  TrainControl * trainControl;
 
-    TrajectoryCurriculum trajectoryCurriculum;
+  TrajectoryCurriculum trajectoryCurriculum;
 
-    PolicyWeights *policyWeights = nullptr;
+  PolicyWeights *policyWeights = nullptr;
 };
 
 /* ECS Archetypes for the game */
 
 // There are 2 Agents in the environment trying to get to the destination
 struct ExploreAgent : public madrona::Archetype<
-    // Basic components required for physics. Note that the current physics
-    // implementation requires archetypes to have these components first
-    // in this exact order.
-    Position,
-    Rotation,
-    Scale,
-    AgentVelocity,
-    ObjectID,
-    ExternalForce,
-    ExternalTorque,
+  // Basic components required for physics. Note that the current physics
+  // implementation requires archetypes to have these components first
+  // in this exact order.
+  Position,
+  Rotation,
+  Scale,
+  AgentVelocity,
+  ObjectID,
+  ExternalForce,
+  ExternalTorque,
 
-    // Internal logic state.
-    StartPos,
-    ExploreTracker,
+  // Internal logic state.
+  StartPos,
+  ExploreTracker,
 
-    // Input
-    ExploreAction,
+  // Input
+  ExploreAction,
 
-    // Observations
-    SelfObservation,
-    SelfPositionObservation,
-    FwdLidar,
+  // Observations
+  SelfObservation,
+  SelfPositionObservation,
+  FwdLidar,
 
-    // Reward, episode termination
-    Reward,
-    Done,
+  // Reward, episode termination
+  Reward,
+  Done,
 
-    // Visualization: In addition to the fly camera, src/viewer.cpp can
-    // view the scene from the perspective of entities with this component
-    VizCamera
+  // Visualization: In addition to the fly camera, src/viewer.cpp can
+  // view the scene from the perspective of entities with this component
+  VizCamera
 > {};
 
 struct CamEntity : public madrona::Archetype<
-    Position,
-    Rotation,
-    Scale,
+  Position,
+  Rotation,
+  Scale,
 
-    // Visualization: In addition to the fly camera, src/viewer.cpp can
-    // view the scene from the perspective of entities with this component
-    VizCamera
+  // Visualization: In addition to the fly camera, src/viewer.cpp can
+  // view the scene from the perspective of entities with this component
+  VizCamera
 > {};
 
 struct FiltersStateObservation {
@@ -867,74 +870,75 @@ struct FiltersStateObservation {
 };
 
 struct PvPAgent : public madrona::Archetype<
-    // Basic components required for physics. Note that the current physics
-    // implementation requires archetypes to have these components first
-    // in this exact order.
-    Position,
-    Rotation,
-    Scale,
-    AgentVelocity,
-    IntermediateMoveState,
-    ExternalForce,
-    ExternalTorque,
+  // Basic components required for physics. Note that the current physics
+  // implementation requires archetypes to have these components first
+  // in this exact order.
+  Position,
+  Rotation,
+  Scale,
+  AgentVelocity,
+  IntermediateMoveState,
+  ExternalForce,
+  ExternalTorque,
 
-    // Internal logic state.
-    Teammates,
-    Opponents,
-    OpponentsVisibility,
-    HP,
-    Magazine,
-    DamageDealt,
-    Alive,
-    Aim,
-    CamRef,
-    TeamInfo,
-    CombatState,
-    StandState,
-    BreadcrumbAgentState,
+  // Internal logic state.
+  Teammates,
+  Opponents,
+  OpponentsVisibility,
+  HP,
+  Magazine,
+  DamageDealt,
+  Alive,
+  Aim,
+  CamRef,
+  TeamInfo,
+  CombatState,
+  StandState,
+  BreadcrumbAgentState,
 
-    // Explore as well
-    StartPos,
-    ExploreTracker,
+  // Explore as well
+  StartPos,
+  ExploreTracker,
 
-    // Input
-    PvPDiscreteAction,
-    PvPAimAction,
-    PvPDiscreteAimAction,
-    CoarsePvPAction,
-    HardcodedBotAction,
+  // Input
+  PvPDiscreteAction,
+  PvPAimAction,
+  PvPDiscreteAimAction,
+  PvPDiscreteAimState,
+  CoarsePvPAction,
+  HardcodedBotAction,
 
-    // Observations
-    SelfObservation,
-    FiltersStateObservation,
-    TeammateObservations,
-    OpponentObservations,
-    OpponentLastKnownObservations,
+  // Observations
+  SelfObservation,
+  FiltersStateObservation,
+  TeammateObservations,
+  OpponentObservations,
+  OpponentLastKnownObservations,
 
-    SelfPositionObservation,
-    TeammatePositionObservations,
-    OpponentPositionObservations,
-    OpponentLastKnownPositionObservations,
+  SelfPositionObservation,
+  TeammatePositionObservations,
+  OpponentPositionObservations,
+  OpponentLastKnownPositionObservations,
 
-    OpponentMasks,
+  OpponentMasks,
 
-    FwdLidar,
-    RearLidar,
-    AgentMap,
-    UnmaskedAgentMap,
+  FwdLidar,
+  RearLidar,
+  AgentMap,
+  UnmaskedAgentMap,
 
-    // Training metadata
-    Reward,
-    Done,
-    AgentPolicy,
-    RewardHyperParams
+  // Training metadata
+  Reward,
+  Done,
+  AgentPolicy,
+  RewardHyperParams
 > {};
 
 struct StaticGeometry : public madrona::Archetype<
-    Position, 
-    Rotation,
-    Scale,
-    ObjectID
+  Position, 
+  Rotation,
+  Scale,
+  ObjectID
 > {};
 
 struct ShotVizState {
@@ -946,27 +950,27 @@ struct ShotVizState {
 };
 
 struct ShotViz : public madrona::Archetype<
-    ShotVizState,
-    ShotVizRemaining
+  ShotVizState,
+  ShotVizRemaining
 > {};
 
 struct Turret : public madrona::Archetype<
-    Position,
-    Rotation,
-    Scale,
-    ObjectID,
-    HP,
-    Magazine,
-    Alive,
-    Aim,
-    DamageDealt,
-    TurretState
+  Position,
+  Rotation,
+  Scale,
+  ObjectID,
+  HP,
+  Magazine,
+  Alive,
+  Aim,
+  DamageDealt,
+  TurretState
 > {};
 
 struct ZoneViz : public madrona::Archetype<
-    Position,
-    Rotation,
-    Scale
+  Position,
+  Rotation,
+  Scale
 > {};
 
 struct FullTeamID {
@@ -978,16 +982,16 @@ struct FullTeamActions {
 };
 
 struct FullTeamZoneObservation {
-    float centerX;
-    float centerY;
-    float centerZ;
-    float myTeamControlling;
-    float enemyTeamControlling;
-    float isContested;
-    float isCaptured;
-    float stepsUntilPoint;
-    float stepsRemaining;
-    std::array<float, 4> id;
+  float centerX;
+  float centerY;
+  float centerZ;
+  float myTeamControlling;
+  float enemyTeamControlling;
+  float isContested;
+  float isCaptured;
+  float stepsUntilPoint;
+  float stepsRemaining;
+  std::array<float, 4> id;
 };
 
 struct FullTeamGlobalObservation {

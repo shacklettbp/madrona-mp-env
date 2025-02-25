@@ -179,8 +179,12 @@ void createPersistentEntities(Engine &ctx, const TaskConfig &cfg)
         };
 
         ctx.get<PvPDiscreteAimAction>(agent) = {
-          .yaw = 0,
-          .pitch = 0,
+          .yaw = consts::discreteAimNumYawBuckets / 2,
+          .pitch = consts::discreteAimNumPitchBuckets / 2,
+        };
+        ctx.get<PvPDiscreteAimState>(agent) = {
+          .yawVelocity = 0,
+          .pitchVelocity = 0,
         };
     }
 

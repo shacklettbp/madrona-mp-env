@@ -1984,7 +1984,7 @@ Tensor Manager::pvpAimActionTensor() const
 
 Tensor Manager::pvpDiscreteAimActionTensor() const
 {
-    return impl_->exportTensor(ExportID::PvPAimAction,
+    return impl_->exportTensor(ExportID::PvPDiscreteAimAction,
                                TensorElementType::Int32,
                                {
                                    impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
@@ -2367,7 +2367,7 @@ TrainInterface Manager::trainInterface() const
     {
       .actions = {
         { "discrete", pvpDiscreteActionTensor() },
-        { "aim", pvpAimActionTensor() },
+        { "aim", pvpDiscreteAimActionTensor() },
       },
       .resets = resetTensor(),
       .simCtrl = simControlTensor(),
@@ -2500,10 +2500,9 @@ void Manager::setExploreAction(int32_t world_idx,
 void Manager::setPvPAction(int32_t world_idx,
                            int32_t agent_idx,
                            PvPDiscreteAction discrete,
-                           PvPAimAction aim)
+                           PvPAimAction aim,
+                           PvPDiscreteAimAction aim_discrete)
 {
-  (void)aim;
-
   {
     auto *action_ptr = (PvPDiscreteAction *)impl_->pvpActionsBuffer +
         world_idx * impl_->numAgentsPerWorld + agent_idx;
@@ -2515,6 +2514,35 @@ void Manager::setPvPAction(int32_t world_idx,
 #endif
     } else {
         *action_ptr = discrete;
+    }
+  }
+
+  {
+    auto *action_ptr = (PvPAimAction *)pvpAimActionTensor().devicePtr() +
+        world_idx * impl_->numAgentsPerWorld + agent_idx;
+
+    if (impl_->cfg.execMode == ExecMode::CUDA) {
+#ifdef MADRONA_CUDA_SUPPORT 
+        cudaMemcpy(action_ptr, &aim, sizeof(PvPAimAction),
+                   cudaMemcpyHostToDevice);
+#endif
+    } else {
+        *action_ptr = aim;
+    }
+  }
+
+  {
+    auto *action_ptr = 
+        (PvPDiscreteAimAction *)pvpDiscreteAimActionTensor().devicePtr() +
+        world_idx * impl_->numAgentsPerWorld + agent_idx;
+
+    if (impl_->cfg.execMode == ExecMode::CUDA) {
+#ifdef MADRONA_CUDA_SUPPORT 
+        cudaMemcpy(action_ptr, &aim, sizeof(PvPDiscreteAimAction),
+                   cudaMemcpyHostToDevice);
+#endif
+    } else {
+        *action_ptr = aim_discrete;
     }
   }
 }

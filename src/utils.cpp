@@ -893,6 +893,11 @@ void spawnAgents(Engine &ctx, bool is_respawn)
           .maxVelocity = consts::maxWalkVelocity,
         };
 
+        ctx.get<PvPDiscreteAimState>(spawning_agent) = {
+          .yawVelocity = 0,
+          .pitchVelocity = 0,
+        };
+
         alive.mask = 1.f;
     }
 

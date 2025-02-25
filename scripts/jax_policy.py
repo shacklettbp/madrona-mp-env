@@ -35,12 +35,15 @@ from hash_encoder import HashGridEncoder
 
 actions_config = {
     'discrete': DiscreteActionsConfig(
-            actions_num_buckets = [ 3, 8, 3, 3 ],
-        ),
-    'aim': ContinuousActionsConfig(
-        stddev_min = 0.001,
-        stddev_max = 1.0,
-        num_dims = 2,
+        actions_num_buckets = [ 3, 8, 3, 3 ],
+    ),
+    #'aim': ContinuousActionsConfig(
+    #    stddev_min = 0.001,
+    #    stddev_max = 1.0,
+    #    num_dims = 2,
+    #),
+    'aim': DiscreteActionsConfig(
+        actions_num_buckets = [ 15, 7 ],
     ),
 }
 

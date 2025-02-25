@@ -136,7 +136,8 @@ public:
         int32_t world_idx,
         int32_t agent_idx,
         PvPDiscreteAction discrete,
-        PvPAimAction aim);
+        PvPAimAction aim,
+        PvPDiscreteAimAction aim_discrete);
 
     void setCoarsePvPAction(
         int32_t world_idx,
