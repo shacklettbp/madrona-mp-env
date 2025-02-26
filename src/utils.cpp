@@ -809,14 +809,14 @@ void spawnAgents(Engine &ctx, bool is_respawn)
 
             if (spawn_pt.y > 0.f) {
               spawn_pt = {
-                -1000.f + base_rng.sampleUniform() * 2000.f,
-                base_rng.sampleUniform() * 400.f,
+                -700.f + base_rng.sampleUniform() * 1400.f,
+                base_rng.sampleUniform() * 350.f,
                 0.f,
               };
             } else {
               spawn_pt = {
-                -1000.f + base_rng.sampleUniform() * 2000.f,
-                -base_rng.sampleUniform() * 400.f,
+                -700.f + base_rng.sampleUniform() * 1400.f,
+                -base_rng.sampleUniform() * 350.f,
                 0.f,
               };
             }

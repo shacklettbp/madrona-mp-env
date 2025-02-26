@@ -259,7 +259,7 @@ cfg = TrainConfig(
         value_loss_coef = 0.5,
         entropy_coef = {
             'discrete': entropy_coef,
-            'aim': entropy_coef * 0.01,
+            'aim': entropy_coef,
         },
         max_grad_norm = 0.5,
         clip_value_loss = args.clip_value_loss,

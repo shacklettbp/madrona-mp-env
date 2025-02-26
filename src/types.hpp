@@ -309,6 +309,8 @@ struct PlayerCommonObservation {
   float velocityX = 0.f;
   float velocityY = 0.f;
   float velocityZ = 0.f;
+  float yawVelocity = 0.f;
+  float pitchVelocity = 0.f;
   StandObservation stand = {};
   float inZone = 0.f;
   std::array<float, consts::maxNumWeaponTypes> weaponTypeObs = {};

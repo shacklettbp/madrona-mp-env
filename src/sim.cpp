@@ -2198,9 +2198,11 @@ inline void pvpDiscreteAimSystem(Engine &,
   constexpr int32_t center_yaw_bucket = consts::discreteAimNumYawBuckets / 2;
   constexpr int32_t center_pitch_bucket = consts::discreteAimNumPitchBuckets / 2;
 
-  constexpr float discrete_yaw_delta = 2.f * math::pi / center_yaw_bucket;
+  constexpr float discrete_yaw_delta =
+      (0.25f * math::pi / consts::deltaT) / center_yaw_bucket;
 
-  constexpr float discrete_pitch_delta = 1.f * math::pi / center_pitch_bucket;
+  constexpr float discrete_pitch_delta =
+      (0.125f * math::pi / consts::deltaT) / center_pitch_bucket;
 
   constexpr float max_yaw_vel = 2.f * math::pi;
   constexpr float max_pitch_vel = max_yaw_vel / 2;
@@ -2217,9 +2219,13 @@ inline void pvpDiscreteAimSystem(Engine &,
       fminf(fmaxf(aim_state.pitchVelocity, -max_pitch_vel), max_pitch_vel);
 
   aim.yaw += aim_state.yawVelocity * consts::deltaT;
+
+  float start_pitch = aim.pitch;
   aim.pitch += aim_state.pitchVelocity * consts::deltaT;
 
   aim = computeAim(aim.yaw, aim.pitch);
+
+  aim_state.pitchVelocity = (aim.pitch - start_pitch) / consts::deltaT;
 
   rot = Quat::angleAxis(aim.yaw, math::up).normalize();
 }
@@ -2575,6 +2581,12 @@ inline void pvpObservationsSystem(
     ob.velocityX = relative_vel.x;
     ob.velocityY = relative_vel.y;
     ob.velocityZ = relative_vel.z;
+
+    {
+      PvPDiscreteAimState discrete_aim_state = ctx.get<PvPDiscreteAimState>(agent);
+      ob.yawVelocity = discrete_aim_state.yawVelocity;
+      ob.pitchVelocity = discrete_aim_state.pitchVelocity;
+    }
 
     ob.stand = computeStandObs(ctx.get<StandState>(agent));
 

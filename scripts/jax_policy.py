@@ -291,7 +291,7 @@ class CriticNet(nn.Module):
 
 class ActorDistributions(flax.struct.PyTreeNode):
     discrete: DiscreteActionDistributions
-    aim: ContinuousActionDistributions
+    aim: DiscreteActionDistributions
 
     def sample(self, prng_key):
         discrete_rnd, aim_rnd = random.split(prng_key)
@@ -340,25 +340,10 @@ class ActorHead(nn.Module):
             dtype = self.dtype,
         )(features)
 
-        aim_out = nn.Dense(
-            4,
-            use_bias = True,
-            kernel_init = jax.nn.initializers.orthogonal(scale=0.01),
-            bias_init = jax.nn.initializers.constant(0),
+        aim_dist = DenseLayerDiscreteActor(
+            cfg = actions_config['aim'],
             dtype = self.dtype,
-            name = 'aim_head',
         )(features)
-
-        aim_out = aim_out.reshape(*aim_out.shape[0:-1], 2, 2)
-
-        aim_means = aim_out[..., 0:1, :]
-        aim_stds = aim_out[..., 1:2, :]
-
-        aim_dist = ContinuousActionDistributions(
-            cfgs = [ actions_config['aim'] ],
-            means = aim_means,
-            stds = aim_stds,
-        )
 
         return ActorDistributions(
             discrete=discrete_dist,

@@ -32,6 +32,8 @@ struct PlayerCommonObNormalize {
   NormParam velocityX;
   NormParam velocityY;
   NormParam velocityZ;
+  NormParam yawVelocity;
+  NormParam pitchVelocity;
   StandObNormalize stand;
   NormParam inZone;
   std::array<NormParam, consts::maxNumWeaponTypes> weaponTypeObs;
@@ -150,8 +152,17 @@ struct PolicyWeights {
 
   std::array<FullyConnectedLayerWithLayerNormWithActivation, 3> mlp;
 
-  static constexpr inline auto discreteActionsNumBuckets =
-      std::to_array<int32_t>({ 3, 8, 3, 3 });
+  static constexpr inline auto discreteActionsNumBuckets = std::to_array<int32_t>({
+      3, // moveAmount
+      8, // moveAngle
+      3, // fire
+      3, // stand
+  });
+
+  static constexpr inline auto discreteAimNumBuckets = std::to_array<int32_t>({
+      15, // yaw
+      7, // pitch
+  });
 
   FullyConnectedParams discreteHead;
   FullyConnectedParams aimHead;
@@ -163,6 +174,17 @@ constexpr int totalNumDiscreteActionBuckets()
   for (int i = 0; i < (int)PolicyWeights::discreteActionsNumBuckets.size();
        i++) {
     sum += PolicyWeights::discreteActionsNumBuckets[i];
+  }
+
+  return sum;
+}
+
+constexpr int totalNumDiscreteAimActionBuckets()
+{
+  int sum = 0;
+  for (int i = 0; i < (int)PolicyWeights::discreteAimNumBuckets.size();
+       i++) {
+    sum += PolicyWeights::discreteAimNumBuckets[i];
   }
 
   return sum;
@@ -211,6 +233,8 @@ static float * normalizePlayerCommonOb(PlayerCommonObservation &ob,
   *out++ = params.velocityX.invStd * (ob.velocityX - params.velocityX.mean);
   *out++ = params.velocityY.invStd * (ob.velocityY - params.velocityY.mean);
   *out++ = params.velocityZ.invStd * (ob.velocityZ - params.velocityZ.mean);
+  *out++ = params.yawVelocity.invStd * (ob.yawVelocity - params.yawVelocity.mean);
+  *out++ = params.pitchVelocity.invStd * (ob.pitchVelocity - params.pitchVelocity.mean);
 
   out = normalizeStandOb(ob.stand, params.stand, out);
 
@@ -496,7 +520,7 @@ void evalAgentPolicy(
   RearLidar &rear_lidar,
   CombatState &combat_state,
   PvPDiscreteAction &discrete_action,
-  PvPAimAction &aim_action)
+  PvPDiscreteAimAction &aim_action)
 {
   (void)teammate_pos_obs;
   (void)opponent_pos_obs;
@@ -697,6 +721,33 @@ void evalAgentPolicy(
   }
 
   {
+    std::array<float, totalNumDiscreteAimActionBuckets()> logits;
+    assert(MLP_BUFFER_SIZE == weights->aimHead.numInputs);
+    assert(logits.size() == weights->aimHead.numFeatures);
+
+    evalFullyConnectedStandalone(
+        logits.data(), cur_mlp_output, weights->discreteHead);
+
+    std::array<int32_t, sizeof(PvPDiscreteAimAction) / sizeof(int32_t)> int_actions;
+    float *cur_logits = logits.data();
+    for (int i = 0; i < (int)PolicyWeights::discreteAimNumBuckets.size();
+         i++) {
+      int num_buckets = PolicyWeights::discreteAimNumBuckets[i];
+
+      int_actions[i] = sampleLogits(
+          cur_logits, num_buckets, combat_state.rng.randKey());
+
+      cur_logits += num_buckets;
+    }
+
+    assert(cur_logits - logits.data() == logits.size());
+
+    aim_action.yaw = int_actions[0];
+    aim_action.pitch = int_actions[1];
+  }
+
+#if 0
+  {
     std::array<float, 4> aim_out;
     assert(aim_out.size() == weights->aimHead.numFeatures);
     assert(MLP_BUFFER_SIZE == weights->aimHead.numInputs);
@@ -743,6 +794,7 @@ void evalAgentPolicy(
     aim_action.yaw = sample.x;
     aim_action.pitch = sample.y;
   }
+#endif
 }
 
 static RewardHyperParamsNorm setupRewardCoefsNorm(
@@ -797,6 +849,8 @@ static void setupPlayerCommonObNormal(
   norm.velocityX = { *self_mu++, *self_inv_std++ };
   norm.velocityY = { *self_mu++, *self_inv_std++ };
   norm.velocityZ = { *self_mu++, *self_inv_std++ };
+  norm.yawVelocity = { *self_mu++, *self_inv_std++ };
+  norm.pitchVelocity = { *self_mu++, *self_inv_std++ };
   norm.stand.curStanding = { *self_mu++, *self_inv_std++ };
   norm.stand.curCrouching = { *self_mu++, *self_inv_std++ };
   norm.stand.curProning = { *self_mu++, *self_inv_std++ };
@@ -1278,7 +1332,7 @@ PolicyWeights * loadPolicyWeights(const char *path)
     weights->discreteHead = loadFullyConnectedParams(
         path, "params_actor_DenseLayerDiscreteActor_0_impl");
     weights->aimHead = loadFullyConnectedParams(
-        path, "params_actor_aim_head");
+        path, "params_actor_DenseLayerDiscreteActor_1_impl");
   }
 
   {
@@ -1345,7 +1399,7 @@ void addPolicyEvalTasks(TaskGraphBuilder &builder)
       RearLidar,
       CombatState,
       PvPDiscreteAction,
-      PvPAimAction
+      PvPDiscreteAimAction
     >>({});
 }
 
