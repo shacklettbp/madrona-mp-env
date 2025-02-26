@@ -1962,10 +1962,12 @@ inline void cleanupShotVizSystem(Engine &ctx,
 inline void applyBotActionsSystem(Engine &ctx,
                                   HardcodedBotAction hardcoded,
                                   PvPDiscreteAction &out_discrete,
+                                  Aim aim,
                                   PvPAimAction &out_aim,
                                   AgentPolicy policy)
 {
   (void)ctx;
+  (void)aim;
   if (policy.idx >= 0) {
     return;
   }
@@ -2176,8 +2178,8 @@ inline void pvpContinuousAimSystem(Engine &,
     return;
   }
 
-  aim.yaw += 10.f * action.yaw * consts::deltaT;
-  aim.pitch += 2.f * action.pitch * consts::deltaT;
+  aim.yaw += action.yaw * consts::deltaT;
+  aim.pitch += action.pitch * consts::deltaT;
 
   aim = computeAim(aim.yaw, aim.pitch);
 
@@ -4688,24 +4690,24 @@ inline void planAStarAISystem(Engine &ctx,
       move_amount = 1;
       switch ((int)(collisionAng / consts::fwdLidarWidth * 8.0f))
       {
-      case 0:
+        case 0:
           move_angle = 2;
           break;
-	  case 1:
-      case 2:
-		  move_angle = 3;
+        case 1:
+        case 2:
+          move_angle = 3;
           break;
-	  case 3:
-      case 4:
-		  move_angle = 4;
+        case 3:
+        case 4:
+          move_angle = 4;
           move_amount = 2;
           break;
-	  case 5:
-      case 6:
-		  move_angle = 5;
+        case 5:
+        case 6:
+          move_angle = 5;
           break;
-	  case 7:
-		  move_angle = 6;
+        case 7:
+          move_angle = 6;
           break;
       }
   }
@@ -4928,6 +4930,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
         applyBotActionsSystem,
             HardcodedBotAction,
             PvPDiscreteAction,
+            Aim,
             PvPAimAction,
             AgentPolicy
         >>({});
