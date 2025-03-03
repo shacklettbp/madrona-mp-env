@@ -839,6 +839,17 @@ inline void resetSystem(Engine &ctx, WorldReset &reset)
 
         ctx.data().curEpisodeIdx = ctx.data().worldEpisodeCounter++;
 
+        if (ctx.data().curEpisodeIdx < 50) {
+          if (ctx.data().baseRNG.sampleUniform() <
+              (ctx.data().curEpisodeIdx + 1) / (float)50) {
+            ctx.singleton<WorldCurriculum>() = WorldCurriculum::FullMatch;
+          } else {
+            ctx.singleton<WorldCurriculum>() = WorldCurriculum::LearnShooting;
+          }
+        } else {
+          ctx.singleton<WorldCurriculum>() = WorldCurriculum::FullMatch;
+        }
+
         initWorld(ctx, force_reset == 1);
     } 
 }

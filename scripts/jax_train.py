@@ -100,7 +100,7 @@ else:
 if args.static_flip_teams:
     sim_flags |= SimFlags.StaticFlipTeams
 
-#sim_flags |= SimFlags.EnableCurriculum
+sim_flags |= SimFlags.EnableCurriculum
 
 team_size = 6
 

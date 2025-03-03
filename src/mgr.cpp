@@ -2373,7 +2373,6 @@ TrainInterface Manager::trainInterface() const
       .simCtrl = simControlTensor(),
       .pbt = {
         { "policy_assignments", policyAssignmentTensor() },
-        { "world_curriculum", worldCurriculumTensor() },
       },
     },
     {

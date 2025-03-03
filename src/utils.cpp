@@ -647,6 +647,7 @@ static void hardcodedSpawnPoint(
     *out_spawn_pitch = spawn.pitch;
 }
 
+#if 0
 static void curriculumSpawnPoint(
     Engine &ctx,
     RNG &base_rng,
@@ -726,12 +727,13 @@ static void curriculumSpawnPoint(
         }
     }
 }
+#endif
 
 void spawnAgents(Engine &ctx, bool is_respawn)
 {
     Navmesh &navmesh = ctx.singleton<LevelData>().navmesh;
     const StandardSpawns &standard_spawns = ctx.singleton<StandardSpawns>();
-    const SpawnCurriculum &spawn_curriculum = ctx.singleton<SpawnCurriculum>();
+    //const SpawnCurriculum &spawn_curriculum = ctx.singleton<SpawnCurriculum>();
     const MatchInfo &match_info = ctx.singleton<MatchInfo>();
 
     const bool navmesh_spawn = (
@@ -746,9 +748,9 @@ void spawnAgents(Engine &ctx, bool is_respawn)
         ctx.data().simFlags & SimFlags::SpawnInMiddle) ==
         SimFlags::SpawnInMiddle;
 
-    const bool enable_spawn_curriculum =
+    const bool enable_curriculum =
         ((ctx.data().simFlags & SimFlags::EnableCurriculum) ==
-            SimFlags::EnableCurriculum) && match_info.enableSpawnCurriculum;
+            SimFlags::EnableCurriculum);
 
     const bool enable_hardcoded_spawns =
         ((ctx.data().simFlags & SimFlags::HardcodedSpawns) ==
@@ -797,12 +799,17 @@ void spawnAgents(Engine &ctx, bool is_respawn)
         } else if (navmesh_spawn) {
             spawn_pt = navmesh.samplePoint(base_rng.randKey());
             spawn_yaw = base_rng.sampleUniform() * 2.f * math::pi;
-        } else if (enable_spawn_curriculum) {
+        } 
+#if 0
+        else if (enable_spawn_curriculum) {
             curriculumSpawnPoint(ctx, base_rng, navmesh,
                                  match_info, spawn_curriculum,
                                  spawning_agent,
                                  &spawn_pt, &spawn_yaw);
-        } else if (ctx.data().episodeCurriculum == WorldCurriculum::LearnShooting) {
+        }
+#endif
+        else if (enable_curriculum && 
+                 ctx.data().episodeCurriculum == WorldCurriculum::LearnShooting) {
             standardSpawnPoint(ctx, spawning_agent, standard_spawns, match_info,
                                is_respawn, standard_use_middle_spawn, episode,
                                &spawn_pt, &spawn_yaw);
