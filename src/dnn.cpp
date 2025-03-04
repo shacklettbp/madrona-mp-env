@@ -160,7 +160,7 @@ struct PolicyWeights {
   });
 
   static constexpr inline auto discreteAimNumBuckets = std::to_array<int32_t>({
-      15, // yaw
+      13, // yaw
       7, // pitch
   });
 

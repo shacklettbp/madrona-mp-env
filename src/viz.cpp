@@ -2710,10 +2710,10 @@ void loop(VizState *viz, Manager &mgr)
         }
 
         if (input.isDown(InputID::Q)) {
-          r_yaw = shift_pressed ? 14 : 8;
+          r_yaw = shift_pressed ? 12 : 7;
         }
         if (input.isDown(InputID::E)) {
-          r_yaw = shift_pressed ? 0 : 6;
+          r_yaw = shift_pressed ? 0 : 5;
         }
 
         int32_t move_amount;

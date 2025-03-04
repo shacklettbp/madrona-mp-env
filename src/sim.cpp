@@ -2199,7 +2199,7 @@ inline void pvpContinuousAimSystem(Engine &,
 
 inline void pvpDiscreteAimSystem(Engine &,
                                  PvPDiscreteAimAction action,
-                                 PvPDiscreteAimState &aim_state,
+                                 PvPDiscreteAimState &,
                                  Rotation &rot,
                                  Aim &aim,
                                  const Alive &alive)
@@ -2208,6 +2208,47 @@ inline void pvpDiscreteAimSystem(Engine &,
       return;
   }
 
+  constexpr int32_t center_yaw_bucket = consts::discreteAimNumYawBuckets / 2;
+  constexpr int32_t center_pitch_bucket = consts::discreteAimNumPitchBuckets / 2;
+
+  int32_t yaw_bucket = action.yaw - center_yaw_bucket;
+
+  constexpr auto yaw_turn_amounts = std::to_array<float>({
+    0,                 // 0
+    0.00390625f * math::pi, // 1
+    0.0078125f  * math::pi, // 2
+    0.015625f   * math::pi, // 3
+    0.03125f    * math::pi, // 4
+    0.0625f     * math::pi, // 5
+    0.125f      * math::pi, // 6
+  });
+
+  if (yaw_bucket < 0) {
+    aim.yaw -= yaw_turn_amounts[std::abs(yaw_bucket)];
+  } else {
+    aim.yaw += yaw_turn_amounts[std::abs(yaw_bucket)];
+  }
+
+  int32_t pitch_bucket = action.pitch - center_pitch_bucket;
+
+  constexpr auto pitch_turn_amounts = std::to_array<float>({
+    0,                     // 0
+    0.0078125f * math::pi, // 1
+    0.015625f  * math::pi, // 2
+    0.03125f   * math::pi, // 3
+  });
+
+  if (pitch_bucket < 0) {
+    aim.pitch -= pitch_turn_amounts[std::abs(pitch_bucket)];
+  } else {
+    aim.pitch += pitch_turn_amounts[std::abs(pitch_bucket)];
+  }
+
+  aim = computeAim(aim.yaw, aim.pitch);
+
+  rot = Quat::angleAxis(aim.yaw, math::up).normalize();
+
+#if 0
   constexpr int32_t center_yaw_bucket = consts::discreteAimNumYawBuckets / 2;
   constexpr int32_t center_pitch_bucket = consts::discreteAimNumPitchBuckets / 2;
 
@@ -2241,6 +2282,7 @@ inline void pvpDiscreteAimSystem(Engine &,
   aim_state.pitchVelocity = (aim.pitch - start_pitch) / consts::deltaT;
 
   rot = Quat::angleAxis(aim.yaw, math::up).normalize();
+#endif
 }
 
 #if 0

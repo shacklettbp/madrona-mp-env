@@ -391,6 +391,8 @@ void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)
       .zoneEarnedPointScale = sampleCoef(0.1, 2.0),
       .breadcrumbScale = sampleCoef(0.01, 0.5),
     };
+
+    ctx.get<RewardHyperParams>(agent_entity) = RewardHyperParams {};
   }
 
   for (int32_t i = 0; i < (int32_t)ctx.data().numTurrets; i++) {

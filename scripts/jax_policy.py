@@ -43,7 +43,7 @@ actions_config = {
     #    num_dims = 2,
     #),
     'aim': DiscreteActionsConfig(
-        actions_num_buckets = [ 15, 7 ],
+        actions_num_buckets = [ 13, 7 ],
     ),
 }
 
