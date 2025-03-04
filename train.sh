@@ -27,7 +27,7 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --steps-per-update 40 \
     --num-bptt-chunks 1 \
     --num-minibatches 4 \
-    --entropy-loss-coef 0.05 \
+    --entropy-loss-coef 0.02 \
     --value-loss-coef 1.0 \
     --num-channels 512 \
     --pbt-ensemble-size 2 \
