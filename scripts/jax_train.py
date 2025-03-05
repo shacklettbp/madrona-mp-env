@@ -253,7 +253,7 @@ cfg = TrainConfig(
     gae_lambda = 0.95,
     algo = PPOConfig(
         num_epochs = 2,
-        num_mini_batches = args.num_minibatches,
+        minibatch_size = 53760,
         clip_coef = 0.2,
         #value_loss_coef = args.value_loss_coef,
         value_loss_coef = 0.5,
@@ -380,11 +380,9 @@ def train():
     last_time = time()
 
     for i in range(num_outer_iters):
-        err, training_mgr = update_loop_compiled(training_mgr)
-        err.throw()
+        training_mgr = update_loop_compiled(training_mgr)
 
-        err, training_mgr = update_population_compiled(training_mgr)
-        err.throw()
+        training_mgr = update_population_compiled(training_mgr)
 
         print(training_mgr.state.policy_states.mmr.elo)
 
