@@ -1,5 +1,14 @@
 // post_effect.slang
 
+struct PostParams {
+  Texture2D inputTexture;
+  Texture2D depthTexture;
+  SamplerState samplerState;
+  SamplerState depthSamplerState;
+};
+
+ParameterBlock<PostParams> params;
+
 struct VSOutput {
     float4 position : SV_POSITION;
     float2 uv : TEXCOORD0;
@@ -14,15 +23,6 @@ VSOutput vertMain(uint id : SV_VertexID) {
     return output;
 }
 
-[[vk::binding(1,0)]]
-Texture2D inputTexture : register(t0);
-[[vk::binding(2,0)]]
-Texture2D depthTexture : register(t1);
-[[vk::binding(3,0)]]
-SamplerState samplerState : register(s0);
-[[vk::binding(4,0)]]
-SamplerState depthSamplerState : register(s1);
-
 [shader("fragment")]
 float4 fragMain(VSOutput input) : SV_Target {
     input.uv.y = 1 - input.uv.y;
@@ -36,13 +36,15 @@ float4 fragMain(VSOutput input) : SV_Target {
     input.uv = input.uv * 0.5 + 0.5;
 
     // Main Sample
-    float4 color = inputTexture.Sample(samplerState, input.uv);
+    float4 color = params.inputTexture.Sample(params.samplerState, input.uv);
 
     // Chromatic Aberration
     float chromaticAberrationAmount = 0.003;
     float2 offset = centeredUV * centeredUV * chromaticAberrationAmount;
-    float4 r = inputTexture.Sample(samplerState, input.uv + float2(offset.x, offset.y));
-    float4 b = inputTexture.Sample(samplerState, input.uv + float2(-offset.x, -offset.y));
+    float4 r = params.inputTexture.Sample(
+        params.samplerState, input.uv + float2(offset.x, offset.y));
+    float4 b = params.inputTexture.Sample(
+        params.samplerState, input.uv + float2(-offset.x, -offset.y));
     color.r = r.r;
     color.b = b.b;
 
@@ -53,8 +55,8 @@ float4 fragMain(VSOutput input) : SV_Target {
     color.rgb *= vignette;
 
     // Sample depth.
-    //float depth = depthTexture.Sample(depthSamplerState, input.uv).x;
-    //color = sqrt(depth);
+    float depth = params.depthTexture.Sample(params.depthSamplerState, input.uv).x;
+    color = sqrt(depth);
 
     return color;
 }
