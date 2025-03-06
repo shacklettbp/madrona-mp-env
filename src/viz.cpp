@@ -366,13 +366,21 @@ struct VizState {
   ShaderCompiler *shaderc;
 
   Texture depthAttachment;
+  Texture sceneColor;
+  Texture sceneDepth;
+  Sampler sceneSampler;
+  Sampler depthSampler;
 
   RasterPassInterface onscreenPassInterface;
   RasterPass onscreenPass;
+  RasterPassInterface offscreenPassInterface;
+  RasterPass offscreenPass;
 
   ParamBlockType globalParamBlockType;
+  ParamBlockType texturedParamBlockType;
   Buffer globalPassDataBuffer;
   ParamBlock globalParamBlock;
+  ParamBlock texturedParamBlock;
 
   RasterShader opaqueGeoShader;
   RasterShader agentShader;
@@ -384,6 +392,7 @@ struct VizState {
   ParamBlockType shotVizParamBlockType;
 
   RasterShader shotVizShader;
+  RasterShader postEffectShader;
 
   CommandEncoder enc;
 
@@ -2097,6 +2106,40 @@ VizState * init(const VizConfig &cfg)
     .usage = TextureUsage::DepthAttachment,
   });
 
+  viz->sceneColor = gpu->createTexture({
+    .format = swapchain_properties.format,
+    .width = (u16)viz->window->pixelWidth,
+    .height = (u16)viz->window->pixelHeight,
+    .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
+    });
+
+  viz->sceneDepth = gpu->createTexture({
+      .format = TextureFormat::Depth32_Float,
+      .width = (u16)viz->window->pixelWidth,
+      .height = (u16)viz->window->pixelHeight,
+      .usage = TextureUsage::DepthAttachment | TextureUsage::ShaderSampled,
+    });
+
+  viz->offscreenPassInterface = gpu->createRasterPassInterface({
+      .uuid = "offscreen_raster_pass"_to_uuid,
+      .depthAttachment = {
+          .format = TextureFormat::Depth32_Float,
+          .loadMode = AttachmentLoadMode::Clear,
+      },
+      .colorAttachments = {
+          {
+              .format = swapchain_properties.format,
+              .loadMode = AttachmentLoadMode::Clear,
+          },
+      },
+    });
+
+  viz->offscreenPass = gpu->createRasterPass({
+      .interface = viz->offscreenPassInterface,
+      .depthAttachment = viz->sceneDepth,
+      .colorAttachments = { viz->sceneColor },
+    });
+
   viz->onscreenPassInterface = gpu->createRasterPassInterface({
     .uuid = "onscreen_raster_pass"_to_uuid,
     .depthAttachment = { 
@@ -2136,12 +2179,33 @@ VizState * init(const VizConfig &cfg)
   viz->globalParamBlockType = gpu->createParamBlockType({
     .uuid = "global_pb"_to_uuid,
     .buffers = {
-      { 
+      {
         .type = BufferBindingType::Uniform,
         .shaderUsage = ShaderStage::Vertex | ShaderStage::Fragment,
       },
     },
   });
+
+  viz->texturedParamBlockType = gpu->createParamBlockType({
+    .uuid = "textured_pb"_to_uuid,
+    .buffers = {
+      {
+        .type = BufferBindingType::Uniform,
+        .shaderUsage = ShaderStage::Vertex | ShaderStage::Fragment,
+      },
+    },
+    .textures = {
+      {.shaderUsage = ShaderStage::Fragment },
+      {
+        .type = TextureBindingType::DepthTexture2D,
+        .shaderUsage = ShaderStage::Fragment,
+      },
+    },
+    .samplers = {
+      {.shaderUsage = ShaderStage::Fragment },
+      {.shaderUsage = ShaderStage::Fragment },
+    },
+    });
 
   viz->globalPassDataBuffer = gpu->createBuffer({
     .numBytes = sizeof(GlobalPassData),
@@ -2155,7 +2219,39 @@ VizState * init(const VizConfig &cfg)
     },
   });
 
+  viz->sceneSampler = gpu->createSampler({
+    .addressMode = SamplerAddressMode::Clamp,
+    .anisotropy = 1,
+    });
+
+  viz->depthSampler = gpu->createSampler({
+    .addressMode = SamplerAddressMode::Clamp,
+    .magnificationFilterMode = SamplerFilterMode::Nearest,
+    .minificationFilterMode = SamplerFilterMode::Nearest,
+    .anisotropy = 1,
+    });
+
+  viz->texturedParamBlock = gpu->createParamBlock({
+    .typeID = viz->texturedParamBlockType,
+    .buffers = {
+      {.buffer = viz->globalPassDataBuffer, .numBytes = sizeof(GlobalPassData) },
+    },
+    .textures = { viz->sceneColor, viz->sceneDepth },
+    .samplers = { viz->sceneSampler, viz->depthSampler },
+    });
+
   using enum VertexFormat;
+
+  viz->postEffectShader = loadShader(viz, MADRONA_MP_ENV_SRC_DIR "post_effect.slang", {
+      .byteCode = {},
+      .vertexEntry = "vertMain",
+      .fragmentEntry = "fragMain",
+      .rasterPass = viz->onscreenPassInterface,
+      .paramBlockTypes = { viz->texturedParamBlockType },
+      .rasterConfig = {
+        .depthCompare = DepthCompare::Disabled,
+      },
+    });
 
   viz->opaqueGeoShader = loadShader(viz, 
     MADRONA_MP_ENV_SRC_DIR "opaque_geo.slang", {
@@ -3904,21 +4000,18 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     viz->enc.endCopyPass(copy_enc);
   }
 
-  RasterPassEncoder raster_enc = viz->enc.beginRasterPass(viz->onscreenPass);
+  // ---  SCENE RENDERING  ---
 
-  renderGeo(ctx, viz, raster_enc);
+  RasterPassEncoder offscreen_raster_enc = viz->enc.beginRasterPass(viz->offscreenPass);
 
-  renderAgents(ctx, viz, raster_enc);
-
-  //renderGoalRegions(ctx, viz, raster_enc);
+  renderGeo(ctx, viz, offscreen_raster_enc);
+  renderAgents(ctx, viz, offscreen_raster_enc);
+  //renderGoalRegions(ctx, viz, offscreen_raster_enc);
   (void)renderGoalRegions;
-
-  renderShotViz(ctx, viz, raster_enc);
-
-  renderZones(ctx, viz, raster_enc);
-
+  renderShotViz(ctx, viz, offscreen_raster_enc);
+  renderZones(ctx, viz, offscreen_raster_enc);
 #ifdef DB_SUPPORT
-  renderAnalyticsViz(ctx, viz, raster_enc);
+  renderAnalyticsViz(ctx, viz, offscreen_raster_enc);
 #endif
 
 #if 0
@@ -3926,6 +4019,19 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   raster_enc.drawData(Vector3 { 1, 0, 1 });
   raster_enc.draw(0, 1);
 #endif
+
+  viz->enc.endRasterPass(offscreen_raster_enc);
+
+  // ---  POST EFFECTS  ---
+
+  RasterPassEncoder raster_enc = viz->enc.beginRasterPass(viz->onscreenPass);
+
+  raster_enc.setShader(viz->postEffectShader);
+  raster_enc.setParamBlock(0, viz->texturedParamBlock);
+  //raster_enc.setTexture(0, viz->sceneColor);
+  raster_enc.draw(0, 3);
+
+  // ---  UI  ---
 
   ImGuiSystem::render(raster_enc);
   viz->enc.endRasterPass(raster_enc);
