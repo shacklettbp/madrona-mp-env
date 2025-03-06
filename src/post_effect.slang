@@ -56,7 +56,7 @@ float4 fragMain(VSOutput input) : SV_Target {
 
     // Sample depth.
     float depth = params.depthTexture.Sample(params.depthSamplerState, input.uv).x;
-    color = sqrt(depth);
+    color = sqrt(depth) * 10;
 
     return color;
 }

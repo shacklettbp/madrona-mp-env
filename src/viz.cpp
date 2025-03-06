@@ -2188,24 +2188,23 @@ VizState * init(const VizConfig &cfg)
 
   viz->texturedParamBlockType = gpu->createParamBlockType({
     .uuid = "textured_pb"_to_uuid,
-    .buffers = {
-      {
-        .type = BufferBindingType::Uniform,
-        .shaderUsage = ShaderStage::Vertex | ShaderStage::Fragment,
-      },
-    },
     .textures = {
       {.shaderUsage = ShaderStage::Fragment },
       {
-        .type = TextureBindingType::DepthTexture2D,
+        .type = TextureBindingType::UnfilterableTexture2D,
         .shaderUsage = ShaderStage::Fragment,
       },
     },
     .samplers = {
-      {.shaderUsage = ShaderStage::Fragment },
-      {.shaderUsage = ShaderStage::Fragment },
+      {
+        .shaderUsage = ShaderStage::Fragment,
+      },
+      {
+        .type = SamplerBindingType::NonFiltering,
+        .shaderUsage = ShaderStage::Fragment,
+      },
     },
-    });
+  });
 
   viz->globalPassDataBuffer = gpu->createBuffer({
     .numBytes = sizeof(GlobalPassData),
@@ -2226,16 +2225,14 @@ VizState * init(const VizConfig &cfg)
 
   viz->depthSampler = gpu->createSampler({
     .addressMode = SamplerAddressMode::Clamp,
+    .mipmapFilterMode = SamplerFilterMode::Nearest,
     .magnificationFilterMode = SamplerFilterMode::Nearest,
     .minificationFilterMode = SamplerFilterMode::Nearest,
     .anisotropy = 1,
-    });
+  });
 
   viz->texturedParamBlock = gpu->createParamBlock({
     .typeID = viz->texturedParamBlockType,
-    .buffers = {
-      {.buffer = viz->globalPassDataBuffer, .numBytes = sizeof(GlobalPassData) },
-    },
     .textures = { viz->sceneColor, viz->sceneDepth },
     .samplers = { viz->sceneSampler, viz->depthSampler },
     });
