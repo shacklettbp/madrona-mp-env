@@ -27,6 +27,7 @@ from madrona_learn.models import (
     DenseLayerDiscreteActor,
     DenseLayerCritic,
     DreamerV3Critic,
+    HLGaussTwoPartCritic,
     LayerNorm,
 )
 from madrona_learn.rnn import LSTM
@@ -377,7 +378,8 @@ def make_policy(dtype):
             dtype = dtype,
         ),
         #critic = DreamerV3Critic(dtype=dtype),
-        critic = DenseLayerCritic(dtype=dtype),
+        #critic = DenseLayerCritic(dtype=dtype),
+        critic = HLGaussTwoPartCritic.create(dtype=dtype),
     )
 
     obs_preprocess = ObservationsEMANormalizer.create(
