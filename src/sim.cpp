@@ -4925,21 +4925,6 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
     }
 #endif
 
-
-  builder.addToGraph<ParallelForNode<Engine,
-      planAStarAISystem,
-          Position,
-          Aim,
-          Magazine,
-          HP,
-          FwdLidar,
-          RearLidar,
-          CombatState,
-          OpponentsVisibility,
-          HardcodedBotAction,
-          AgentPolicy
-      >>({});
-
   builder.addToGraph<CompactArchetypeNode<GameEventEntity>>({});
   builder.addToGraph<CompactArchetypeNode<PackedStepSnapshotEntity>>({});
 }
@@ -4966,6 +4951,26 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
   builder.addToGraph<ClearTmpNode<GameEventEntity>>({});
   builder.addToGraph<ClearTmpNode<PackedStepSnapshotEntity>>({});
+
+  builder.addToGraph<ParallelForNode<Engine,
+      planAStarAISystem,
+          Position,
+          Aim,
+          Magazine,
+          HP,
+          FwdLidar,
+          RearLidar,
+          CombatState,
+          OpponentsVisibility,
+          HardcodedBotAction,
+          AgentPolicy
+      >>({});
+
+#ifndef MADRONA_GPU_MODE
+  if (cfg.policyWeights) {
+    addPolicyEvalTasks(builder);
+  }
+#endif
 
   auto pvpGameplayLogic = [&](Span<const TaskGraphNodeID> deps) {
     if ((cfg.simFlags & SimFlags::FullTeamPolicy) ==
@@ -5400,12 +5405,6 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
     >>({});
 
   resetAndObsTasks(builder, cfg, {done_sys});
-
-#ifndef MADRONA_GPU_MODE
-  if (cfg.policyWeights) {
-    addPolicyEvalTasks(builder);
-  }
-#endif
 }
 
 void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)

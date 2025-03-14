@@ -95,9 +95,9 @@ float4 fragMain(VSOutput input) : SV_Target {
     }
 
     // Depth of field
-    float blurAmount = saturate((depth - 1000) / 250);
-    blurAmount += 1 - saturate((depth - 10) / 50);
-    color.rgb = lerp(color.rgb, blurColor / blurNorm, blurAmount);
+    //float blurAmount = saturate((depth - 1000) / 250);
+    //blurAmount += 1 - saturate((depth - 10) / 50);
+    //color.rgb = lerp(color.rgb, blurColor / blurNorm, blurAmount);
 
     // Bloom
     float bloomAmount = 10.0;
