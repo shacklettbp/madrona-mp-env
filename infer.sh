@@ -28,9 +28,9 @@ python ${ROOT_DIR}/scripts/jax_infer.py $GPU_SIM \
     --game-mode Zone \
     --scene $2 \
     --crossplay \
+    --bf16 \
     --record ${ROOT_DIR}/build/record \
     --event-log ${ROOT_DIR}/events # \
-    #--bf16 \
     #--bc-dump-dir ${ROOT_DIR}/bc_data/raw_data \
     #--print-action-probs \
     #--deterministic_actions
