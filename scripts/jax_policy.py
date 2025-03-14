@@ -82,6 +82,51 @@ def vaswani_positional_embedding(embed_size, dtype):
     return embed
 
 
+class PolicyRNN(nn.Module):
+    rnn: nn.Module
+    norm: nn.Module
+
+    @staticmethod
+    def create(num_hidden_channels, num_layers, dtype, rnn_cls = LSTM):
+        return PolicyRNN(
+            rnn = rnn_cls(
+                num_hidden_channels = num_hidden_channels,
+                num_layers = num_layers,
+                dtype = dtype,
+            ),
+            norm = LayerNorm(dtype=dtype),
+        )
+
+    @nn.nowrap
+    def init_recurrent_state(self, N):
+        return self.rnn.init_recurrent_state(N)
+
+    @nn.nowrap
+    def clear_recurrent_state(self, rnn_states, should_clear):
+        return self.rnn.clear_recurrent_state(rnn_states, should_clear)
+
+    def setup(self):
+        pass
+
+    def __call__(
+        self,
+        cur_hiddens,
+        x,
+        train,
+    ):
+        out, new_hiddens = self.rnn(cur_hiddens, x, train)
+        return self.norm(out), new_hiddens
+
+    def sequence(
+        self,
+        start_hiddens,
+        seq_ends,
+        seq_x,
+        train,
+    ):
+        return self.norm(
+            self.rnn.sequence(start_hiddens, seq_ends, seq_x, train))
+
 class PrefixCommon(nn.Module):
     dtype: jnp.dtype
     num_embed_channels: int = 64
@@ -156,7 +201,6 @@ class PrefixCommon(nn.Module):
             dtype = self.dtype,
             name = 'self_embed',
         )(self_features)
-
         self_features = LayerNorm(dtype=self.dtype)(self_features)
         self_features = nn.leaky_relu(self_features)
 
@@ -361,10 +405,20 @@ def make_policy(dtype):
 
     actor_encoder = BackboneEncoder(
         net = ActorNet(dtype, use_maxpool_net=True),
+        #rnn = PolicyRNN.create(
+        #    num_hidden_channels = 512,
+        #    num_layers = 1,
+        #    dtype = dtype,
+        #),
     )
 
     critic_encoder = BackboneEncoder(
         net = CriticNet(dtype, use_maxpool_net=True),
+        #rnn = PolicyRNN.create(
+        #    num_hidden_channels = 512,
+        #    num_layers = 1,
+        #    dtype = dtype,
+        #),
     )
 
     backbone = BackboneSeparate(
@@ -380,7 +434,11 @@ def make_policy(dtype):
         ),
         #critic = DreamerV3Critic(dtype=dtype),
         #critic = DenseLayerCritic(dtype=dtype),
-        critic = HLGaussCritic.create(dtype=dtype),
+        critic = HLGaussCritic.create(
+            dtype=dtype,
+            min_bound=-200,
+            max_bound=200,
+        ),
     )
 
     obs_preprocess = ObservationsEMANormalizer.create(

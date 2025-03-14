@@ -160,8 +160,8 @@ struct PolicyWeights {
   });
 
   static constexpr inline auto discreteAimNumBuckets = std::to_array<int32_t>({
-      13, // yaw
-      7, // pitch
+    consts::discreteAimNumYawBuckets, // yaw
+    consts::discreteAimNumPitchBuckets, // pitch
   });
 
   FullyConnectedParams discreteHead;
@@ -430,7 +430,9 @@ static void evalFullyConnectedStandalone(
 static void evalFullyConnectedLayerWithLayerNormWithActivation(
     float *output,
     float *input,
-    FullyConnectedLayerWithLayerNormWithActivation &layer)
+    FullyConnectedLayerWithLayerNormWithActivation &layer,
+    float leaky_relu_slope,
+    bool debug = false)
 {
   int num_inputs = layer.params.numInputs;
   int num_features = layer.params.numFeatures;
@@ -457,16 +459,54 @@ static void evalFullyConnectedLayerWithLayerNormWithActivation(
     m2 = fmaf(delta, delta2, m2);
   }
 
-  float sigma = sqrtf(m2 / num_features);
+  float sigma = sqrtf(m2 / num_features + 1e-6f);
+
+  if (debug) {
+    printf("Dense\n");
+    for (int out_idx = 0; out_idx < num_features; out_idx++) {
+      printf("%.2e ", output[out_idx]);
+    }
+    printf("\n");
+
+    printf("Layernorm params\n");
+    for (int out_idx = 0; out_idx < num_features; out_idx++) {
+      printf("%.2e %.2e ", layer.layerNorm.scale[out_idx],
+             layer.layerNorm.bias[out_idx]);
+    }
+    printf("\n");
+
+    printf("Layernorm\n");
+    printf("%.2e %.2e\n", mean, m2 / num_features);
+    for (int out_idx = 0; out_idx < num_features; out_idx++) {
+      float rescaled = fmaf(
+          layer.layerNorm.scale[out_idx] / sigma,
+          output[out_idx] - mean,
+          layer.layerNorm.bias[out_idx]);
+      printf("%.2e ", rescaled);
+    }
+    printf("\n");
+
+    printf("Activation\n");
+    for (int out_idx = 0; out_idx < num_features; out_idx++) {
+      float rescaled = fmaf(
+          layer.layerNorm.scale[out_idx] / sigma,
+          output[out_idx] - mean,
+          layer.layerNorm.bias[out_idx]);
+
+      float activation =
+          rescaled >= 0.f ? rescaled : (leaky_relu_slope * rescaled);
+      printf("%.2e ", activation);
+    }
+    printf("\n");
+    printf("\n");
+  }
 
   for (int out_idx = 0; out_idx < num_features; out_idx++) {
     float rescaled = fmaf(
         layer.layerNorm.scale[out_idx] / sigma,
         output[out_idx] - mean,
         layer.layerNorm.bias[out_idx]);
-
-    constexpr float leaky_relu_slope = 1e-2f;
-
+    
     float activation =
         rescaled >= 0.f ? rescaled : (leaky_relu_slope * rescaled);
 
@@ -476,9 +516,11 @@ static void evalFullyConnectedLayerWithLayerNormWithActivation(
 
 static void embedInput(float *output,
                        float *input,
-                       EmbedModule &module)
+                       EmbedModule &module,
+                       bool debug = false)
 {
-  evalFullyConnectedLayerWithLayerNormWithActivation(output, input, module.fc);
+  evalFullyConnectedLayerWithLayerNormWithActivation(
+    output, input, module.fc, 1e-2f, debug);
 }
 
 // Gumbel-max trick
@@ -503,6 +545,7 @@ static int32_t sampleLogits(float *logits, int32_t num_buckets, RandKey rnd)
 
 void evalAgentPolicy(
   Engine &ctx,
+  AgentPolicy policy,
   SelfObservation &self_ob,
   RewardHyperParams &reward_coefs,
   TeammateObservations &teammate_obs,
@@ -522,6 +565,10 @@ void evalAgentPolicy(
   PvPDiscreteAction &discrete_action,
   PvPDiscreteAimAction &aim_action)
 {
+  if (policy.idx < 0) {
+    return;
+  }
+
   (void)teammate_pos_obs;
   (void)opponent_pos_obs;
   (void)opponent_last_known_pos_obs;
@@ -541,8 +588,26 @@ void evalAgentPolicy(
         3 * NUM_POSITION_EMBEDDING_FREQUENCIES * 2;
         
     std::array<float, SELF_INPUT_SIZE> self_input;
+
+#if 0
+    {
+      memcpy(self_input.data(), &self_ob, sizeof(SelfObservation));
+      for (int i = 0; i < sizeof(SelfObservation) / sizeof(float); i++) {
+        printf("%f ", self_input[i]);
+      }
+      printf("\n");
+    }
+#endif
+
     float *cur_self_input = self_input.data();
     normalizeSelfOb(self_ob, weights->normOb.self, cur_self_input);
+
+#if 0
+    for (int i = 0; i < sizeof(SelfObservation) / sizeof(float); i++) {
+      printf("%f ", self_input[i]);
+    }
+    printf("\n");
+#endif
 
     cur_self_input += sizeof(SelfObservation) / sizeof(float);
 
@@ -561,7 +626,7 @@ void evalAgentPolicy(
     assert(cur_self_input - self_input.data() == SELF_INPUT_SIZE);
 
     embedInput(
-        cur_mlp_input, self_input.data(), weights->selfEmbed);
+        cur_mlp_input, self_input.data(), weights->selfEmbed, false);
 
     cur_mlp_input += EMBED_SIZE;
   }
@@ -668,6 +733,16 @@ void evalAgentPolicy(
     cur_mlp_input += EMBED_SIZE;
   }
 
+#if 0
+  for (int i = 0; i < mlp_input_buffer.size(); i += 64) {
+    for (int j = i; j < i + 64; j++) { 
+      printf("%f ", mlp_input_buffer.data()[j]);
+    }
+    printf("\n");
+  }
+  printf("\n\n");
+#endif
+
   assert(cur_mlp_input - mlp_input_buffer.data() == mlp_input_buffer.size());
 
   constexpr int MLP_BUFFER_SIZE = 512;
@@ -677,7 +752,7 @@ void evalAgentPolicy(
     assert(weights->mlp[0].params.numFeatures == MLP_BUFFER_SIZE);
 
     evalFullyConnectedLayerWithLayerNormWithActivation(
-        mlp_buffer.data(), mlp_input_buffer.data(), weights->mlp[0]);
+        mlp_buffer.data(), mlp_input_buffer.data(), weights->mlp[0], 0.f);
   }
 
   cur_mlp_input = mlp_buffer.data();
@@ -687,7 +762,8 @@ void evalAgentPolicy(
     assert(weights->mlp[i].params.numFeatures == MLP_BUFFER_SIZE);
 
     evalFullyConnectedLayerWithLayerNormWithActivation(
-        cur_mlp_output, cur_mlp_input, weights->mlp[i]);
+        cur_mlp_output, cur_mlp_input, weights->mlp[i], 0.f);
+        
     std::swap(cur_mlp_input, cur_mlp_output);
   }
   cur_mlp_output = cur_mlp_input;
@@ -726,7 +802,7 @@ void evalAgentPolicy(
     assert(logits.size() == weights->aimHead.numFeatures);
 
     evalFullyConnectedStandalone(
-        logits.data(), cur_mlp_output, weights->discreteHead);
+        logits.data(), cur_mlp_output, weights->aimHead);
 
     std::array<int32_t, sizeof(PvPDiscreteAimAction) / sizeof(int32_t)> int_actions;
     float *cur_logits = logits.data();
@@ -1265,19 +1341,11 @@ PolicyWeights * loadPolicyWeights(const char *path)
   loadNormParams(weights, path);
 
   {
-    weights->selfEmbed.fc.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_self_embed");
-
-    weights->selfEmbed.fc.layerNorm = loadLayerNormParams(
-        path, "params_backbone_prefix_LayerNorm_0_impl");
-  }
-
-  {
     weights->fwdLidarEmbed.fc.params = loadFullyConnectedParams(
         path, "params_backbone_prefix_fwd_lidar_embed");
 
     weights->fwdLidarEmbed.fc.layerNorm = loadLayerNormParams(
-        path, "params_backbone_prefix_LayerNorm_1_impl");
+        path, "params_backbone_prefix_LayerNorm_0_impl");
   }
 
   {
@@ -1285,6 +1353,14 @@ PolicyWeights * loadPolicyWeights(const char *path)
         path, "params_backbone_prefix_rear_lidar_embed");
 
     weights->rearLidarEmbed.fc.layerNorm = loadLayerNormParams(
+        path, "params_backbone_prefix_LayerNorm_1_impl");
+  }
+
+  {
+    weights->selfEmbed.fc.params = loadFullyConnectedParams(
+        path, "params_backbone_prefix_self_embed");
+
+    weights->selfEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_2_impl");
   }
 
@@ -1382,6 +1458,7 @@ void addPolicyEvalTasks(TaskGraphBuilder &builder)
 {
   builder.addToGraph<ParallelForNode<Engine,
     evalAgentPolicy,
+      AgentPolicy,
       SelfObservation,
       RewardHyperParams,
       TeammateObservations,

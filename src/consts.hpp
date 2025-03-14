@@ -66,6 +66,7 @@ inline constexpr float deltaT = 0.05f;
 inline constexpr madrona::CountT numNonMapAssets = 14;
 
 inline constexpr int32_t aStarPolicyID = -1;
+inline constexpr int32_t humanPolicyID = -2;
 
 inline constexpr int32_t discreteAimNumYawBuckets = 13;
 inline constexpr int32_t discreteAimNumPitchBuckets = 7;

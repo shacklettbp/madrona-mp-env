@@ -27,8 +27,8 @@ python ${ROOT_DIR}/scripts/jax_infer.py $GPU_SIM \
     --num-worlds $1 \
     --game-mode Zone \
     --scene $2 \
-    --bf16 \
     --crossplay \
+    --bf16 \
     --record ${ROOT_DIR}/build/record \
     --event-log ${ROOT_DIR}/events # \
     #--bc-dump-dir ${ROOT_DIR}/bc_data/raw_data \

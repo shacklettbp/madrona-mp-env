@@ -54,6 +54,13 @@ int main(int argc, char *argv[])
         }
     }
 
+    std::string scene_dir = "data/simple_map";
+
+    std::string collision_data_file = scene_dir + "/collisions.bin";
+    std::string navmesh_file = scene_dir + "/navmesh.bin";
+    std::string spawn_data_file = scene_dir + "/spawns.bin";
+    std::string zone_data_file = scene_dir + "/zones.bin";
+
     Manager mgr({
         .execMode = exec_mode,
         .gpuID = 0,
@@ -63,13 +70,26 @@ int main(int argc, char *argv[])
         //.simFlags = /*SimFlags::Default,*/ SimFlags::HardcodedSpawns,
         .simFlags = SimFlags::Default,
         .taskType = Task::Zone,
-        .teamSize = (uint32_t)3,
+        .teamSize = (uint32_t)6,
         .numPBTPolicies = 0,
         .policyHistorySize = 1,
-        .map = {},
+        .map = {
+          .name = scene_dir.c_str(),
+          .collisionDataFile = collision_data_file.c_str(),
+          .navmeshFile = navmesh_file.c_str(),
+          .spawnDataFile = spawn_data_file.c_str(),
+          .zoneDataFile = zone_data_file.c_str(),
+          .mapOffset = Vector3::zero(),
+          .mapRotation = 0.f,
+        },
         .highlevelMove = false,
+        .policyWeightsPath = "converted_ckpt/0",
     });
     mgr.init();
+
+    mgr.step();
+
+    return 0;
 
     std::random_device rd;
     std::mt19937 rand_gen(rd());

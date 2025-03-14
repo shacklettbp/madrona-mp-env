@@ -2872,7 +2872,7 @@ void loop(VizState *viz, Manager &mgr)
           PvPDiscreteAction action_readback;
           PvPDiscreteAction *src_action =
               (PvPDiscreteAction *)action_tensor.devicePtr();
-          src_action += viz->curWorld * viz->numViews + viz->curControl;
+          src_action += viz->curWorld * viz->numViews + viz->curControl - 1;
           memcpy(&action_readback, src_action, sizeof(PvPDiscreteAction));
           stand = action_readback.stand;
         }
@@ -3147,8 +3147,9 @@ static void flyCamUI(Camera &cam)
   }
 }
 
-static void cfgUI(VizState *viz)
-{ ImGui::Begin("Controls");
+static void cfgUI(VizState *viz, Manager &mgr)
+{ 
+  ImGui::Begin("Controls");
 
   {
     float worldbox_width = ImGui::CalcTextSize(" ").x * (
@@ -3203,6 +3204,7 @@ static void cfgUI(VizState *viz)
     }
     ImGui::PopItemWidth();
 
+    i32 old_control = viz->curControl;
     if (viz->linkViewControl) {
       viz->curControl = viz->curView;
       ImGui::BeginDisabled();
@@ -3227,6 +3229,40 @@ static void cfgUI(VizState *viz)
 
     if (viz->linkViewControl) {
       ImGui::EndDisabled();
+    }
+
+    if (old_control != viz->curControl) {
+      if (old_control != 0) {
+        mgr.setAgentPolicy(viz->curWorld, old_control - 1, {0});
+        mgr.setPvPAction(viz->curWorld, old_control - 1, PvPDiscreteAction {
+          .moveAmount = 0,
+          .moveAngle = 0,
+          .fire = 0,
+          .stand = 0,
+        }, PvPAimAction {
+          .yaw = 0,
+          .pitch = 0,
+        }, PvPDiscreteAimAction {
+          .yaw = consts::discreteAimNumYawBuckets / 2,
+          .pitch = consts::discreteAimNumPitchBuckets / 2,
+        });
+      }
+
+      if (viz->curControl != 0) {
+        mgr.setAgentPolicy(viz->curWorld, viz->curControl - 1, {consts::humanPolicyID});
+        mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
+          .moveAmount = 0,
+          .moveAngle = 0,
+          .fire = 0,
+          .stand = 0,
+        }, PvPAimAction {
+          .yaw = 0,
+          .pitch = 0,
+        }, PvPDiscreteAimAction {
+          .yaw = consts::discreteAimNumYawBuckets / 2,
+          .pitch = consts::discreteAimNumPitchBuckets / 2,
+        });
+      }
     }
   }
 
@@ -3505,6 +3541,22 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
 {
   const UserInputEvents &input_events = viz->ui->inputEvents();
   if (input_events.downEvent(InputID::Esc)) {
+    if (viz->curControl != 0) {
+        mgr.setAgentPolicy(viz->curWorld, viz->curControl - 1, {0});
+        mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
+          .moveAmount = 0,
+          .moveAngle = 0,
+          .fire = 0,
+          .stand = 0,
+        }, PvPAimAction {
+          .yaw = 0,
+          .pitch = 0,
+        }, PvPDiscreteAimAction {
+          .yaw = consts::discreteAimNumYawBuckets / 2,
+          .pitch = consts::discreteAimNumPitchBuckets / 2,
+        });
+    }
+
     viz->curControl = 0;
     viz->curView = 0;
   }
@@ -3512,7 +3564,7 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   ImGuiSystem::newFrame(viz->ui, viz->window->systemUIScale, 1.f / 60.f);
 
   if (viz->curView == 0) {
-    cfgUI(viz);
+    cfgUI(viz, mgr);
   }
 
   Engine &ctx = mgr.getWorldContext(viz->curWorld);

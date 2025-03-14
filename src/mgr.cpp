@@ -2597,6 +2597,15 @@ bool Manager::isReplayFinished()
     }
 }
 
+void Manager::setAgentPolicy(
+  int32_t world_idx, int32_t agent_idx, AgentPolicy policy)
+{
+  const Tensor &policy_tensor = policyAssignmentTensor();
+  AgentPolicy *dst = (AgentPolicy *)policy_tensor.devicePtr();
+
+  dst[world_idx * impl_->numAgentsPerWorld + agent_idx] = policy;
+}
+
 void Manager::setUniformAgentPolicy(AgentPolicy policy)
 {
     const Tensor &policy_tensor = policyAssignmentTensor();

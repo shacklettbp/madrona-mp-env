@@ -148,6 +148,7 @@ public:
 
     bool isReplayFinished();
 
+    void setAgentPolicy(int32_t world_idx, int32_t agent_idx, AgentPolicy policy);
     void setUniformAgentPolicy(AgentPolicy policy);
 
 private:
