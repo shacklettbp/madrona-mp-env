@@ -545,6 +545,7 @@ static int32_t sampleLogits(float *logits, int32_t num_buckets, RandKey rnd)
 
 void evalAgentPolicy(
   Engine &ctx,
+  AgentPolicy policy,
   SelfObservation &self_ob,
   RewardHyperParams &reward_coefs,
   TeammateObservations &teammate_obs,
@@ -564,6 +565,10 @@ void evalAgentPolicy(
   PvPDiscreteAction &discrete_action,
   PvPDiscreteAimAction &aim_action)
 {
+  if (policy.idx < 0) {
+    return;
+  }
+
   (void)teammate_pos_obs;
   (void)opponent_pos_obs;
   (void)opponent_last_known_pos_obs;
@@ -1453,6 +1458,7 @@ void addPolicyEvalTasks(TaskGraphBuilder &builder)
 {
   builder.addToGraph<ParallelForNode<Engine,
     evalAgentPolicy,
+      AgentPolicy,
       SelfObservation,
       RewardHyperParams,
       TeammateObservations,

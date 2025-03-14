@@ -1979,7 +1979,7 @@ inline void applyBotActionsSystem(Engine &ctx,
 {
   (void)ctx;
   (void)aim;
-  if (policy.idx >= 0) {
+  if (policy.idx != consts::aStarPolicyID) {
     return;
   }
 
