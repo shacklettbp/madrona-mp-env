@@ -368,20 +368,29 @@ struct VizState {
   Texture depthAttachment;
   Texture sceneColor;
   Texture sceneDepth;
+  Texture pingPongColor[2];
   Sampler sceneSampler;
   Sampler depthSampler;
 
   RasterPassInterface onscreenPassInterface;
   RasterPass onscreenPass;
+  RasterPassInterface pingPongInterface[2];
+  RasterPass pingPongPass[2];
   RasterPassInterface offscreenPassInterface;
   RasterPass offscreenPass;
 
   ParamBlockType globalParamBlockType;
-  ParamBlockType texturedParamBlockType;
+  ParamBlockType postEffectStartType;
+  ParamBlockType postEffectPingPongType;
+  ParamBlockType postEffectCompositeType;
   Buffer globalPassDataBuffer;
   ParamBlock globalParamBlock;
-  ParamBlock texturedParamBlock;
+  ParamBlock postEffectStartBlock;
+  ParamBlock postEffectPingBlock;
+  ParamBlock postEffectPongBlock;
+  ParamBlock postEffectCompositeBlock;
 
+  RasterShader ssaoShader;
   RasterShader opaqueGeoShader;
   RasterShader agentShader;
   RasterShader goalRegionsShader;
@@ -2120,6 +2129,33 @@ VizState * init(const VizConfig &cfg)
       .usage = TextureUsage::DepthAttachment | TextureUsage::ShaderSampled,
     });
 
+  for (int i = 0; i < 2; i++)
+  {
+    viz->pingPongColor[i] = gpu->createTexture({
+      .format = swapchain_properties.format,
+      .width = (u16)viz->window->pixelWidth,
+      .height = (u16)viz->window->pixelHeight,
+      .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
+      });
+
+    char name[] = "0_post_process_raster_pass";
+    name[0] += i;
+    viz->pingPongInterface[i] = gpu->createRasterPassInterface({
+      .uuid = UUID::randomFromSeedString(name, strlen(name)),
+      .colorAttachments = {
+        {
+          .format = swapchain_properties.format,
+          .loadMode = AttachmentLoadMode::Clear,
+        },
+      },
+      });
+
+    viz->pingPongPass[i] = gpu->createRasterPass({
+      .interface = viz->pingPongInterface[i],
+      .colorAttachments = { viz->pingPongColor[i] },
+      });
+  }
+
   viz->offscreenPassInterface = gpu->createRasterPassInterface({
       .uuid = "offscreen_raster_pass"_to_uuid,
       .depthAttachment = {
@@ -2186,8 +2222,8 @@ VizState * init(const VizConfig &cfg)
     },
   });
 
-  viz->texturedParamBlockType = gpu->createParamBlockType({
-    .uuid = "textured_pb"_to_uuid,
+  viz->postEffectStartType = gpu->createParamBlockType({
+    .uuid = "post_start_pb"_to_uuid,
     .textures = {
       {.shaderUsage = ShaderStage::Fragment },
       {
@@ -2205,6 +2241,44 @@ VizState * init(const VizConfig &cfg)
       },
     },
   });
+  viz->postEffectPingPongType = gpu->createParamBlockType({
+    .uuid = "pingpong_pb"_to_uuid,
+    .textures = {
+      {.shaderUsage = ShaderStage::Fragment },
+      {.shaderUsage = ShaderStage::Fragment },
+      {
+        .type = TextureBindingType::UnfilterableTexture2D,
+        .shaderUsage = ShaderStage::Fragment,
+      },
+    },
+    .samplers = {
+      {.shaderUsage = ShaderStage::Fragment, },
+      {.shaderUsage = ShaderStage::Fragment, },
+      {
+        .type = SamplerBindingType::NonFiltering,
+        .shaderUsage = ShaderStage::Fragment,
+      },
+    },
+    });
+  viz->postEffectCompositeType = gpu->createParamBlockType({
+    .uuid = "composite_pb"_to_uuid,
+    .textures = {
+      {.shaderUsage = ShaderStage::Fragment },
+      {.shaderUsage = ShaderStage::Fragment },
+      {
+        .type = TextureBindingType::UnfilterableTexture2D,
+        .shaderUsage = ShaderStage::Fragment,
+      },
+    },
+    .samplers = {
+      {.shaderUsage = ShaderStage::Fragment, },
+      {.shaderUsage = ShaderStage::Fragment, },
+      {
+        .type = SamplerBindingType::NonFiltering,
+        .shaderUsage = ShaderStage::Fragment,
+      },
+    },
+    });
 
   viz->globalPassDataBuffer = gpu->createBuffer({
     .numBytes = sizeof(GlobalPassData),
@@ -2231,10 +2305,25 @@ VizState * init(const VizConfig &cfg)
     .anisotropy = 1,
   });
 
-  viz->texturedParamBlock = gpu->createParamBlock({
-    .typeID = viz->texturedParamBlockType,
+  viz->postEffectStartBlock = gpu->createParamBlock({
+    .typeID = viz->postEffectStartType,
     .textures = { viz->sceneColor, viz->sceneDepth },
     .samplers = { viz->sceneSampler, viz->depthSampler },
+    });
+  viz->postEffectPingBlock = gpu->createParamBlock({
+    .typeID = viz->postEffectPingPongType,
+    .textures = { viz->pingPongColor[1], viz->sceneColor, viz->sceneDepth },
+    .samplers = { viz->sceneSampler, viz->sceneSampler, viz->depthSampler },
+    });
+  viz->postEffectPongBlock = gpu->createParamBlock({
+    .typeID = viz->postEffectPingPongType,
+    .textures = { viz->pingPongColor[0], viz->sceneColor, viz->sceneDepth },
+    .samplers = { viz->sceneSampler, viz->sceneSampler, viz->depthSampler },
+    });
+  viz->postEffectCompositeBlock = gpu->createParamBlock({
+    .typeID = viz->postEffectCompositeType,
+    .textures = { viz->pingPongColor[0], viz->sceneColor, viz->sceneDepth },
+    .samplers = { viz->sceneSampler, viz->sceneSampler, viz->depthSampler },
     });
 
   using enum VertexFormat;
@@ -2244,7 +2333,18 @@ VizState * init(const VizConfig &cfg)
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = viz->onscreenPassInterface,
-      .paramBlockTypes = { viz->texturedParamBlockType },
+      .paramBlockTypes = { viz->postEffectCompositeType },
+      .rasterConfig = {
+        .depthCompare = DepthCompare::Disabled,
+      },
+    });
+
+  viz->ssaoShader = loadShader(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", {
+      .byteCode = {},
+      .vertexEntry = "vertMain",
+      .fragmentEntry = "fragMain",
+      .rasterPass = viz->pingPongInterface[0],
+      .paramBlockTypes = { viz->postEffectStartType },
       .rasterConfig = {
         .depthCompare = DepthCompare::Disabled,
       },
@@ -2427,6 +2527,9 @@ void shutdown(VizState *viz)
 
   gpu->destroyRasterShader(viz->agentShader);
 
+  gpu->destroyRasterShader(viz->postEffectShader);
+  gpu->destroyRasterShader(viz->ssaoShader);
+
   gpu->destroyRasterShader(viz->opaqueGeoShader);
 
   ImGuiSystem::shutdown(gpu);
@@ -2435,8 +2538,17 @@ void shutdown(VizState *viz)
   gpu->destroyBuffer(viz->globalPassDataBuffer);
   gpu->destroyParamBlockType(viz->globalParamBlockType);
 
+  for (int i = 0; i < 2; i++)
+  {
+    gpu->destroyRasterPass(viz->pingPongPass[i]);
+    gpu->destroyRasterPassInterface(viz->pingPongInterface[i]);
+    gpu->destroyTexture(viz->pingPongColor[i]);
+  }
+
   gpu->destroyRasterPass(viz->onscreenPass);
   gpu->destroyRasterPassInterface(viz->onscreenPassInterface);
+  gpu->destroyRasterPass(viz->offscreenPass);
+  gpu->destroyRasterPassInterface(viz->offscreenPassInterface);
 
   gpu->destroyTexture(viz->depthAttachment);
 
@@ -4021,11 +4133,19 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   // ---  POST EFFECTS  ---
 
-  RasterPassEncoder raster_enc = viz->enc.beginRasterPass(viz->onscreenPass);
+  // ---  SSAO  ---
 
+  RasterPassEncoder ssao = viz->enc.beginRasterPass(viz->pingPongPass[0]);
+  ssao.setShader(viz->ssaoShader);
+  ssao.setParamBlock(0, viz->postEffectStartBlock);
+  ssao.draw(0, 3);
+  viz->enc.endRasterPass(ssao);
+
+  // ---  COMPOSITE  ---
+
+  RasterPassEncoder raster_enc = viz->enc.beginRasterPass(viz->onscreenPass);
   raster_enc.setShader(viz->postEffectShader);
-  raster_enc.setParamBlock(0, viz->texturedParamBlock);
-  //raster_enc.setTexture(0, viz->sceneColor);
+  raster_enc.setParamBlock(0, viz->postEffectCompositeBlock);
   raster_enc.draw(0, 3);
 
   // ---  UI  ---
