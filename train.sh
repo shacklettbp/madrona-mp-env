@@ -34,8 +34,8 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --pbt-past-policies 4 \
     --profile-port 5000 \
     --scene $2 \
-    --bf16 \
     --eval-frequency 500 \
+    --bf16 \
     --gpu-sim
     #--restore 15000 \
     #--restore 61000 \
