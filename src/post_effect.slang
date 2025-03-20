@@ -85,7 +85,12 @@ float SSAO(float2 uv)
         }
     }
 
-    return ssao / 16.0;
+    // Blend out SSAO at a distance for now.
+    float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
+    depth = LinearDepth(depth);
+    ssao = lerp(ssao / 16.0, 1.0, saturate((depth-750.0)/500.0) );
+
+    return ssao;
 }
 
 float3 DepthOfField(float3 color, float2 uv, inout float3 bloomColor)
