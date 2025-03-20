@@ -462,16 +462,27 @@ static void evalFullyConnectedLayerWithLayerNormWithActivation(
   float sigma = sqrtf(m2 / num_features + 1e-6f);
 
   if (debug) {
+    printf("Input\n");
+    for (int in_idx = 0; in_idx < num_inputs; in_idx++) {
+      printf("%.2e ", input[in_idx]);
+    }
+    printf("\n");
+
     printf("Dense\n");
     for (int out_idx = 0; out_idx < num_features; out_idx++) {
       printf("%.2e ", output[out_idx]);
     }
     printf("\n");
 
-    printf("Layernorm params\n");
+    printf("Layernorm scales\n");
     for (int out_idx = 0; out_idx < num_features; out_idx++) {
-      printf("%.2e %.2e ", layer.layerNorm.scale[out_idx],
-             layer.layerNorm.bias[out_idx]);
+      printf("%.2e ", layer.layerNorm.scale[out_idx]);
+    }
+    printf("\n");
+
+    printf("Layernorm biases\n");
+    for (int out_idx = 0; out_idx < num_features; out_idx++) {
+      printf("%.2e ", layer.layerNorm.bias[out_idx]);
     }
     printf("\n");
 
@@ -589,25 +600,8 @@ void evalAgentPolicy(
         
     std::array<float, SELF_INPUT_SIZE> self_input;
 
-#if 0
-    {
-      memcpy(self_input.data(), &self_ob, sizeof(SelfObservation));
-      for (int i = 0; i < sizeof(SelfObservation) / sizeof(float); i++) {
-        printf("%f ", self_input[i]);
-      }
-      printf("\n");
-    }
-#endif
-
     float *cur_self_input = self_input.data();
     normalizeSelfOb(self_ob, weights->normOb.self, cur_self_input);
-
-#if 0
-    for (int i = 0; i < sizeof(SelfObservation) / sizeof(float); i++) {
-      printf("%f ", self_input[i]);
-    }
-    printf("\n");
-#endif
 
     cur_self_input += sizeof(SelfObservation) / sizeof(float);
 
@@ -760,6 +754,31 @@ void evalAgentPolicy(
   for (int i = 1; i < (int)weights->mlp.size(); i++) {
     assert(weights->mlp[i].params.numInputs == MLP_BUFFER_SIZE);
     assert(weights->mlp[i].params.numFeatures == MLP_BUFFER_SIZE);
+
+    if (false) {
+      printf("\n\nMLP %d\n\n", i);
+      float param_norm = 0.f;
+      float bias_norm = 0.f;
+      float *layer_weights = weights->mlp[i].params.weights;
+      float *layer_bias = weights->mlp[i].params.bias;
+
+      int num_features = weights->mlp[i].params.numFeatures;
+      int num_inputs = weights->mlp[i].params.numInputs;
+
+      for (int j = 0; j < num_features; j++) {
+        for (int k = 0; k < num_inputs; k++) {
+          float param = layer_weights[j * weights->mlp[i].params.numInputs + k];
+          param_norm += param * param;
+        }
+
+        bias_norm += layer_bias[j] * layer_bias[j];
+      }
+
+      param_norm = sqrtf(param_norm);
+      bias_norm = sqrtf(bias_norm);
+
+      printf("%f %f\n", param_norm, bias_norm);
+    }
 
     evalFullyConnectedLayerWithLayerNormWithActivation(
         cur_mlp_output, cur_mlp_input, weights->mlp[i], 0.f);
@@ -1073,7 +1092,7 @@ static int loadWeightFile(const char *dir, const char *name,
 }
 
 static FullyConnectedParams loadFullyConnectedParams(
-  const char *dir, const char *path)
+  const char *dir, const char *path, bool has_bias)
 {
   std::string kernel_path = path;
   kernel_path += "_kernel";
@@ -1092,11 +1111,18 @@ static FullyConnectedParams loadFullyConnectedParams(
   params.numInputs = shape[0];
   params.numFeatures = shape[1];
 
-  ndim = loadWeightFile(
-    dir, bias_path.c_str(), &params.bias, &shape);
+  if (has_bias) {
+    ndim = loadWeightFile(
+      dir, bias_path.c_str(), &params.bias, &shape);
 
-  assert(ndim == 1);
-  assert(shape[0] == params.numFeatures);
+    assert(ndim == 1);
+    assert(shape[0] == params.numFeatures);
+  } else {
+    params.bias = (float *)malloc(sizeof(float) * params.numFeatures);
+    for (int i = 0; i < params.numFeatures; i++) {
+      params.bias[i] = 0.f;
+    }
+  }
 
   // Transpose weights to be output, input row major
   float *transposed = (float *)malloc(
@@ -1342,7 +1368,7 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
   {
     weights->fwdLidarEmbed.fc.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_fwd_lidar_embed");
+        path, "params_backbone_prefix_fwd_lidar_embed", false);
 
     weights->fwdLidarEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_0_impl");
@@ -1350,7 +1376,7 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
   {
     weights->rearLidarEmbed.fc.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_rear_lidar_embed");
+        path, "params_backbone_prefix_rear_lidar_embed", false);
 
     weights->rearLidarEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_1_impl");
@@ -1358,7 +1384,7 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
   {
     weights->selfEmbed.fc.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_self_embed");
+        path, "params_backbone_prefix_self_embed", false);
 
     weights->selfEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_2_impl");
@@ -1366,7 +1392,7 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
   {
     weights->teammatesEmbed.fc.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_teammates_embed");
+        path, "params_backbone_prefix_teammates_embed", false);
 
     weights->teammatesEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_3_impl");
@@ -1374,7 +1400,7 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
   {
     weights->opponentsEmbed.fc.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_opponents_embed");
+        path, "params_backbone_prefix_opponents_embed", false);
 
     weights->opponentsEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_4_impl");
@@ -1382,7 +1408,8 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
   {
     weights->opponentsLastKnownEmbed.fc.params = loadFullyConnectedParams(
-        path, "params_backbone_prefix_opponents_last_known_embed");
+        path, "params_backbone_prefix_opponents_last_known_embed",
+        false);
 
     weights->opponentsLastKnownEmbed.fc.layerNorm = loadLayerNormParams(
         path, "params_backbone_prefix_LayerNorm_5_impl");
@@ -1398,7 +1425,7 @@ PolicyWeights * loadPolicyWeights(const char *path)
     layernorm_path += std::to_string(i) + "_impl";
         
     weights->mlp[i].params = loadFullyConnectedParams(
-        path, param_path.c_str());
+        path, param_path.c_str(), false);
     weights->mlp[i].layerNorm = loadLayerNormParams(
         path, layernorm_path.c_str());
   }
@@ -1406,9 +1433,9 @@ PolicyWeights * loadPolicyWeights(const char *path)
 
   {
     weights->discreteHead = loadFullyConnectedParams(
-        path, "params_actor_DenseLayerDiscreteActor_0_impl");
+        path, "params_actor_DenseLayerDiscreteActor_0_impl", true);
     weights->aimHead = loadFullyConnectedParams(
-        path, "params_actor_DenseLayerDiscreteActor_1_impl");
+        path, "params_actor_DenseLayerDiscreteActor_1_impl", true);
   }
 
   {

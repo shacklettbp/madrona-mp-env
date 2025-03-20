@@ -149,9 +149,8 @@ class PrefixCommon(nn.Module):
 
         fwd_lidar = nn.Dense(
                 self.num_embed_channels,
-                use_bias = True,
+                use_bias = False,
                 kernel_init = self.embed_init,
-                bias_init = jax.nn.initializers.constant(0),
                 dtype = self.dtype,
                 name = 'fwd_lidar_embed',
             )(fwd_lidar.reshape(*fwd_lidar.shape[:-3], -1))
@@ -161,9 +160,8 @@ class PrefixCommon(nn.Module):
 
         rear_lidar = nn.Dense(
                 self.num_embed_channels,
-                use_bias = True,
+                use_bias = False,
                 kernel_init = self.embed_init,
-                bias_init = jax.nn.initializers.constant(0),
                 dtype = self.dtype,
                 name = 'rear_lidar_embed',
             )(rear_lidar.reshape(*rear_lidar.shape[:-3], -1))
@@ -195,9 +193,8 @@ class PrefixCommon(nn.Module):
 
         self_features = nn.Dense(
             self.num_embed_channels,
-            use_bias = True,
+            use_bias = False,
             kernel_init = self.embed_init,
-            bias_init = jax.nn.initializers.constant(0),
             dtype = self.dtype,
             name = 'self_embed',
         )(self_features)
@@ -206,9 +203,8 @@ class PrefixCommon(nn.Module):
 
         teammates_features = nn.Dense(
             self.num_embed_channels,
-            use_bias = True,
+            use_bias = False,
             kernel_init = self.embed_init,
-            bias_init = jax.nn.initializers.constant(0),
             dtype = self.dtype,
             name = 'teammates_embed',
         )(teammates)
@@ -217,9 +213,8 @@ class PrefixCommon(nn.Module):
 
         opponents_features = nn.Dense(
             self.num_embed_channels,
-            use_bias = True,
+            use_bias = False,
             kernel_init = self.embed_init,
-            bias_init = jax.nn.initializers.constant(0),
             dtype = self.dtype,
             name = 'opponents_embed',
         )(opponents)
@@ -228,9 +223,8 @@ class PrefixCommon(nn.Module):
 
         opponents_last_known_features = nn.Dense(
             self.num_embed_channels,
-            use_bias = True,
+            use_bias = False,
             kernel_init = self.embed_init,
-            bias_init = jax.nn.initializers.constant(0),
             dtype = self.dtype,
             name = 'opponents_last_known_embed',
         )(opponents_last_known)

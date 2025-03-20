@@ -84,6 +84,7 @@ struct Manager::Impl {
 
     inline virtual ~Impl() {}
 
+    virtual void init() = 0;
     virtual void run(TaskGraphID taskgraph_id = TaskGraphID::Step) = 0;
 
 #ifdef MADRONA_CUDA_SUPPORT
@@ -232,6 +233,11 @@ struct Manager::CPUImpl final : Manager::Impl {
     inline virtual ~CPUImpl() final
     {
         free(trajectoryCurriculum.snapshots);
+    }
+
+    inline virtual void init()
+    {
+      cpuExec.runTaskGraph(TaskGraphID::Init);
     }
 
     inline virtual void run(TaskGraphID graph_id)
@@ -463,6 +469,12 @@ struct Manager::CUDAImpl final : Manager::Impl {
       writeGameEvents(*eventLog, *eventStepsLog, eventLogReadBack, num_events, 
                       eventLogStepStatesReadback, num_steps,
                       cfg.numWorlds, stepIdx);
+    }
+
+    inline virtual void init()
+    {
+      auto init_graph = gpuExec.buildLaunchGraph(TaskGraphID::Init);
+      gpuExec.run(init_graph);
     }
 
     inline virtual void run(TaskGraphID graph_id)
@@ -1917,7 +1929,7 @@ void Manager::init()
     for (int32_t i = 0; i < (int32_t)cfg.numWorlds; i++) {
         triggerReset(i);
     }
-    impl_->run(TaskGraphID::Init);
+    impl_->init();
 
     if ((cfg.simFlags & SimFlags::StaggerStarts) ==
         SimFlags::StaggerStarts) {

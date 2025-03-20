@@ -101,20 +101,46 @@ NB_MODULE(madrona_mp_env, m) {
            nb::arg("record_log_path") = nb::none(),
            nb::arg("event_log_path") = nb::none(),
            nb::arg("curriculum_data_path") = nb::none())
+        .def("init", &Manager::init)
         .def("step", &Manager::step)
-        .def("reset_tensor", &Manager::resetTensor)
+
+        .def("fwd_lidar", &Manager::fwdLidarTensor)
+        .def("rear_lidar", &Manager::rearLidarTensor)
+        .def("hp", &Manager::hpTensor)
+        .def("magazine", &Manager::magazineTensor)
+        .def("alive", &Manager::aliveTensor)
+        .def("self_obs", &Manager::selfObservationTensor)
+        .def("filters_state", &Manager::filtersStateObservationTensor)
+        .def("teammates", &Manager::teammateObservationsTensor)
+        .def("opponents", &Manager::opponentObservationsTensor)
+        .def("opponents_last_known",
+             &Manager::opponentLastKnownObservationsTensor)
+        .def("self_pos",
+             &Manager::selfPositionTensor)
+        .def("teammate_positions",
+             &Manager::teammatePositionObservationsTensor)
+        .def("opponent_positions",
+             &Manager::opponentPositionObservationsTensor)
+        .def("opponent_last_known_positions", 
+             &Manager::opponentLastKnownPositionObservationsTensor)
+        .def("opponent_masks",
+             &Manager::opponentMasksTensor)
+
+        .def("agent_map", &Manager::agentMapTensor)
+        .def("unmasked_agent_map", &Manager::agentMapTensor)
+        .def("reward_coefs", &Manager::rewardHyperParamsTensor)
+
         .def("explore_action_tensor", &Manager::exploreActionTensor)
+
         .def("pvp_action_tensor", &Manager::pvpDiscreteActionTensor)
+        .def("aim_action_tensor", &Manager::pvpDiscreteAimActionTensor)
+
         .def("reward_tensor", &Manager::rewardTensor)
         .def("done_tensor", &Manager::doneTensor)
-        .def("policy_assignment_tensor", &Manager::policyAssignmentTensor)
+        .def("reset_tensor", &Manager::resetTensor)
         .def("self_observation_tensor", &Manager::selfObservationTensor)
-        .def("opponent_masks_tensor", &Manager::opponentMasksTensor)
-        .def("fwd_lidar_tensor", &Manager::fwdLidarTensor)
-        .def("rear_lidar_tensor", &Manager::rearLidarTensor)
-        .def("hp_tensor", &Manager::hpTensor)
-        .def("magazine_tensor", &Manager::magazineTensor)
-        .def("alive_tensor", &Manager::aliveTensor)
+
+        .def("train_interface", &Manager::trainInterface)
         .def("jax", madrona::py::JAXInterface::buildEntry<
                 &Manager::trainInterface,
                 &Manager::cpuJAXInit,
