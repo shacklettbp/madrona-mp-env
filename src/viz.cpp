@@ -2490,7 +2490,7 @@ VizState * init(const VizConfig &cfg)
         }
       }},
       .rasterConfig = {
-        .depthCompare = DepthCompare::Disabled,
+        //.depthCompare = DepthCompare::Disabled,
         .writeDepth = true,
       },
     });
@@ -3113,7 +3113,7 @@ void loop(VizState *viz, Manager &mgr)
 
       Entity agent = ctx.data().agents[viz->curControl - 1];
 
-      const float mouse_aim_sensitivity = 300.f;
+      const float mouse_aim_sensitivity = 30.f;
       const float mouse_max_move = 1000.f;
       const float mouse_accelleration = 0.8f;
       const float fine_aim_multiplier = 0.3f;
@@ -3991,7 +3991,7 @@ static void renderAgents(Engine &ctx, VizState *viz,
   const auto &query = ctx.query<Position, Rotation, Scale, CombatState,
       Magazine, HP, TeamInfo>();
 
-  raster_enc.setShader(viz->opaqueGeoShader);
+  raster_enc.setShader(viz->agentShader);
   raster_enc.setParamBlock(0, viz->globalParamBlock);
 
   ctx.iterateQuery(query,
