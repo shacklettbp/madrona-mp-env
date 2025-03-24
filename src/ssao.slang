@@ -90,8 +90,10 @@ VSOutput vertMain(uint id : SV_VertexID)
 float SSAO(float2 uv)
 {
     float size = 5.0;
-    float power = 1.5;
-    float intensity = 3.0;
+    //float power = 1.5;
+    //float intensity = 3.0;
+    float power = 1.0;
+    float intensity = 1.0;
     float ssaoDepth = 50.0;
 
     float occlusion = 0.0;
@@ -101,7 +103,7 @@ float SSAO(float2 uv)
         float2 offset = RotatedDisk(uv, i / 2) * (size / linearDepth);
         float sampleDepth = params.depthTexture.Sample(params.depthSamplerState, uv + offset).x;
         float sampleLinearDepth = LinearDepth(sampleDepth);
-        float sampleOcclusion = saturate((linearDepth - sampleLinearDepth) / ssaoDepth) * saturate(2-(linearDepth - sampleLinearDepth) / ssaoDepth);
+        float sampleOcclusion = saturate((linearDepth - sampleLinearDepth) / ssaoDepth) /*saturate(1-(linearDepth - sampleLinearDepth) / ssaoDepth) */;
         occlusion += sampleOcclusion;
     }
     occlusion = pow(occlusion / (float)poissonDiskSize, power) * intensity;

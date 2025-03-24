@@ -86,11 +86,11 @@ float SSAO(float2 uv)
     }
 
     // Blend out SSAO at a distance for now.
-    float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
-    depth = LinearDepth(depth);
-    ssao = lerp(ssao / 16.0, 1.0, saturate((depth-750.0)/500.0) );
+    //float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
+    //depth = LinearDepth(depth);
+    //ssao = lerp(ssao / 16.0, 1.0, saturate((depth-750.0)/500.0) );
 
-    return ssao;
+    return ssao / 16;
 }
 
 float3 DepthOfField(float3 color, float2 uv, inout float3 bloomColor)
@@ -127,7 +127,7 @@ float3 DepthOfField(float3 color, float2 uv, inout float3 bloomColor)
     // Depth of field
     float blurAmount = saturate((depth - 1000) / 250);
     blurAmount += 1 - saturate((depth - 10) / 50);
-    color.rgb = lerp(color.rgb, blurColor / blurNorm, blurAmount);
+    //color.rgb = lerp(color.rgb, blurColor / blurNorm, blurAmount);
     return color;
 }
 
@@ -154,6 +154,11 @@ float4 fragMain(VSOutput input) : SV_Target {
     color.rgb *= SSAO(input.uv);
 
     //color.rgb = ChromaticAberration(input.uv, color.g);
+
+     float3 blurColor;
+    color.rgb = DepthOfField(color.rgb, input.uv, blurColor);
+
+    color.rgb = Bloom(color.rgb, input.uv, blurColor);
 
     /*float3 blurColor;
     color.rgb = DepthOfField(color.rgb, input.uv, blurColor);

@@ -53,9 +53,10 @@ float4 fragMain(V2F v2f) : SV_Target0
 
   float brightness = lerp(0.25, 1, dot_view);
 
-  float4 color = lerp(perDraw.baseColor, float4(1.0, 1.0, 0.5, 1),
-      pow(clamp(v2f.worldZ / 500, 0.0, 1.0), 0.4));
+  //float4 color = lerp(perDraw.baseColor, float4(1.0, 1.0, 0.5, 1),
+  //    pow(clamp(v2f.worldZ / 500, 0.0, 1.0), 0.4));
+  //return color * float4(float3(brightness), 1.f);
 
-
-  return color * float4(float3(brightness), 1.f);
+  float4 color = float4(1.0, 1.0, 1.0, 1.0);
+  return color;
 }
