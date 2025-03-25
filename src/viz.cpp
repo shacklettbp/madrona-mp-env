@@ -4210,10 +4210,9 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   // ---  SSAO  ---
 
   viz->ssaoPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", 1.0f, 1.0f, 1, false);
-  viz->ssaoPass.AddTextureInput(viz->sceneColor);
   viz->ssaoPass.AddDepthInput(viz->sceneDepth);
   RasterPassEncoder ssao = viz->ssaoPass.Execute();
-  ssao.draw(0, 3);
+  ssao.draw(0, 1);
   viz->enc.endRasterPass(ssao);
 
   // ---  BLOOM HORIZONTAL  ---
@@ -4221,7 +4220,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->bloomHorizontalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom_horizontal.slang", 0.25f, 1.0f, 1, false);
   viz->bloomHorizontalPass.AddTextureInput(viz->sceneColor);
   RasterPassEncoder bloomh = viz->bloomHorizontalPass.Execute();
-  bloomh.draw(0, 3);
+  bloomh.draw(0, 1);
   viz->enc.endRasterPass(bloomh);
 
   // ---  BLOOM VERTICAL  ---
@@ -4229,7 +4228,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->bloomVerticalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom_vertical.slang", 0.25f, 0.25f, 1, false);
   viz->bloomVerticalPass.AddTextureInput(viz->bloomHorizontalPass.Output(0));
   RasterPassEncoder bloomv = viz->bloomVerticalPass.Execute();
-  bloomv.draw(0, 3);
+  bloomv.draw(0, 1);
   viz->enc.endRasterPass(bloomv);
 
   // ---  COMPOSITE  ---
@@ -4240,7 +4239,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->finalPass.AddTextureInput(viz->sceneColor);
   viz->finalPass.AddDepthInput(viz->sceneDepth);
   RasterPassEncoder final = viz->finalPass.Execute();
-  final.draw(0, 3);
+  final.draw(0, 1);
 
   // ---  UI  ---
 

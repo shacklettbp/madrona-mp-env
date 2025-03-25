@@ -23,10 +23,9 @@ struct VSOutput {
 };
 
 static float near = 0.01;
-static float far = 50000.0;
 float LinearDepth(float depth)
 {
-    return near * far / (far + (1.0-depth) * (near - far));
+    return near / depth;
 }
 
 float GaussianFactor(float x, float y, float sigma)

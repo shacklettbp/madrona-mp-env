@@ -1,9 +1,7 @@
 // post_effect.slang
 
 struct PostParams {
-  Texture2D inputTexture;
   Texture2D depthTexture;
-  SamplerState samplerState;
   SamplerState depthSamplerState;
 };
 
@@ -65,10 +63,9 @@ struct VSOutput {
 };
 
 static float near = 0.01;
-static float far = 50000.0;
 float LinearDepth(float depth)
 {
-    return near * far / (far + (1.0-depth) * (near - far));
+    return near / depth;
 }
 
 float GaussianFactor(float x, float y, float sigma)
@@ -103,7 +100,7 @@ float SSAO(float2 uv)
         float2 offset = RotatedDisk(uv, i / 2) * (size / linearDepth);
         float sampleDepth = params.depthTexture.Sample(params.depthSamplerState, uv + offset).x;
         float sampleLinearDepth = LinearDepth(sampleDepth);
-        float sampleOcclusion = saturate((linearDepth - sampleLinearDepth) / ssaoDepth) /*saturate(1-(linearDepth - sampleLinearDepth) / ssaoDepth) */;
+        float sampleOcclusion = saturate((linearDepth - sampleLinearDepth) / ssaoDepth);
         occlusion += sampleOcclusion;
     }
     occlusion = pow(occlusion / (float)poissonDiskSize, power) * intensity;
