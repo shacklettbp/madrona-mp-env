@@ -371,10 +371,14 @@ private:
   RasterPass pass;
   std::vector<Texture> targets;
   std::vector<Sampler> samplers;
+  std::vector<TextureBindingConfig> bindings;
+  std::vector<SamplerBindingConfig> samplerBindings;
   std::vector<Texture> inputs;
   ParamBlockType paramType;
   ParamBlock params;
   RasterShader shader;
+  std::string name;
+  std::string shaderName;
   bool initialized;
 };
 
@@ -398,23 +402,17 @@ struct VizState {
   Sampler sceneSampler;
   Sampler depthSampler;
 
-  RasterPassInterface onscreenPassInterface;
-  RasterPass onscreenPass;
   RasterPassInterface offscreenPassInterface;
   RasterPass offscreenPass;
 
   PostEffectPass ssaoPass;
+  PostEffectPass bloomHorizontalPass;
+  PostEffectPass bloomVerticalPass;
+  PostEffectPass finalPass;
 
   ParamBlockType globalParamBlockType;
-  ParamBlockType postEffectStartType;
-  ParamBlockType postEffectPingPongType;
-  ParamBlockType postEffectCompositeType;
   Buffer globalPassDataBuffer;
   ParamBlock globalParamBlock;
-  ParamBlock postEffectStartBlock;
-  ParamBlock postEffectPingBlock;
-  ParamBlock postEffectPongBlock;
-  ParamBlock postEffectCompositeBlock;
 
   RasterShader opaqueGeoShader;
   RasterShader agentShader;
@@ -426,7 +424,6 @@ struct VizState {
   ParamBlockType shotVizParamBlockType;
 
   RasterShader shotVizShader;
-  RasterShader postEffectShader;
 
   CommandEncoder enc;
 
@@ -487,55 +484,72 @@ PostEffectPass::PostEffectPass()
   initialized = false;
 }
 
-void PostEffectPass::Prepare(struct VizState* _viz, const char* shaderName, float resXMult, float resYMult, int colorOutputs, bool outputDepth)
+void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, float resXMult, float resYMult, int colorOutputs, bool finalOutput)
 {
-  viz = _viz;
-  if (!initialized)
-  {
-    for (int i = 0; i < colorOutputs; i++)
-    {
-      targets.push_back(viz->gpu->createTexture({
-          .format = viz->swapchainFormat,
-          .width = (u16)(viz->window->pixelWidth * resXMult),
-          .height = (u16)(viz->window->pixelHeight * resYMult),
-          .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
-        }));
-    }
+  if (initialized)
+    return;
 
-    if (outputDepth)
-    {
-      targets.push_back(viz->gpu->createTexture({
-          .format = TextureFormat::Depth32_Float,
-          .width = (u16)(viz->window->pixelWidth * resXMult),
-          .height = (u16)(viz->window->pixelHeight * resYMult),
-          .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
-        }));
-    }
+  viz = _viz;
+  shaderName = _shaderName;
+ 
+  name = std::string("0") + shaderName;
+  static int index = 0;
+  name[0] = '0' + index++;
+
+  std::vector<gas::ColorAttachmentConfig> colorConfigList;
+  for (int i = 0; i < colorOutputs; i++)
+  {
+    targets.push_back(viz->gpu->createTexture({
+        .format = viz->swapchainFormat,
+        .width = (u16)(viz->window->pixelWidth * resXMult),
+        .height = (u16)(viz->window->pixelHeight * resYMult),
+        .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
+      }));
+
+    colorConfigList.push_back({
+      .format = viz->swapchainFormat,
+      .loadMode = AttachmentLoadMode::Clear,
+    });
+  }
+
+  madrona::Span<gas::ColorAttachmentConfig> colorConfigs = madrona::Span<gas::ColorAttachmentConfig>(colorConfigList.data(), colorConfigList.size());
+
+  if (finalOutput)
+  {
+    targets.push_back(viz->gpu->createTexture({
+        .format = TextureFormat::Depth32_Float,
+        .width = (u16)(viz->window->pixelWidth * resXMult),
+        .height = (u16)(viz->window->pixelHeight * resYMult),
+        .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
+      }));
+
+    DepthAttachmentConfig depthConfig = {
+      .format = TextureFormat::Depth32_Float,
+      .loadMode = AttachmentLoadMode::Clear,
+    };
 
     interface = viz->gpu->createRasterPassInterface({
-      .uuid = UUID::randomFromSeedString(shaderName, strlen(shaderName)),
-      .colorAttachments = {
-        {
-          .format = viz->swapchainFormat,
-          .loadMode = AttachmentLoadMode::Clear,
-        },
-      },
+      .uuid = UUID::randomFromSeedString(shaderName.c_str(), shaderName.size()),
+      .depthAttachment = depthConfig,
+      .colorAttachments = colorConfigs,
       });
 
     pass = viz->gpu->createRasterPass({
-      .interface = interface,
-      .colorAttachments = { targets[0] },
+    .interface = interface,
+    .depthAttachment = targets[1],
+    .colorAttachments = { viz->swapchain.proxyAttachment() },
+      });
+  }
+  else
+  {
+    interface = viz->gpu->createRasterPassInterface({
+      .uuid = UUID::randomFromSeedString(shaderName.c_str(), shaderName.size()),
+      .colorAttachments = colorConfigs,
       });
 
-    shader = loadShader(viz, shaderName, {
-      .byteCode = {},
-      .vertexEntry = "vertMain",
-      .fragmentEntry = "fragMain",
-      .rasterPass = interface,
-      .paramBlockTypes = { viz->postEffectStartType },
-      .rasterConfig = {
-        .depthCompare = DepthCompare::Disabled,
-      },
+    pass = viz->gpu->createRasterPass({
+    .interface = interface,
+    .colorAttachments = { targets[0] },
       });
   }
 }
@@ -546,6 +560,8 @@ void PostEffectPass::AddTextureInput(gas::Texture& texture)
     return;
   inputs.push_back(texture);
   samplers.push_back(viz->sceneSampler);
+  bindings.push_back({ .shaderUsage = ShaderStage::Fragment });
+  samplerBindings.push_back({ .shaderUsage = ShaderStage::Fragment });
 }
 
 void PostEffectPass::AddDepthInput(gas::Texture& texture)
@@ -554,6 +570,8 @@ void PostEffectPass::AddDepthInput(gas::Texture& texture)
     return;
   inputs.push_back(texture);
   samplers.push_back(viz->depthSampler);
+  bindings.push_back({ .type = TextureBindingType::UnfilterableTexture2D,.shaderUsage = ShaderStage::Fragment });
+  samplerBindings.push_back({ .type = SamplerBindingType::NonFiltering,.shaderUsage = ShaderStage::Fragment });
 }
 
 gas::RasterPassEncoder PostEffectPass::Execute()
@@ -564,11 +582,30 @@ gas::RasterPassEncoder PostEffectPass::Execute()
     // Convert collected vectors into spans to input into constructor.
     madrona::Span<gas::Texture> textureInputs = madrona::Span<gas::Texture>(inputs.data(), inputs.size());
     madrona::Span<gas::Sampler> samplerInputs = madrona::Span<gas::Sampler>(samplers.data(), samplers.size());
+    madrona::Span<gas::TextureBindingConfig> textureBindingsSpan = madrona::Span<gas::TextureBindingConfig>(bindings.data(), bindings.size());
+    madrona::Span<gas::SamplerBindingConfig> samplerBindingsSpan = madrona::Span<gas::SamplerBindingConfig>(samplerBindings.data(), samplerBindings.size());
+
+    paramType = viz->gpu->createParamBlockType({
+    .uuid = UUID::randomFromSeedString(name.c_str(), name.size()),
+    .textures = textureBindingsSpan,
+    .samplers = samplerBindingsSpan,
+      });
 
     params = viz->gpu->createParamBlock({
-      .typeID = viz->postEffectCompositeType,
+      .typeID = paramType,
       .textures = textureInputs,
       .samplers = samplerInputs,
+      });
+
+    shader = loadShader(viz, shaderName.c_str(), {
+      .byteCode = {},
+      .vertexEntry = "vertMain",
+      .fragmentEntry = "fragMain",
+      .rasterPass = interface,
+      .paramBlockTypes = { paramType },
+      .rasterConfig = {
+        .depthCompare = DepthCompare::Disabled,
+      },
       });
   }
 
@@ -2291,28 +2328,8 @@ VizState * init(const VizConfig &cfg)
       .colorAttachments = { viz->sceneColor },
     });
 
-  viz->onscreenPassInterface = gpu->createRasterPassInterface({
-    .uuid = "onscreen_raster_pass"_to_uuid,
-    .depthAttachment = { 
-      .format = TextureFormat::Depth32_Float,
-      .loadMode = AttachmentLoadMode::Clear,
-    },
-    .colorAttachments = {
-      {
-        .format = swapchain_properties.format,
-        .loadMode = AttachmentLoadMode::Clear,
-      },
-    },
-  });
-
-  viz->onscreenPass = gpu->createRasterPass({
-    .interface = viz->onscreenPassInterface,
-    .depthAttachment = viz->depthAttachment,
-    .colorAttachments = { viz->swapchain.proxyAttachment() },
-  });
-
   ImGuiSystem::init(viz->ui, gpu, viz->mainQueue, viz->shaderc,
-      viz->onscreenPassInterface,
+      viz->offscreenPassInterface,
       DATA_DIR "imgui_font.ttf", 12.f);
 
   viz->enc = gpu->createCommandEncoder(viz->mainQueue);
@@ -2336,64 +2353,6 @@ VizState * init(const VizConfig &cfg)
       },
     },
   });
-
-  viz->postEffectStartType = gpu->createParamBlockType({
-    .uuid = "post_start_pb"_to_uuid,
-    .textures = {
-      {.shaderUsage = ShaderStage::Fragment },
-      {
-        .type = TextureBindingType::UnfilterableTexture2D,
-        .shaderUsage = ShaderStage::Fragment,
-      },
-    },
-    .samplers = {
-      {
-        .shaderUsage = ShaderStage::Fragment,
-      },
-      {
-        .type = SamplerBindingType::NonFiltering,
-        .shaderUsage = ShaderStage::Fragment,
-      },
-    },
-  });
-  viz->postEffectPingPongType = gpu->createParamBlockType({
-    .uuid = "pingpong_pb"_to_uuid,
-    .textures = {
-      {.shaderUsage = ShaderStage::Fragment },
-      {.shaderUsage = ShaderStage::Fragment },
-      {
-        .type = TextureBindingType::UnfilterableTexture2D,
-        .shaderUsage = ShaderStage::Fragment,
-      },
-    },
-    .samplers = {
-      {.shaderUsage = ShaderStage::Fragment, },
-      {.shaderUsage = ShaderStage::Fragment, },
-      {
-        .type = SamplerBindingType::NonFiltering,
-        .shaderUsage = ShaderStage::Fragment,
-      },
-    },
-    });
-  viz->postEffectCompositeType = gpu->createParamBlockType({
-    .uuid = "composite_pb"_to_uuid,
-    .textures = {
-      {.shaderUsage = ShaderStage::Fragment },
-      {.shaderUsage = ShaderStage::Fragment },
-      {
-        .type = TextureBindingType::UnfilterableTexture2D,
-        .shaderUsage = ShaderStage::Fragment,
-      },
-    },
-    .samplers = {
-      {.shaderUsage = ShaderStage::Fragment, },
-      {.shaderUsage = ShaderStage::Fragment, },
-      {
-        .type = SamplerBindingType::NonFiltering,
-        .shaderUsage = ShaderStage::Fragment,
-      },
-    },
-    });
 
   viz->globalPassDataBuffer = gpu->createBuffer({
     .numBytes = sizeof(GlobalPassData),
@@ -2420,46 +2379,14 @@ VizState * init(const VizConfig &cfg)
     .anisotropy = 1,
   });
 
-  viz->postEffectStartBlock = gpu->createParamBlock({
-    .typeID = viz->postEffectStartType,
-    .textures = { viz->sceneColor, viz->sceneDepth },
-    .samplers = { viz->sceneSampler, viz->depthSampler },
-    });
-  /*viz->postEffectPingBlock = gpu->createParamBlock({
-    .typeID = viz->postEffectPingPongType,
-    .textures = { viz->pingPongColor[1], viz->sceneColor, viz->sceneDepth },
-    .samplers = { viz->sceneSampler, viz->sceneSampler, viz->depthSampler },
-    });
-  viz->postEffectPongBlock = gpu->createParamBlock({
-    .typeID = viz->postEffectPingPongType,
-    .textures = { viz->pingPongColor[0], viz->sceneColor, viz->sceneDepth },
-    .samplers = { viz->sceneSampler, viz->sceneSampler, viz->depthSampler },
-    });*/
-  viz->postEffectCompositeBlock = gpu->createParamBlock({
-    .typeID = viz->postEffectCompositeType,
-    .textures = { viz->pingPongColor[0], viz->sceneColor, viz->sceneDepth },
-    .samplers = { viz->sceneSampler, viz->sceneSampler, viz->depthSampler },
-    });
-
   using enum VertexFormat;
-
-  viz->postEffectShader = loadShader(viz, MADRONA_MP_ENV_SRC_DIR "post_effect.slang", {
-      .byteCode = {},
-      .vertexEntry = "vertMain",
-      .fragmentEntry = "fragMain",
-      .rasterPass = viz->onscreenPassInterface,
-      .paramBlockTypes = { viz->postEffectCompositeType },
-      .rasterConfig = {
-        .depthCompare = DepthCompare::Disabled,
-      },
-    });
 
   viz->opaqueGeoShader = loadShader(viz, 
     MADRONA_MP_ENV_SRC_DIR "opaque_geo.slang", {
       .byteCode = {},
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
-      .rasterPass = viz->onscreenPassInterface,
+      .rasterPass = viz->offscreenPassInterface,
       .paramBlockTypes = { viz->globalParamBlockType },
       .numPerDrawBytes = sizeof(OpaqueGeoPerDraw),
       .vertexBuffers = {{ 
@@ -2479,7 +2406,7 @@ VizState * init(const VizConfig &cfg)
       .byteCode = {},
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
-      .rasterPass = viz->onscreenPassInterface,
+      .rasterPass = viz->offscreenPassInterface,
       .paramBlockTypes = { viz->globalParamBlockType },
       .numPerDrawBytes = sizeof(AgentPerDraw),
       .vertexBuffers = {{ 
@@ -2500,7 +2427,7 @@ VizState * init(const VizConfig &cfg)
       .byteCode = {},
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
-      .rasterPass = viz->onscreenPassInterface,
+      .rasterPass = viz->offscreenPassInterface,
       .paramBlockTypes = { viz->globalParamBlockType },
       .numPerDrawBytes = sizeof(GoalRegionPerDraw),
       .rasterConfig = {
@@ -2515,7 +2442,7 @@ VizState * init(const VizConfig &cfg)
       .byteCode = {},
       .vertexEntry = "vertMainWireframe",
       .fragmentEntry = "fragMainWireframe",
-      .rasterPass = viz->onscreenPassInterface,
+      .rasterPass = viz->offscreenPassInterface,
       .paramBlockTypes = { viz->globalParamBlockType },
       .numPerDrawBytes = sizeof(GoalRegionPerDraw),
       .rasterConfig = {
@@ -2529,7 +2456,7 @@ VizState * init(const VizConfig &cfg)
       .byteCode = {},
       .vertexEntry = "vertMainWireframe",
       .fragmentEntry = "fragMainWireframeNoDepth",
-      .rasterPass = viz->onscreenPassInterface,
+      .rasterPass = viz->offscreenPassInterface,
       .paramBlockTypes = { viz->globalParamBlockType },
       .numPerDrawBytes = sizeof(GoalRegionPerDraw),
       .rasterConfig = {
@@ -2545,7 +2472,7 @@ VizState * init(const VizConfig &cfg)
       .byteCode = {},
       .vertexEntry = "vertMain",
       .fragmentEntry = "triFrag",
-      .rasterPass = viz->onscreenPassInterface,
+      .rasterPass = viz->offscreenPassInterface,
       .paramBlockTypes = { viz->globalParamBlockType },
       .numPerDrawBytes = sizeof(AnalyticsTeamHullPerDraw),
       .vertexBuffers = {{
@@ -2575,7 +2502,7 @@ VizState * init(const VizConfig &cfg)
       .byteCode = {},
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
-      .rasterPass = viz->onscreenPassInterface,
+      .rasterPass = viz->offscreenPassInterface,
       .paramBlockTypes = {
         viz->globalParamBlockType,
         viz->shotVizParamBlockType,
@@ -2631,8 +2558,6 @@ void shutdown(VizState *viz)
 
   gpu->destroyRasterShader(viz->agentShader);
 
-  gpu->destroyRasterShader(viz->postEffectShader);
-
   gpu->destroyRasterShader(viz->opaqueGeoShader);
 
   ImGuiSystem::shutdown(gpu);
@@ -2641,10 +2566,11 @@ void shutdown(VizState *viz)
   gpu->destroyBuffer(viz->globalPassDataBuffer);
   gpu->destroyParamBlockType(viz->globalParamBlockType);
 
-  gpu->destroyRasterPass(viz->onscreenPass);
-  gpu->destroyRasterPassInterface(viz->onscreenPassInterface);
   gpu->destroyRasterPass(viz->offscreenPass);
   gpu->destroyRasterPassInterface(viz->offscreenPassInterface);
+
+  viz->ssaoPass.Destroy();
+  viz->finalPass.Destroy();
 
   gpu->destroyTexture(viz->depthAttachment);
 
@@ -4284,22 +4210,42 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   // ---  SSAO  ---
 
   viz->ssaoPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", 1.0f, 1.0f, 1, false);
+  viz->ssaoPass.AddTextureInput(viz->sceneColor);
+  viz->ssaoPass.AddDepthInput(viz->sceneDepth);
   RasterPassEncoder ssao = viz->ssaoPass.Execute();
-  ssao.setParamBlock(0, viz->postEffectStartBlock);
   ssao.draw(0, 3);
   viz->enc.endRasterPass(ssao);
 
+  // ---  BLOOM HORIZONTAL  ---
+
+  viz->bloomHorizontalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom_horizontal.slang", 0.25f, 1.0f, 1, false);
+  viz->bloomHorizontalPass.AddTextureInput(viz->sceneColor);
+  RasterPassEncoder bloomh = viz->bloomHorizontalPass.Execute();
+  bloomh.draw(0, 3);
+  viz->enc.endRasterPass(bloomh);
+
+  // ---  BLOOM VERTICAL  ---
+
+  viz->bloomVerticalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom_vertical.slang", 0.25f, 0.25f, 1, false);
+  viz->bloomVerticalPass.AddTextureInput(viz->bloomHorizontalPass.Output(0));
+  RasterPassEncoder bloomv = viz->bloomVerticalPass.Execute();
+  bloomv.draw(0, 3);
+  viz->enc.endRasterPass(bloomv);
+
   // ---  COMPOSITE  ---
 
-  RasterPassEncoder raster_enc = viz->enc.beginRasterPass(viz->onscreenPass);
-  raster_enc.setShader(viz->postEffectShader);
-  raster_enc.setParamBlock(0, viz->postEffectCompositeBlock);
-  raster_enc.draw(0, 3);
+  viz->finalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "post_effect.slang", 1.0f, 1.0f, 1, true);
+  viz->finalPass.AddTextureInput(viz->ssaoPass.Output(0));
+  viz->finalPass.AddTextureInput(viz->bloomVerticalPass.Output(0));
+  viz->finalPass.AddTextureInput(viz->sceneColor);
+  viz->finalPass.AddDepthInput(viz->sceneDepth);
+  RasterPassEncoder final = viz->finalPass.Execute();
+  final.draw(0, 3);
 
   // ---  UI  ---
 
-  ImGuiSystem::render(raster_enc);
-  viz->enc.endRasterPass(raster_enc);
+  ImGuiSystem::render(final);
+  viz->enc.endRasterPass(final);
 
   viz->enc.endEncoding();
   gpu->submit(viz->mainQueue, viz->enc);

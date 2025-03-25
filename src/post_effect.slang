@@ -2,9 +2,11 @@
 
 struct PostParams {
   Texture2D ssaoTexture;
+  Texture2D bloomTexture;
   Texture2D inputTexture;
   Texture2D depthTexture;
   SamplerState ssaoSamplerState;
+  SamplerState bloomSamplerState;
   SamplerState samplerState;
   SamplerState depthSamplerState;
 };
@@ -131,10 +133,11 @@ float3 DepthOfField(float3 color, float2 uv, inout float3 bloomColor)
     return color;
 }
 
-float3 Bloom(float3 color, float2 uv, float3 bloomColor)
+float3 Bloom(float3 color, float2 uv)
 {
     // Bloom
-    float bloomAmount = 10.0;
+    float bloomAmount = 5.0;
+    float3 bloomColor = params.bloomTexture.Sample(params.bloomSamplerState, uv).rgb;
     color.rgb = color.rgb * 0.6 + bloomColor * bloomAmount;
     for( int i = 0; i < 3; i++ ) {
         color[i] += saturate(color[(i+1)%3] - 1) + saturate(color[(i+2)%3] - 1);
@@ -155,15 +158,10 @@ float4 fragMain(VSOutput input) : SV_Target {
 
     //color.rgb = ChromaticAberration(input.uv, color.g);
 
-     float3 blurColor;
-    color.rgb = DepthOfField(color.rgb, input.uv, blurColor);
+    //float3 blurColor;
+    //color.rgb = DepthOfField(color.rgb, input.uv, blurColor);
 
-    color.rgb = Bloom(color.rgb, input.uv, blurColor);
-
-    /*float3 blurColor;
-    color.rgb = DepthOfField(color.rgb, input.uv, blurColor);
-
-    color.rgb = Bloom(color.rgb, input.uv, blurColor);*/
+    color.rgb = Bloom(color.rgb, input.uv);
 
     color.rgb *= Vignette(input.uv);
 
