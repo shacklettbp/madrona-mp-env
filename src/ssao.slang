@@ -1,15 +1,14 @@
 // post_effect.slang
 
+#include "viz_shader_common.h"
+
 struct PostParams {
   Texture2D depthTexture;
   SamplerState depthSamplerState;
 };
 
 ParameterBlock<PostParams> params;
-
-// We will pass this in eventually.
-//static int2 sceneResolution = int2(1920, 1080);
-static int2 sceneResolution = int2(2730, 1536);
+ParameterBlock<PostEffectData> consts;
 
 static int poissonDiskSize = 32;
 static float2[] poissonDisk = {
@@ -49,6 +48,7 @@ float2(-0.783, 0.534)
 float2 RotatedDisk(float2 uv, int sample)
 {
     // Generate a random angle from the uv.
+    float2 sceneResolution = (float2)consts.view.fbDims;
     int angleSelect = (((int)(uv.y * sceneResolution.y) % 4) * 4 + ((int)(uv.x * sceneResolution.x) % 4));
     float angle = poissonDisk[angleSelect / 2][angleSelect % 2] * 3.1415;
     float s = sin(angle);

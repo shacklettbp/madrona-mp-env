@@ -1,5 +1,7 @@
 // post_effect.slang
 
+#include "viz_shader_common.h"
+
 struct PostParams {
   Texture2D ssaoTexture;
   Texture2D bloomTexture;
@@ -12,10 +14,7 @@ struct PostParams {
 };
 
 ParameterBlock<PostParams> params;
-
-// We will pass this in eventually.
-//static int2 sceneResolution = int2(1920, 1080);
-static int2 sceneResolution = int2(2730, 1536);
+ParameterBlock<PostEffectData> consts;
 
 struct VSOutput {
     float4 position : SV_POSITION;
@@ -81,15 +80,10 @@ float SSAO(float2 uv)
     {
         for( int y = -1; y < 3; y++)
         {
-            float2 offset = float2(x, y) / (float2)sceneResolution;
+            float2 offset = float2(x, y) / (float2)consts.view.fbDims;
             ssao += params.ssaoTexture.Sample(params.ssaoSamplerState, uv + offset).x;
         }
     }
-
-    // Blend out SSAO at a distance for now.
-    //float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
-    //depth = LinearDepth(depth);
-    //ssao = lerp(ssao / 16.0, 1.0, saturate((depth-750.0)/500.0) );
 
     return ssao / 16;
 }
@@ -137,10 +131,11 @@ float3 Bloom(float3 color, float2 uv)
     // Bloom
     float bloomAmount = 5.0;
     float3 bloomColor = params.bloomTexture.Sample(params.bloomSamplerState, uv).rgb;
-    color.rgb = color.rgb * 0.6 + bloomColor * bloomAmount;
-    for( int i = 0; i < 3; i++ ) {
+    color.rgb = color.rgb * 0.8 + bloomColor * bloomAmount;
+    // Overdrive to white.
+    /*for( int i = 0; i < 3; i++ ) {
         color[i] += saturate(color[(i+1)%3] - 1) + saturate(color[(i+2)%3] - 1);
-    }
+    }*/
     return color;
 }
 

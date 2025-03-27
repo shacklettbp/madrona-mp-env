@@ -22,6 +22,11 @@ struct GlobalPassData {
   ViewData view;
 };
 
+struct PostEffectData {
+  ViewData view;
+  float4 params;
+};
+
 struct OpaqueGeoPerDraw {
   NonUniformScaleObjectTransform txfm;
   float4 baseColor;

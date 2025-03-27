@@ -27,6 +27,7 @@ using shader::OpaqueGeoVertex;
 using shader::ViewData;
 using shader::NonUniformScaleObjectTransform;
 using shader::GlobalPassData;
+using shader::PostEffectData;
 using shader::OpaqueGeoPerDraw;
 using shader::GoalRegionPerDraw;
 using shader::AnalyticsTeamHullPerDraw;

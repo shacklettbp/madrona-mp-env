@@ -361,6 +361,7 @@ public:
   void Prepare(struct VizState* _viz, const char *shaderName, float resXMult, float resYMult, int colorOutputs, bool outputDepth);
   void AddTextureInput(gas::Texture& texture);
   void AddDepthInput(gas::Texture& depth);
+  void SetParams(const Vector4 &shaderParams);
   gas::RasterPassEncoder Execute();
   void Destroy();
   gas::Texture& Output(int i);
@@ -376,9 +377,12 @@ private:
   std::vector<Texture> inputs;
   ParamBlockType paramType;
   ParamBlock params;
+  ParamBlock params2;
   RasterShader shader;
   std::string name;
   std::string shaderName;
+  u16 resX;
+  u16 resY;
   bool initialized;
 };
 
@@ -411,8 +415,11 @@ struct VizState {
   PostEffectPass finalPass;
 
   ParamBlockType globalParamBlockType;
+  ParamBlockType postEffectParamBlockType;
   Buffer globalPassDataBuffer;
+  Buffer postEffectDataBuffer;
   ParamBlock globalParamBlock;
+  PostEffectData postEffectData;
 
   RasterShader opaqueGeoShader;
   RasterShader agentShader;
@@ -497,12 +504,14 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   name[0] = '0' + index++;
 
   std::vector<gas::ColorAttachmentConfig> colorConfigList;
+  resX = (u16)(viz->window->pixelWidth * resXMult);
+  resY = (u16)(viz->window->pixelHeight * resYMult);
   for (int i = 0; i < colorOutputs; i++)
   {
     targets.push_back(viz->gpu->createTexture({
         .format = viz->swapchainFormat,
-        .width = (u16)(viz->window->pixelWidth * resXMult),
-        .height = (u16)(viz->window->pixelHeight * resYMult),
+        .width = resX,
+        .height = resY,
         .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
       }));
 
@@ -518,8 +527,8 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   {
     targets.push_back(viz->gpu->createTexture({
         .format = TextureFormat::Depth32_Float,
-        .width = (u16)(viz->window->pixelWidth * resXMult),
-        .height = (u16)(viz->window->pixelHeight * resYMult),
+        .width = resX,
+        .height = resY,
         .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
       }));
 
@@ -529,7 +538,7 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
     };
 
     interface = viz->gpu->createRasterPassInterface({
-      .uuid = UUID::randomFromSeedString(shaderName.c_str(), shaderName.size()),
+      .uuid = UUID::randomFromSeedString(name.c_str(), name.size()),
       .depthAttachment = depthConfig,
       .colorAttachments = colorConfigs,
       });
@@ -543,7 +552,7 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   else
   {
     interface = viz->gpu->createRasterPassInterface({
-      .uuid = UUID::randomFromSeedString(shaderName.c_str(), shaderName.size()),
+      .uuid = UUID::randomFromSeedString(name.c_str(), name.size()),
       .colorAttachments = colorConfigs,
       });
 
@@ -574,6 +583,26 @@ void PostEffectPass::AddDepthInput(gas::Texture& texture)
   samplerBindings.push_back({ .type = SamplerBindingType::NonFiltering,.shaderUsage = ShaderStage::Fragment });
 }
 
+void PostEffectPass::SetParams(const Vector4 &shaderParams)
+{
+  CopyPassEncoder copy_enc = viz->enc.beginCopyPass();
+  MappedTmpBuffer param_staging =
+    copy_enc.tmpBuffer(sizeof(PostEffectData));
+
+  PostEffectData* param_staging_ptr =
+    (PostEffectData*)param_staging.ptr;
+
+  viz->postEffectData.view.fbDims = { resX, resY };
+  viz->postEffectData.params = shaderParams;
+  memcpy(param_staging_ptr, &viz->postEffectData, sizeof(PostEffectData));
+
+  copy_enc.copyBufferToBuffer(
+    param_staging.buffer, viz->postEffectDataBuffer,
+    param_staging.offset, 0, sizeof(PostEffectData));
+
+  viz->enc.endCopyPass(copy_enc);
+}
+
 gas::RasterPassEncoder PostEffectPass::Execute()
 {
   // Set up the inputs based on what was called between Prepare and Execute.
@@ -597,12 +626,19 @@ gas::RasterPassEncoder PostEffectPass::Execute()
       .samplers = samplerInputs,
       });
 
+    params2 = viz->gpu->createParamBlock({
+      .typeID = viz->postEffectParamBlockType,
+      .buffers = {
+        {.buffer = viz->postEffectDataBuffer, .numBytes = sizeof(PostEffectData) },
+      }
+      });
+
     shader = loadShader(viz, shaderName.c_str(), {
       .byteCode = {},
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = interface,
-      .paramBlockTypes = { paramType },
+      .paramBlockTypes = { paramType, viz->postEffectParamBlockType },
       .rasterConfig = {
         .depthCompare = DepthCompare::Disabled,
       },
@@ -613,6 +649,7 @@ gas::RasterPassEncoder PostEffectPass::Execute()
   gas::RasterPassEncoder enc = viz->enc.beginRasterPass(pass);
   enc.setShader(shader);
   enc.setParamBlock(0, params);
+  enc.setParamBlock(1, params2);
   return enc;
 }
 
@@ -2366,6 +2403,21 @@ VizState * init(const VizConfig &cfg)
     },
   });
 
+  viz->postEffectParamBlockType = gpu->createParamBlockType({
+    .uuid = "post_pb"_to_uuid,
+    .buffers = {
+      {
+        .type = BufferBindingType::Uniform,
+        .shaderUsage = ShaderStage::Vertex | ShaderStage::Fragment,
+      },
+    },
+    });
+
+  viz->postEffectDataBuffer = gpu->createBuffer({
+    .numBytes = sizeof(PostEffectData),
+    .usage = BufferUsage::ShaderUniform | BufferUsage::CopyDst,
+    });
+
   viz->sceneSampler = gpu->createSampler({
     .addressMode = SamplerAddressMode::Clamp,
     .anisotropy = 1,
@@ -2565,6 +2617,8 @@ void shutdown(VizState *viz)
   gpu->destroyParamBlock(viz->globalParamBlock);
   gpu->destroyBuffer(viz->globalPassDataBuffer);
   gpu->destroyParamBlockType(viz->globalParamBlockType);
+  gpu->destroyBuffer(viz->postEffectDataBuffer);
+  gpu->destroyParamBlockType(viz->postEffectParamBlockType);
 
   gpu->destroyRasterPass(viz->offscreenPass);
   gpu->destroyRasterPassInterface(viz->offscreenPassInterface);
@@ -4176,6 +4230,8 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
     setupViewData(ctx, cam, viz, global_param_staging_ptr);
 
+    memcpy(&viz->postEffectData.view, global_param_staging_ptr, sizeof(GlobalPassData));
+
     copy_enc.copyBufferToBuffer(
         global_param_staging.buffer, viz->globalPassDataBuffer,
         global_param_staging.offset, 0, sizeof(GlobalPassData));
@@ -4211,22 +4267,25 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   viz->ssaoPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", 1.0f, 1.0f, 1, false);
   viz->ssaoPass.AddDepthInput(viz->sceneDepth);
+  viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f));
   RasterPassEncoder ssao = viz->ssaoPass.Execute();
   ssao.draw(0, 1);
   viz->enc.endRasterPass(ssao);
 
   // ---  BLOOM HORIZONTAL  ---
 
-  viz->bloomHorizontalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom_horizontal.slang", 0.25f, 1.0f, 1, false);
+  viz->bloomHorizontalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", 0.25f, 1.0f, 1, false);
   viz->bloomHorizontalPass.AddTextureInput(viz->sceneColor);
+  viz->bloomHorizontalPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // 0 in X is horizontal pass.
   RasterPassEncoder bloomh = viz->bloomHorizontalPass.Execute();
   bloomh.draw(0, 1);
   viz->enc.endRasterPass(bloomh);
 
   // ---  BLOOM VERTICAL  ---
 
-  viz->bloomVerticalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom_vertical.slang", 0.25f, 0.25f, 1, false);
+  viz->bloomVerticalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", 0.25f, 0.25f, 1, false);
   viz->bloomVerticalPass.AddTextureInput(viz->bloomHorizontalPass.Output(0));
+  viz->bloomVerticalPass.SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f)); // 1 in X is vertical pass.
   RasterPassEncoder bloomv = viz->bloomVerticalPass.Execute();
   bloomv.draw(0, 1);
   viz->enc.endRasterPass(bloomv);
@@ -4238,6 +4297,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->finalPass.AddTextureInput(viz->bloomVerticalPass.Output(0));
   viz->finalPass.AddTextureInput(viz->sceneColor);
   viz->finalPass.AddDepthInput(viz->sceneDepth);
+  viz->finalPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // No parameters for final composite.
   RasterPassEncoder final = viz->finalPass.Execute();
   final.draw(0, 1);
 
