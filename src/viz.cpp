@@ -31,6 +31,7 @@
 #include <set>
 #include <vector>
 #include <random>
+#include <stdlib.h>
 
 namespace NavUtils
 {
@@ -362,7 +363,7 @@ public:
   void AddTextureInput(gas::Texture& texture);
   void AddDepthInput(gas::Texture& depth);
   void SetParams(const Vector4 &shaderParams);
-  gas::RasterPassEncoder Execute();
+  gas::RasterPassEncoder Execute(bool final);
   void Destroy();
   gas::Texture& Output(int i);
   gas::Texture& Depth();
@@ -385,6 +386,8 @@ private:
   u16 resY;
   bool initialized;
 };
+
+const int DownsamplePasses = 3;
 
 struct VizState {
   UISystem *ui;
@@ -410,8 +413,10 @@ struct VizState {
   RasterPass offscreenPass;
 
   PostEffectPass ssaoPass;
-  PostEffectPass bloomHorizontalPass;
-  PostEffectPass bloomVerticalPass;
+  PostEffectPass ssaoDownsamplePass;
+  PostEffectPass downsamplePasses[DownsamplePasses];
+  PostEffectPass bloomHorizontalPasses[DownsamplePasses];
+  PostEffectPass bloomVerticalPasses[DownsamplePasses];
   PostEffectPass finalPass;
 
   ParamBlockType globalParamBlockType;
@@ -502,6 +507,9 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   name = std::string("0") + shaderName;
   static int index = 0;
   name[0] = '0' + index++;
+  static UUID broken = { 0,0 };
+  broken[0]++;
+  broken[1]++;
 
   std::vector<gas::ColorAttachmentConfig> colorConfigList;
   resX = (u16)(viz->window->pixelWidth * resXMult);
@@ -538,7 +546,7 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
     };
 
     interface = viz->gpu->createRasterPassInterface({
-      .uuid = UUID::randomFromSeedString(name.c_str(), name.size()),
+      .uuid = broken,//UUID::randomFromSeedString(name.c_str(), name.size()),
       .depthAttachment = depthConfig,
       .colorAttachments = colorConfigs,
       });
@@ -552,7 +560,7 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   else
   {
     interface = viz->gpu->createRasterPassInterface({
-      .uuid = UUID::randomFromSeedString(name.c_str(), name.size()),
+      .uuid = broken,//UUID::randomFromSeedString(name.c_str(), name.size()),
       .colorAttachments = colorConfigs,
       });
 
@@ -603,7 +611,7 @@ void PostEffectPass::SetParams(const Vector4 &shaderParams)
   viz->enc.endCopyPass(copy_enc);
 }
 
-gas::RasterPassEncoder PostEffectPass::Execute()
+gas::RasterPassEncoder PostEffectPass::Execute( bool final )
 {
   // Set up the inputs based on what was called between Prepare and Execute.
   if (!initialized)
@@ -614,8 +622,11 @@ gas::RasterPassEncoder PostEffectPass::Execute()
     madrona::Span<gas::TextureBindingConfig> textureBindingsSpan = madrona::Span<gas::TextureBindingConfig>(bindings.data(), bindings.size());
     madrona::Span<gas::SamplerBindingConfig> samplerBindingsSpan = madrona::Span<gas::SamplerBindingConfig>(samplerBindings.data(), samplerBindings.size());
 
+    static UUID broken = { 0,0 };
+    broken[0]++;
+    broken[1]++;
     paramType = viz->gpu->createParamBlockType({
-    .uuid = UUID::randomFromSeedString(name.c_str(), name.size()),
+    .uuid = broken,//UUID::randomFromSeedString(name.c_str(), name.size()),
     .textures = textureBindingsSpan,
     .samplers = samplerBindingsSpan,
       });
@@ -650,6 +661,9 @@ gas::RasterPassEncoder PostEffectPass::Execute()
   enc.setShader(shader);
   enc.setParamBlock(0, params);
   enc.setParamBlock(1, params2);
+  enc.draw(0, 1);
+  if (!final)
+    viz->enc.endRasterPass(enc);
   return enc;
 }
 
@@ -4268,38 +4282,52 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->ssaoPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", 1.0f, 1.0f, 1, false);
   viz->ssaoPass.AddDepthInput(viz->sceneDepth);
   viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f));
-  RasterPassEncoder ssao = viz->ssaoPass.Execute();
-  ssao.draw(0, 1);
-  viz->enc.endRasterPass(ssao);
+  viz->ssaoPass.Execute( false );
 
-  // ---  BLOOM HORIZONTAL  ---
+  /*viz->ssaoDownsamplePass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "downsample.slang", 0.25f, 0.25f, 1, false);
+  viz->ssaoDownsamplePass.AddTextureInput(viz->ssaoPass.Output(0));
+  viz->ssaoDownsamplePass.SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f));
+  viz->ssaoDownsamplePass.Execute(false);*/
 
-  viz->bloomHorizontalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", 0.25f, 1.0f, 1, false);
-  viz->bloomHorizontalPass.AddTextureInput(viz->sceneColor);
-  viz->bloomHorizontalPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // 0 in X is horizontal pass.
-  RasterPassEncoder bloomh = viz->bloomHorizontalPass.Execute();
-  bloomh.draw(0, 1);
-  viz->enc.endRasterPass(bloomh);
+  // Do a multi-pass bloom.
+  for (int pass = 0; pass < DownsamplePasses; pass++)
+  {
 
-  // ---  BLOOM VERTICAL  ---
+    // ---  DOWN SAMPLE  ---
 
-  viz->bloomVerticalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", 0.25f, 0.25f, 1, false);
-  viz->bloomVerticalPass.AddTextureInput(viz->bloomHorizontalPass.Output(0));
-  viz->bloomVerticalPass.SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f)); // 1 in X is vertical pass.
-  RasterPassEncoder bloomv = viz->bloomVerticalPass.Execute();
-  bloomv.draw(0, 1);
-  viz->enc.endRasterPass(bloomv);
+    float downsample_factor = 0.25f / (pass + 1);
+    viz->downsamplePasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "downsample.slang", downsample_factor, downsample_factor, 1, false);
+    viz->downsamplePasses[pass].AddTextureInput( pass == 0 ? viz->sceneColor : viz->downsamplePasses[pass-1].Output(0));
+    viz->downsamplePasses[pass].SetParams(Vector4(4.0f * (pass + 1), 4.0f * (pass + 1), 0.0f, 0.0f)); // X and Y are downsample factors.
+    viz->downsamplePasses[pass].Execute(false);
+
+    // ---  BLOOM HORIZONTAL  ---
+
+    viz->bloomHorizontalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
+    viz->bloomHorizontalPasses[pass].AddTextureInput(viz->downsamplePasses[pass].Output(0));
+    viz->bloomHorizontalPasses[pass].SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // 0 in X is horizontal pass.
+    viz->bloomHorizontalPasses[pass].Execute(false);
+
+    // ---  BLOOM VERTICAL  ---
+
+    viz->bloomVerticalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
+    viz->bloomVerticalPasses[pass].AddTextureInput(viz->bloomHorizontalPasses[pass].Output(0));
+    viz->bloomVerticalPasses[pass].SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f)); // 1 in X is vertical pass.
+    viz->bloomVerticalPasses[pass].Execute(false);
+  }
 
   // ---  COMPOSITE  ---
 
   viz->finalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "post_effect.slang", 1.0f, 1.0f, 1, true);
   viz->finalPass.AddTextureInput(viz->ssaoPass.Output(0));
-  viz->finalPass.AddTextureInput(viz->bloomVerticalPass.Output(0));
+  for (int i = 0; i < DownsamplePasses; i++)
+  {
+    viz->finalPass.AddTextureInput(viz->bloomVerticalPasses[i].Output(0));
+  }
   viz->finalPass.AddTextureInput(viz->sceneColor);
   viz->finalPass.AddDepthInput(viz->sceneDepth);
   viz->finalPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // No parameters for final composite.
-  RasterPassEncoder final = viz->finalPass.Execute();
-  final.draw(0, 1);
+  RasterPassEncoder final = viz->finalPass.Execute( true );
 
   // ---  UI  ---
 

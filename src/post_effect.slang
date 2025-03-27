@@ -4,11 +4,15 @@
 
 struct PostParams {
   Texture2D ssaoTexture;
-  Texture2D bloomTexture;
+  Texture2D bloomTexture0;
+  Texture2D bloomTexture1;
+  Texture2D bloomTexture2;
   Texture2D inputTexture;
   Texture2D depthTexture;
   SamplerState ssaoSamplerState;
-  SamplerState bloomSamplerState;
+  SamplerState bloomSamplerState0;
+  SamplerState bloomSamplerState1;
+  SamplerState bloomSamplerState2;
   SamplerState samplerState;
   SamplerState depthSamplerState;
 };
@@ -129,8 +133,10 @@ float3 DepthOfField(float3 color, float2 uv, inout float3 bloomColor)
 float3 Bloom(float3 color, float2 uv)
 {
     // Bloom
-    float bloomAmount = 5.0;
-    float3 bloomColor = params.bloomTexture.Sample(params.bloomSamplerState, uv).rgb;
+    float bloomAmount = 1.0;
+    float3 bloomColor = params.bloomTexture0.Sample(params.bloomSamplerState0, uv).rgb * 0.3;
+    bloomColor += params.bloomTexture1.Sample(params.bloomSamplerState1, uv).rgb * 0.5;
+    bloomColor += params.bloomTexture2.Sample(params.bloomSamplerState2, uv).rgb * 1.0;
     color.rgb = color.rgb * 0.8 + bloomColor * bloomAmount;
     // Overdrive to white.
     /*for( int i = 0; i < 3; i++ ) {

@@ -15,12 +15,12 @@ struct VSOutput {
     float2 uv : TEXCOORD0;
 };
 
-static int bloomSize = 32;
+static int bloomSize = 8;
 
-float GaussianFactor(float x, float y, float sigma)
+float GaussianFactor(float x, float sigma)
 {
     sigma = sigma / 3.0;
-    return exp(-(x * x + y * y) / (2 * sigma * sigma));
+    return exp(-(x * x) / (2 * sigma * sigma));
 }
 
 [shader("vertex")]
@@ -49,7 +49,7 @@ float4 fragMain(VSOutput input) : SV_Target {
             float2 offset = float2(0, i) / (float)consts.view.fbDims.y;
             float2 uv = saturate(input.uv + offset);
             float3 sample = params.inputTexture.Sample(params.samplerState, uv).rgb;
-            color.rgb += sample * GaussianFactor(float(i), 0.0, 10.0);// / (float)bloomSize * 0.5;
+            color.rgb += sample * GaussianFactor(float(i), bloomSize);// / (float)bloomSize * 0.5;
         }
     }
     else
@@ -62,7 +62,8 @@ float4 fragMain(VSOutput input) : SV_Target {
             float3 sample = params.inputTexture.Sample(params.samplerState, uv).rgb;
             // If the color is high saturation, it will bloom.
             float saturation = max(sample.r, max(sample.g, sample.b)) - min(sample.r, min(sample.g, sample.b));
-            color.rgb += sample * saturation * GaussianFactor(float(i), 0.0, 10.0) / (float)bloomSize * 0.5;
+            float value = max(sample.r, max(sample.g, sample.b));
+            color.rgb += sample * saturation * value * GaussianFactor(float(i), bloomSize) / (float)bloomSize * 0.5;
         }
     }
 

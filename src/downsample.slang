@@ -37,7 +37,7 @@ float4 fragMain(VSOutput input) : SV_Target {
     {
         for( int y = 0; y < ratio.y; y++ )
         {
-            float2 offset = float2(x, y) / (float)consts.view.fbDims.xy / (float2)ratio;
+            float2 offset = float2(x, y) / (float2)consts.view.fbDims.xy / (float2)ratio;
             float2 uv = saturate(input.uv + offset);
             float3 sample = params.inputTexture.Sample(params.samplerState, uv).rgb;
             color.rgb += sample / (float)(ratio.x * ratio.y);
