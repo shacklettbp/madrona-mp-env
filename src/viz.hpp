@@ -24,9 +24,6 @@ struct VizConfig {
   uint32_t numViews;
   uint32_t teamSize;
 
-  const char *mapDataFilename;
-  Vector3 mapOffset;
-  float mapRotation;
   bool doAITeam1;
   bool doAITeam2;
 
@@ -41,6 +38,9 @@ struct VizCamera {};
 namespace VizSystem {
 
 VizState * init(const VizConfig &cfg);
+
+std::string bootMenu(VizState *viz);
+void loadMapAssets(VizState *viz, const char *map_assets_path);
 
 void shutdown(VizState *viz);
 

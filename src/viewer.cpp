@@ -184,18 +184,6 @@ int main(int argc, char *argv[])
       }
     }
 
-    if (scene_dir.empty()) {
-        usageErr();
-    }
-
-    std::string collision_data_file = scene_dir + "/collisions.bin";
-    std::string navmesh_file = scene_dir + "/navmesh.bin";
-    std::string spawn_data_file = scene_dir + "/spawns.bin";
-    std::string zone_data_file = scene_dir + "/zones.bin";
-
-    Vector3 map_offset = Vector3::zero();
-    float map_rotation = 0.f;
-
     VizState *viz = VizSystem::init(VizConfig {
       .windowWidth = 2730,
       .windowHeight = 1536,
@@ -206,15 +194,26 @@ int main(int argc, char *argv[])
       .numViews = (uint32_t)num_views,
       .teamSize = (uint32_t)team_size,
 
-      .mapDataFilename = collision_data_file.c_str(),
-      .mapOffset = map_offset,
-      .mapRotation = map_rotation,
       .doAITeam1 = doAITeam1,
       .doAITeam2 = doAITeam2,
       .skipMainMenu = skip_main_menu,
       .analyticsDBPath = analytics_db_path,
       .trajectoriesDBPath = trajectories_db_path,
     });
+
+    if (scene_dir.empty()) {
+      scene_dir = VizSystem::bootMenu(viz);
+      if (scene_dir.empty()) {
+        return 1;
+      }
+    }
+
+    std::string collision_data_file = scene_dir + "/collisions.bin";
+    std::string navmesh_file = scene_dir + "/navmesh.bin";
+    std::string spawn_data_file = scene_dir + "/spawns.bin";
+    std::string zone_data_file = scene_dir + "/zones.bin";
+
+    VizSystem::loadMapAssets(viz, collision_data_file.c_str());
 
     const bool highlevel_move = false;
 
@@ -241,8 +240,8 @@ int main(int argc, char *argv[])
           .navmeshFile = navmesh_file.c_str(),
           .spawnDataFile = spawn_data_file.c_str(),
           .zoneDataFile = zone_data_file.c_str(),
-          .mapOffset = map_offset,
-          .mapRotation = map_rotation,
+          .mapOffset = Vector3::zero(),
+          .mapRotation = 0.f,
         },
         .highlevelMove = highlevel_move,
         .replayLogPath = replay_log_path,
