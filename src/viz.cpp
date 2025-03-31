@@ -411,6 +411,7 @@ struct VizState {
 
   RasterPassInterface offscreenPassInterface;
   RasterPass offscreenPass;
+  RasterPass mainmenuPass;
 
   PostEffectPass ssaoPass;
   PostEffectPass ssaoDownsamplePass;
@@ -488,6 +489,9 @@ struct VizState {
   std::vector<Object> objects = {};
   std::vector<AssetGroup> objectAssetGroups = {};
 
+  bool mainMenu = true;
+  bool debugMenus = false;
+
   AnalyticsDB db = {};
 };
 
@@ -507,8 +511,7 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   name = std::string("0") + shaderName;
   static int index = 0;
   name[0] = '0' + index++;
-  static UUID broken = { 0,0 };
-  broken[0]++;
+  static UUID broken = { 123,0 };
   broken[1]++;
 
   std::vector<gas::ColorAttachmentConfig> colorConfigList;
@@ -2379,6 +2382,12 @@ VizState * init(const VizConfig &cfg)
       .colorAttachments = { viz->sceneColor },
     });
 
+  viz->mainmenuPass = gpu->createRasterPass({
+    .interface = viz->offscreenPassInterface,
+    .depthAttachment = viz->sceneDepth,
+    .colorAttachments = { viz->swapchain.proxyAttachment() },
+  });
+
   ImGuiSystem::init(viz->ui, gpu, viz->mainQueue, viz->shaderc,
       viz->offscreenPassInterface,
       DATA_DIR "imgui_font.ttf", 12.f);
@@ -2393,7 +2402,7 @@ VizState * init(const VizConfig &cfg)
   viz->doAI[0] = cfg.doAITeam1;
   viz->doAI[1] = cfg.doAITeam2;
 
-  viz->simTickRate = 20;
+  viz->simTickRate = 0;
 
   viz->globalParamBlockType = gpu->createParamBlockType({
     .uuid = "global_pb"_to_uuid,
@@ -2634,7 +2643,9 @@ void shutdown(VizState *viz)
   gpu->destroyBuffer(viz->postEffectDataBuffer);
   gpu->destroyParamBlockType(viz->postEffectParamBlockType);
 
+  gpu->destroyRasterPass(viz->mainmenuPass);
   gpu->destroyRasterPass(viz->offscreenPass);
+
   gpu->destroyRasterPassInterface(viz->offscreenPassInterface);
 
   viz->ssaoPass.Destroy();
@@ -3400,7 +3411,9 @@ static void cfgUI(VizState *viz, Manager &mgr)
   ImGui::TextUnformatted("Player Info Settings");
   ImGui::Separator();
 
-  ImGui::Checkbox("Show Unmasked Minimaps", &viz->showUnmaskedMinimaps);
+  //ImGui::Checkbox("Show Unmasked Minimaps", &viz->showUnmaskedMinimaps);
+
+  ImGui::Checkbox("Show Debug menus", &viz->debugMenus);
 
   ImGui::End();
 }
@@ -3647,6 +3660,7 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
         });
     }
 
+    viz->mainMenu = true;
     viz->curControl = 0;
     viz->curView = 0;
   }
@@ -3660,7 +3674,9 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   Engine &ctx = mgr.getWorldContext(viz->curWorld);
 
   if (viz->curView == 0) {
-    agentInfoUI(ctx, viz);
+    if (viz->debugMenus) {
+      agentInfoUI(ctx, viz);
+    }
 
 #ifdef DB_SUPPORT
     analyticsDBUI(ctx, viz);
@@ -4196,6 +4212,53 @@ static void renderAnalyticsViz(Engine &ctx, VizState *viz,
 }
 #endif
 
+inline void mainMenuSystem(VizState *viz)
+{
+  ImGuiSystem::newFrame(viz->ui, viz->window->systemUIScale, 1.f / 60.f);
+
+  auto viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(
+    ImVec2(viewport->WorkSize.x / 2, viewport->WorkSize.y / 2),
+    0, ImVec2(1.f, 0.f));
+  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f);
+  ImGui::Begin("Main Menu", nullptr,
+               ImGuiWindowFlags_NoMove |
+               ImGuiWindowFlags_NoTitleBar |
+               ImGuiWindowFlags_AlwaysAutoResize);
+  ImGui::SetWindowFontScale(3.0f);
+
+  if (ImGui::Button("Play")) {
+    viz->mainMenu = false;
+    viz->simTickRate = 20;
+    viz->curWorld = 0;
+    viz->curView = 1;
+    viz->curControl = 1;
+  }
+
+  if (ImGui::Button("Top Down View")) {
+    viz->mainMenu = false;
+    viz->simTickRate = 20;
+    viz->curWorld = 0;
+    viz->curView = 0;
+    viz->curControl = 0;
+  }
+
+  ImGui::PopStyleVar();
+  ImGui::End();
+
+  GPURuntime *gpu = viz->gpu;
+  viz->enc.beginEncoding();
+
+  RasterPassEncoder pass = viz->enc.beginRasterPass(viz->mainmenuPass);
+
+  ImGuiSystem::render(pass);
+
+  viz->enc.endRasterPass(pass);
+
+  viz->enc.endEncoding();
+  gpu->submit(viz->mainQueue, viz->enc);
+}
+
 inline void renderSystem(Engine &ctx, VizState *viz)
 {
   GPURuntime *gpu = viz->gpu;
@@ -4345,9 +4408,12 @@ void setupGameTasks(VizState *, TaskGraphBuilder &)
 
 void vizStep(VizState *viz, Manager &mgr)
 {
-  Engine &ctx = uiLogic(viz, mgr);
-
-  renderSystem(ctx, viz);
+  if (viz->mainMenu) {
+    mainMenuSystem(viz);
+  } else {
+    Engine &ctx = uiLogic(viz, mgr);
+    renderSystem(ctx, viz);
+  }
 }
 
 }
