@@ -245,6 +245,7 @@ cfg = TrainConfig(
     num_worlds = args.num_worlds,
     num_agents_per_world = num_agents_per_world,
     num_updates = args.num_updates,
+    lr_update_cycle_length = args.eval_frequency,
     actions = actions_config,
     steps_per_update = args.steps_per_update,
     num_bptt_chunks = args.num_bptt_chunks,

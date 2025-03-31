@@ -30,6 +30,8 @@ struct VizConfig {
   bool doAITeam1;
   bool doAITeam2;
 
+  bool skipMainMenu;
+
   const char *analyticsDBPath;
   const char *trajectoriesDBPath;
 };

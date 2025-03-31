@@ -56,6 +56,7 @@ int main(int argc, char *argv[])
     std::string scene_dir;
     bool doAITeam1 = false;
     bool doAITeam2 = false;
+    bool skip_main_menu = false;
 
     char *analytics_db_path = nullptr;
     char *trajectories_db_path = nullptr;
@@ -107,6 +108,7 @@ int main(int argc, char *argv[])
           }
 
           replay_log_path = argv[i];
+          skip_main_menu = true;
         } else if (!strcmp("scene", arg)) {
           if (!scene_dir.empty()) {
             usageErr();
@@ -209,6 +211,7 @@ int main(int argc, char *argv[])
       .mapRotation = map_rotation,
       .doAITeam1 = doAITeam1,
       .doAITeam2 = doAITeam2,
+      .skipMainMenu = skip_main_menu,
       .analyticsDBPath = analytics_db_path,
       .trajectoriesDBPath = trajectories_db_path,
     });

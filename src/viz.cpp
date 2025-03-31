@@ -2600,6 +2600,11 @@ VizState * init(const VizConfig &cfg)
   }
 #endif
 
+  if (cfg.skipMainMenu) {
+    viz->mainMenu = false;
+    viz->simTickRate = 20;
+  }
+
   return viz;
 }
 
@@ -3661,6 +3666,7 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
     }
 
     viz->mainMenu = true;
+    viz->simTickRate = 0;
     viz->curControl = 0;
     viz->curView = 0;
   }
@@ -4219,15 +4225,21 @@ inline void mainMenuSystem(VizState *viz)
   auto viewport = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(
     ImVec2(viewport->WorkSize.x / 2, viewport->WorkSize.y / 2),
-    0, ImVec2(1.f, 0.f));
+    ImGuiCond_Always, ImVec2(0.5f, 0.5f));
   ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(400, 300));
   ImGui::Begin("Main Menu", nullptr,
                ImGuiWindowFlags_NoMove |
                ImGuiWindowFlags_NoTitleBar |
                ImGuiWindowFlags_AlwaysAutoResize);
   ImGui::SetWindowFontScale(3.0f);
 
-  if (ImGui::Button("Play")) {
+  float window_width = ImGui::GetWindowSize().x;
+  float button_width = 400.0f; // Adjust width as needed
+  float x_pos = (window_width - button_width) * 0.5f;
+  
+  ImGui::SetCursorPosX(x_pos);
+  if (ImGui::Button("Play", ImVec2(button_width, 50))) {
     viz->mainMenu = false;
     viz->simTickRate = 20;
     viz->curWorld = 0;
@@ -4235,7 +4247,8 @@ inline void mainMenuSystem(VizState *viz)
     viz->curControl = 1;
   }
 
-  if (ImGui::Button("Top Down View")) {
+  ImGui::SetCursorPosX(x_pos);
+  if (ImGui::Button("Top Down View", ImVec2(button_width, 50))) {
     viz->mainMenu = false;
     viz->simTickRate = 20;
     viz->curWorld = 0;
@@ -4243,6 +4256,7 @@ inline void mainMenuSystem(VizState *viz)
     viz->curControl = 0;
   }
 
+  ImGui::PopStyleVar();
   ImGui::PopStyleVar();
   ImGui::End();
 
