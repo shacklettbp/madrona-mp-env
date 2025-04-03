@@ -49,7 +49,7 @@ VSOutput vertMain(uint id : SV_VertexID)
 
 float2 LensDistortion(float2 uv)
 {
-    float distortionAmount = 0.05;
+    float distortionAmount = 0.07;
     uv = uv * 2.0 - 1.0;
     float2 centeredUV = uv;
     float distanceFromCenter = length(uv);
@@ -72,7 +72,7 @@ float Vignette(float2 uv)
 {
     float distanceFromCenter = length(uv - 0.5);
     float vignetteAmount = 0.8;
-    float brighten = 0.3;
+    float brighten = 0.2;
     return saturate(1.0 - distanceFromCenter * vignetteAmount  + brighten);
 }
 
@@ -134,8 +134,8 @@ float3 Bloom(float3 color, float2 uv)
 {
     // Bloom
     float bloomAmount = 1.0;
-    float3 bloomColor = params.bloomTexture0.Sample(params.bloomSamplerState0, uv).rgb * 0.3;
-    bloomColor += params.bloomTexture1.Sample(params.bloomSamplerState1, uv).rgb * 0.5;
+    float3 bloomColor = params.bloomTexture0.Sample(params.bloomSamplerState0, uv).rgb * 0.5;
+    bloomColor += params.bloomTexture1.Sample(params.bloomSamplerState1, uv).rgb * 0.7;
     bloomColor += params.bloomTexture2.Sample(params.bloomSamplerState2, uv).rgb * 1.0;
     color.rgb = color.rgb * 0.8 + bloomColor * bloomAmount;
     // Overdrive to white.
@@ -145,18 +145,85 @@ float3 Bloom(float3 color, float2 uv)
     return color;
 }
 
+float3 ClipToWorld(float3 pos, float3x4 c2w, inout float3 camPos)
+{
+    float3 worldPos = float3(c2w[0].w, c2w[1].w, c2w[2].w);
+    camPos = worldPos;
+    worldPos += c2w[0].xyz * pos.x * pos.z;
+    worldPos += c2w[1].xyz * pos.y * pos.z;
+    worldPos += c2w[2].xyz * pos.z;
+
+    return worldPos;
+}
+
+float HeightFog(float2 uv)
+{
+    // We need to reconstruct actual world position from sampled depth.
+    float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
+    if( depth == 0 )
+        return 1;
+    depth = LinearDepth(depth);
+    float3 camPos;
+    float3 worldPos = ClipToWorld(float3(uv * 2 - 1, depth), consts.c2w, camPos);
+
+    //return saturate((worldPos.z+200) / 1000);
+
+    // Use the world position to get the fog amount.
+    float d = 400.0; // Half Distance.
+    float h = 100.0; // Half Height.
+
+    // Ensure both points are at or below to fog plane.
+    if( camPos.z > 0 && worldPos.z > 0 )
+        return 0;
+
+    // Move each point to the fog plane.
+    float3 dir = worldPos - camPos;
+    if( camPos.z > 0 )
+    {
+        float t = camPos.z / -dir.z;
+        depth = (1 - t) * depth;
+        camPos += dir * t;
+    }
+    if( worldPos.z > 0 )
+    {
+        float t = worldPos.z / dir.z;
+        depth = (1 - t) * depth;
+        worldPos -= dir * t;
+    }
+
+    // Linear Height Fog
+    /*float d1 = saturate((-camPos.z) / h / d );
+    float d2 = saturate((-worldPos.z) / h / d );
+    float integrated = depth * (d1 + d2) * 0.5;*/
+
+    // Exponential Height Fog
+    float d1 = (1.0 - exp( camPos.z / h * d)) / d;
+    float i1 = ( h / d * exp(camPos.z * d / h) - camPos.z) / d;
+    float i2 = ( h / d * exp(worldPos.z * d / h) - worldPos.z ) / d;
+    float integrated = depth * d1;
+    if( camPos.z != worldPos.z )
+    {
+        integrated = depth * (i1 - i2) / (worldPos.z - camPos.z);
+    }
+    float fogAmount = 1 - exp(-integrated);
+
+    return saturate(fogAmount);
+}
+
 [shader("fragment")]
 float4 fragMain(VSOutput input) : SV_Target {
     input.uv.y = 1 - input.uv.y;
 
-    //input.uv = LensDistortion(input.uv);
+    input.uv = LensDistortion(input.uv);
 
     // Main Sample
     float4 color = params.inputTexture.Sample(params.samplerState, input.uv);
 
+    color.rgb = ChromaticAberration(input.uv, color.g);
+
     color.rgb *= SSAO(input.uv);
 
-    //color.rgb = ChromaticAberration(input.uv, color.g);
+    color.rgb = lerp(color.rgb, float3(0.7, 0.8, 1.0), HeightFog(input.uv));
 
     //float3 blurColor;
     //color.rgb = DepthOfField(color.rgb, input.uv, blurColor);

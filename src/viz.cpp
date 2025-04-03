@@ -491,6 +491,18 @@ struct VizState {
   AnalyticsDB db = {};
 };
 
+static void setupInverseViewMatrix(const Camera& cam, VizState* viz, PostEffectData* out)
+{
+  float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
+
+  float fov = cam.fine_aim ? cam.fov * 0.5f : cam.fov;
+  float fov_scale = 1.f / tanf(math::toRadians(fov * 0.5f));
+
+  out->c2w.rows[0] = Vector4::fromVec3W(cam.right / fov_scale * aspect_ratio, cam.position.x);
+  out->c2w.rows[1] = Vector4::fromVec3W(-cam.up / fov_scale, cam.position.y);
+  out->c2w.rows[2] = Vector4::fromVec3W(cam.fwd, cam.position.z);
+}
+
 PostEffectPass::PostEffectPass()
 {
   initialized = false;
@@ -602,6 +614,8 @@ void PostEffectPass::SetParams(const Vector4 &shaderParams)
 
   viz->postEffectData.view.fbDims = { resX, resY };
   viz->postEffectData.params = shaderParams;
+  // Calculate the inverse of the camera matrix.
+  setupInverseViewMatrix(viz->flyCam, viz, &viz->postEffectData);
   memcpy(param_staging_ptr, &viz->postEffectData, sizeof(PostEffectData));
 
   copy_enc.copyBufferToBuffer(
@@ -4284,11 +4298,6 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f));
   viz->ssaoPass.Execute( false );
 
-  /*viz->ssaoDownsamplePass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "downsample.slang", 0.25f, 0.25f, 1, false);
-  viz->ssaoDownsamplePass.AddTextureInput(viz->ssaoPass.Output(0));
-  viz->ssaoDownsamplePass.SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f));
-  viz->ssaoDownsamplePass.Execute(false);*/
-
   // Do a multi-pass bloom.
   for (int pass = 0; pass < DownsamplePasses; pass++)
   {
@@ -4298,7 +4307,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     float downsample_factor = 0.25f / (pass + 1);
     viz->downsamplePasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "downsample.slang", downsample_factor, downsample_factor, 1, false);
     viz->downsamplePasses[pass].AddTextureInput( pass == 0 ? viz->sceneColor : viz->downsamplePasses[pass-1].Output(0));
-    viz->downsamplePasses[pass].SetParams(Vector4(4.0f * (pass + 1), 4.0f * (pass + 1), 0.0f, 0.0f)); // X and Y are downsample factors.
+    viz->downsamplePasses[pass].SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f)); // X and Y are downsample factors.
     viz->downsamplePasses[pass].Execute(false);
 
     // ---  BLOOM HORIZONTAL  ---

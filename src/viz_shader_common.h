@@ -24,6 +24,7 @@ struct GlobalPassData {
 
 struct PostEffectData {
   ViewData view;
+  float3x4 c2w;
   float4 params;
 };
 
