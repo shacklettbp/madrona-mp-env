@@ -411,6 +411,7 @@ struct VizState {
 
   RasterPassInterface offscreenPassInterface;
   RasterPass offscreenPass;
+  RasterPass mainmenuPass;
 
   PostEffectPass ssaoPass;
   PostEffectPass ssaoDownsamplePass;
@@ -450,6 +451,8 @@ struct VizState {
   i32 simTickRate;
   bool doAI[2];
 
+  float mouseSensitivity = 30.f;
+
   /*Camera flyCam = {
     .position = {202.869324, 211.050766, 716.584534},
     .fwd = {0.592786, 0.093471, -0.799917},
@@ -488,6 +491,10 @@ struct VizState {
   std::vector<Object> objects = {};
   std::vector<AssetGroup> objectAssetGroups = {};
 
+  bool mainMenu = true;
+  bool gameRunning = false;
+  bool debugMenus = false;
+
   AnalyticsDB db = {};
 };
 
@@ -519,8 +526,7 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   name = std::string("0") + shaderName;
   static int index = 0;
   name[0] = '0' + index++;
-  static UUID broken = { 0,0 };
-  broken[0]++;
+  static UUID broken = { 123,0 };
   broken[1]++;
 
   std::vector<gas::ColorAttachmentConfig> colorConfigList;
@@ -859,7 +865,7 @@ static void loadObjects(VizState *viz,
   });
 }
 
-static void loadAssets(VizState *viz, const VizConfig &cfg)
+static void loadAssets(VizState *viz)
 {
   auto capsule_path =
       (std::filesystem::path(DATA_DIR) / "capsule.obj").string();
@@ -954,69 +960,54 @@ static void loadAssets(VizState *viz, const VizConfig &cfg)
       { rgb8ToFloat(100, 230, 100),   -1, 0.8f, 1.0f },
   });
   
-  AABB world_bounds;
-  auto collision_data = importCollisionData(
-      cfg.mapDataFilename, cfg.mapOffset, cfg.mapRotation,
-      &world_bounds);
+  HeapArray<imp::SourceObject> common_objects(consts::numNonMapAssets);
+  common_objects[0] = capsule_asset->objects[0];
+  common_objects[1] = other_capsule_asset->objects[0];
   
-  MapRenderableCollisionData map_render_data =
-      convertCollisionDataToRenderMeshes(collision_data);
-  
-  HeapArray<imp::SourceObject> combined_objects(
-      consts::numNonMapAssets + map_render_data.objects.size());
-  combined_objects[0] = capsule_asset->objects[0];
-  combined_objects[1] = other_capsule_asset->objects[0];
-  
-  combined_objects[2] = shot_cylinder_asset_a_hit->objects[0];
-  combined_objects[3] = shot_cylinder_asset_a_miss->objects[0];
-  combined_objects[4] = shot_cylinder_asset_b_hit->objects[0];
-  combined_objects[5] = shot_cylinder_asset_b_miss->objects[0];
-  combined_objects[6] = zone_marker_asset_inactive->objects[0];
-  combined_objects[7] = zone_marker_asset_contested->objects[0];
-  combined_objects[8] = zone_marker_asset_team_a->objects[0];
-  combined_objects[9] = zone_marker_asset_team_b->objects[0];
-  combined_objects[10] = spawn_marker_asset_respawn->objects[0];
-  combined_objects[11] = spawn_marker_asset_team_a->objects[0];
-  combined_objects[12] = spawn_marker_asset_team_b->objects[0];
-  combined_objects[13] = respawn_region_marker_asset->objects[0];
-  
-  for (CountT i = 0; i < map_render_data.objects.size(); i++) {
-      combined_objects[i + consts::numNonMapAssets] = map_render_data.objects[i];
-  }
+  common_objects[2] = shot_cylinder_asset_a_hit->objects[0];
+  common_objects[3] = shot_cylinder_asset_a_miss->objects[0];
+  common_objects[4] = shot_cylinder_asset_b_hit->objects[0];
+  common_objects[5] = shot_cylinder_asset_b_miss->objects[0];
+  common_objects[6] = zone_marker_asset_inactive->objects[0];
+  common_objects[7] = zone_marker_asset_contested->objects[0];
+  common_objects[8] = zone_marker_asset_team_a->objects[0];
+  common_objects[9] = zone_marker_asset_team_b->objects[0];
+  common_objects[10] = spawn_marker_asset_respawn->objects[0];
+  common_objects[11] = spawn_marker_asset_team_a->objects[0];
+  common_objects[12] = spawn_marker_asset_team_b->objects[0];
+  common_objects[13] = respawn_region_marker_asset->objects[0];
   
   // Capsules
-  combined_objects[0].meshes[0].materialIDX = 1;
-  combined_objects[1].meshes[0].materialIDX = 2;
+  common_objects[0].meshes[0].materialIDX = 1;
+  common_objects[1].meshes[0].materialIDX = 2;
   
   // ShotViz?
-  combined_objects[2].meshes[0].materialIDX = 3;
-  combined_objects[3].meshes[0].materialIDX = 4;
-  combined_objects[4].meshes[0].materialIDX = 5;
-  combined_objects[5].meshes[0].materialIDX = 6;
+  common_objects[2].meshes[0].materialIDX = 3;
+  common_objects[3].meshes[0].materialIDX = 4;
+  common_objects[4].meshes[0].materialIDX = 5;
+  common_objects[5].meshes[0].materialIDX = 6;
   
   // Zone assets
-  combined_objects[6].meshes[0].materialIDX = 7;
-  combined_objects[7].meshes[0].materialIDX = 8;
-  combined_objects[8].meshes[0].materialIDX = 1;
-  combined_objects[9].meshes[0].materialIDX = 2;
+  common_objects[6].meshes[0].materialIDX = 7;
+  common_objects[7].meshes[0].materialIDX = 8;
+  common_objects[8].meshes[0].materialIDX = 1;
+  common_objects[9].meshes[0].materialIDX = 2;
   
   // Spawn Marker
-  combined_objects[10].meshes[0].materialIDX = 8;
-  combined_objects[11].meshes[0].materialIDX = 1;
-  combined_objects[12].meshes[0].materialIDX = 2;
+  common_objects[10].meshes[0].materialIDX = 8;
+  common_objects[11].meshes[0].materialIDX = 1;
+  common_objects[12].meshes[0].materialIDX = 2;
   
   // Respawn Region Marker
-  combined_objects[13].meshes[0].materialIDX = 2;
+  common_objects[13].meshes[0].materialIDX = 2;
   
   imp::ImageImporter &tex_importer = importer.imageImporter();
   
   StackAlloc tmp_alloc;
   Span<imp::SourceTexture> imported_textures =
-      tex_importer.importImages(tmp_alloc,
-  {
-  });
+      tex_importer.importImages(tmp_alloc, {});
   
-  loadObjects(viz, combined_objects, materials, imported_textures);
+  loadObjects(viz, common_objects, materials, imported_textures);
 }
 
 namespace VizSystem {
@@ -2393,6 +2384,12 @@ VizState * init(const VizConfig &cfg)
       .colorAttachments = { viz->sceneColor },
     });
 
+  viz->mainmenuPass = gpu->createRasterPass({
+    .interface = viz->offscreenPassInterface,
+    .depthAttachment = viz->sceneDepth,
+    .colorAttachments = { viz->swapchain.proxyAttachment() },
+  });
+
   ImGuiSystem::init(viz->ui, gpu, viz->mainQueue, viz->shaderc,
       viz->offscreenPassInterface,
       DATA_DIR "imgui_font.ttf", 12.f);
@@ -2407,7 +2404,7 @@ VizState * init(const VizConfig &cfg)
   viz->doAI[0] = cfg.doAITeam1;
   viz->doAI[1] = cfg.doAITeam2;
 
-  viz->simTickRate = 20;
+  viz->simTickRate = 0;
 
   viz->globalParamBlockType = gpu->createParamBlockType({
     .uuid = "global_pb"_to_uuid,
@@ -2597,13 +2594,19 @@ VizState * init(const VizConfig &cfg)
     });
 
 
-  loadAssets(viz, cfg);
+  loadAssets(viz);
 
 #ifdef DB_SUPPORT
   if (cfg.analyticsDBPath != nullptr) {
     loadAnalyticsDB(viz, cfg);
   }
 #endif
+
+  if (cfg.skipMainMenu) {
+    viz->mainMenu = false;
+    viz->gameRunning = true;
+    viz->simTickRate = 20;
+  }
 
   return viz;
 }
@@ -2648,7 +2651,9 @@ void shutdown(VizState *viz)
   gpu->destroyBuffer(viz->postEffectDataBuffer);
   gpu->destroyParamBlockType(viz->postEffectParamBlockType);
 
+  gpu->destroyRasterPass(viz->mainmenuPass);
   gpu->destroyRasterPass(viz->offscreenPass);
+
   gpu->destroyRasterPassInterface(viz->offscreenPassInterface);
 
   viz->ssaoPass.Destroy();
@@ -3105,9 +3110,6 @@ void loop(VizState *viz, Manager &mgr)
       last_sim_tick_time = cur_frame_start_time;
     }
 
-    //frame_duration = throttleFPS(cur_frame_start_time);
-    //
-
     if (viz->curControl == 0) {
       handleCamera(viz, frontend_delta_t);
     } else {
@@ -3121,12 +3123,11 @@ void loop(VizState *viz, Manager &mgr)
 
       Entity agent = ctx.data().agents[viz->curControl - 1];
 
-      const float mouse_aim_sensitivity = 30.f;
       const float mouse_max_move = 1000.f;
       const float mouse_accelleration = 0.8f;
       const float fine_aim_multiplier = 0.3f;
 
-      Vector2 mouse_delta = mouse_move * mouse_aim_sensitivity * frontend_delta_t;
+      Vector2 mouse_delta = mouse_move * viz->mouseSensitivity * frontend_delta_t;
       // If we're holding right-mouse, do fine aim.
       viz->flyCam.fine_aim = false;
       if (input.isDown(InputID::MouseRight)) {
@@ -3414,7 +3415,9 @@ static void cfgUI(VizState *viz, Manager &mgr)
   ImGui::TextUnformatted("Player Info Settings");
   ImGui::Separator();
 
-  ImGui::Checkbox("Show Unmasked Minimaps", &viz->showUnmaskedMinimaps);
+  //ImGui::Checkbox("Show Unmasked Minimaps", &viz->showUnmaskedMinimaps);
+
+  ImGui::Checkbox("Show Debug menus", &viz->debugMenus);
 
   ImGui::End();
 }
@@ -3661,6 +3664,8 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
         });
     }
 
+    viz->mainMenu = true;
+    viz->simTickRate = 0;
     viz->curControl = 0;
     viz->curView = 0;
   }
@@ -3674,7 +3679,9 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   Engine &ctx = mgr.getWorldContext(viz->curWorld);
 
   if (viz->curView == 0) {
-    agentInfoUI(ctx, viz);
+    if (viz->debugMenus) {
+      agentInfoUI(ctx, viz);
+    }
 
 #ifdef DB_SUPPORT
     analyticsDBUI(ctx, viz);
@@ -4210,6 +4217,85 @@ static void renderAnalyticsViz(Engine &ctx, VizState *viz,
 }
 #endif
 
+inline void mainMenuSystem(VizState *viz, std::string *out_path)
+{
+  ImGuiSystem::newFrame(viz->ui, viz->window->systemUIScale, 1.f / 60.f);
+
+  auto viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(
+    ImVec2(viewport->WorkSize.x / 2, viewport->WorkSize.y / 2),
+    ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(100, 150));
+  ImGui::Begin("Main Menu", nullptr,
+               ImGuiWindowFlags_NoMove |
+               ImGuiWindowFlags_NoTitleBar |
+               ImGuiWindowFlags_AlwaysAutoResize);
+  ImGui::SetWindowFontScale(3.0f);
+
+  float window_width = ImGui::GetWindowSize().x;
+  float button_width = 400.0f; // Adjust width as needed
+  float x_pos = (window_width - button_width) * 0.5f;
+
+  if (out_path) {
+    static std::array<char, 16384> path_str { "data/simple_map" };
+    ImGui::SetCursorPosX(x_pos);
+    ImGui::PushItemWidth(button_width);
+    ImGui::InputText("Map Path", path_str.data(), path_str.size());
+    ImGui::PopItemWidth();
+    *out_path = path_str.data();
+
+    ImGui::NewLine();
+    ImGui::NewLine();
+  }
+  
+  ImGui::SetCursorPosX(x_pos);
+
+  ImGui::PushItemWidth(button_width);
+  ImGui::DragFloat("Mouse Sensitivity", &viz->mouseSensitivity, 10.f, 1000.f,
+                   ImGuiSliderFlags_AlwaysClamp);
+  ImGui::PopItemWidth();
+  ImGui::NewLine();
+  ImGui::SetCursorPosX(x_pos);
+
+  const char *play_button_name = viz->gameRunning ? "Resume" : "Play";
+
+  if (ImGui::Button(play_button_name, ImVec2(button_width, 50))) {
+    viz->mainMenu = false;
+    viz->gameRunning = true;
+    viz->simTickRate = 20;
+    viz->curWorld = 0;
+    viz->curView = 1;
+    viz->curControl = 1;
+  }
+
+  ImGui::SetCursorPosX(x_pos);
+  if (ImGui::Button("Top Down View", ImVec2(button_width, 50))) {
+    viz->mainMenu = false;
+    viz->gameRunning = true;
+    viz->simTickRate = 20;
+    viz->curWorld = 0;
+    viz->curView = 0;
+    viz->curControl = 0;
+  }
+
+  ImGui::PopStyleVar();
+  ImGui::PopStyleVar();
+  ImGui::End();
+
+  GPURuntime *gpu = viz->gpu;
+  viz->enc.beginEncoding();
+
+  RasterPassEncoder pass = viz->enc.beginRasterPass(viz->mainmenuPass);
+
+  ImGuiSystem::render(pass);
+
+  viz->enc.endRasterPass(pass);
+
+  viz->enc.endEncoding();
+  gpu->submit(viz->mainQueue, viz->enc);
+}
+
 inline void renderSystem(Engine &ctx, VizState *viz)
 {
   GPURuntime *gpu = viz->gpu;
@@ -4354,9 +4440,54 @@ void setupGameTasks(VizState *, TaskGraphBuilder &)
 
 void vizStep(VizState *viz, Manager &mgr)
 {
-  Engine &ctx = uiLogic(viz, mgr);
+  if (viz->mainMenu) {
+    mainMenuSystem(viz, nullptr);
+  } else {
+    Engine &ctx = uiLogic(viz, mgr);
+    renderSystem(ctx, viz);
+  }
+}
 
-  renderSystem(ctx, viz);
+std::string bootMenu(VizState *viz)
+{
+  std::string map_path = "";
+
+  GPURuntime *gpu = viz->gpu;
+
+  bool running = true;
+  while (running) {
+    gpu->waitUntilReady(viz->mainQueue);
+
+    auto [swapchain_tex, swapchain_status] =
+      gpu->acquireSwapchainImage(viz->swapchain);
+    assert(swapchain_status == SwapchainStatus::Valid);
+
+    bool should_exit = viz->ui->processEvents();
+
+    mainMenuSystem(viz, &map_path);
+    gpu->presentSwapchainImage(viz->swapchain);
+
+    if (should_exit || (viz->window->state & WindowState::ShouldClose) != 
+        WindowState::None) {
+      running = false;
+      map_path = "";
+    } else if (!viz->mainMenu) {
+      running = false;
+    }
+  }
+
+  return map_path;
+}
+
+void loadMapAssets(VizState *viz, const char *map_assets_path)
+{
+  AABB world_bounds;
+  auto collision_data = importCollisionData(
+      map_assets_path, Vector3::zero(), 0.f, &world_bounds);
+  
+  MapRenderableCollisionData map_render_data =
+      convertCollisionDataToRenderMeshes(collision_data);
+  loadObjects(viz, map_render_data.objects, {}, {});
 }
 
 }
