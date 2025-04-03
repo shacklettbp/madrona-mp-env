@@ -4487,7 +4487,9 @@ void loadMapAssets(VizState *viz, const char *map_assets_path)
   
   MapRenderableCollisionData map_render_data =
       convertCollisionDataToRenderMeshes(collision_data);
-  loadObjects(viz, map_render_data.objects, {}, {});
+  loadObjects(viz, map_render_data.objects, {
+    { rgb8ToFloat(230, 230, 230), -1, 0.8f, 1.0f },
+  }, {});
 }
 
 }
