@@ -374,7 +374,7 @@ public:
   void Prepare(struct VizState* _viz, const char *shaderName, float resXMult, float resYMult, int colorOutputs, bool outputDepth);
   void AddTextureInput(gas::Texture& texture);
   void AddDepthInput(gas::Texture& depth);
-  void SetParams(const Vector4 &shaderParams);
+  void SetParams(const Vector4 &shaderParams, const float3x4 &c2w);
   gas::RasterPassEncoder Execute(bool final);
   void Destroy();
   gas::Texture& Output(int i);
@@ -510,16 +510,16 @@ struct VizState {
   AnalyticsDB db = {};
 };
 
-static void setupInverseViewMatrix(const Camera& cam, VizState* viz, PostEffectData* out)
+static void setupInverseViewMatrix(const Camera& cam, VizState* viz, float3x4 * out_c2w)
 {
   float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
 
   float fov = cam.fine_aim ? cam.fov * 0.5f : cam.fov;
   float fov_scale = 1.f / tanf(math::toRadians(fov * 0.5f));
 
-  out->c2w.rows[0] = Vector4::fromVec3W(cam.right / fov_scale * aspect_ratio, cam.position.x);
-  out->c2w.rows[1] = Vector4::fromVec3W(-cam.up / fov_scale, cam.position.y);
-  out->c2w.rows[2] = Vector4::fromVec3W(cam.fwd, cam.position.z);
+  out_c2w->rows[0] = Vector4::fromVec3W(cam.right / fov_scale * aspect_ratio, cam.position.x);
+  out_c2w->rows[1] = Vector4::fromVec3W(-cam.up / fov_scale, cam.position.y);
+  out_c2w->rows[2] = Vector4::fromVec3W(cam.fwd, cam.position.z);
 }
 
 PostEffectPass::PostEffectPass()
@@ -621,7 +621,7 @@ void PostEffectPass::AddDepthInput(gas::Texture& texture)
   samplerBindings.push_back({ .type = SamplerBindingType::NonFiltering,.shaderUsage = ShaderStage::Fragment });
 }
 
-void PostEffectPass::SetParams(const Vector4 &shaderParams)
+void PostEffectPass::SetParams(const Vector4 &shaderParams, const float3x4 &c2w)
 {
   CopyPassEncoder copy_enc = viz->enc.beginCopyPass();
   MappedTmpBuffer param_staging =
@@ -632,8 +632,7 @@ void PostEffectPass::SetParams(const Vector4 &shaderParams)
 
   viz->postEffectData.view.fbDims = { resX, resY };
   viz->postEffectData.params = shaderParams;
-  // Calculate the inverse of the camera matrix.
-  setupInverseViewMatrix(viz->flyCam, viz, &viz->postEffectData);
+  viz->postEffectData.c2w = c2w;
   memcpy(param_staging_ptr, &viz->postEffectData, sizeof(PostEffectData));
 
   copy_enc.copyBufferToBuffer(
@@ -4409,6 +4408,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   viz->enc.beginEncoding();
 
+  float3x4 c2w;
   {
     CopyPassEncoder copy_enc = viz->enc.beginCopyPass();
     MappedTmpBuffer global_param_staging =
@@ -4450,6 +4450,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     }
 
     setupViewData(ctx, cam, viz, global_param_staging_ptr);
+    setupInverseViewMatrix(cam, viz, &c2w);
 
     memcpy(&viz->postEffectData.view, global_param_staging_ptr, sizeof(GlobalPassData));
 
@@ -4488,7 +4489,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   viz->ssaoPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", 1.0f, 1.0f, 1, false);
   viz->ssaoPass.AddDepthInput(viz->sceneDepth);
-  viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f));
+  viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f), c2w);
   viz->ssaoPass.Execute( false );
 
   // Do a multi-pass bloom.
@@ -4500,21 +4501,21 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     float downsample_factor = 0.25f / (pass + 1);
     viz->downsamplePasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "downsample.slang", downsample_factor, downsample_factor, 1, false);
     viz->downsamplePasses[pass].AddTextureInput( pass == 0 ? viz->sceneColor : viz->downsamplePasses[pass-1].Output(0));
-    viz->downsamplePasses[pass].SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f)); // X and Y are downsample factors.
+    viz->downsamplePasses[pass].SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f), c2w); // X and Y are downsample factors.
     viz->downsamplePasses[pass].Execute(false);
 
     // ---  BLOOM HORIZONTAL  ---
 
     viz->bloomHorizontalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
     viz->bloomHorizontalPasses[pass].AddTextureInput(viz->downsamplePasses[pass].Output(0));
-    viz->bloomHorizontalPasses[pass].SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // 0 in X is horizontal pass.
+    viz->bloomHorizontalPasses[pass].SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f), c2w); // 0 in X is horizontal pass.
     viz->bloomHorizontalPasses[pass].Execute(false);
 
     // ---  BLOOM VERTICAL  ---
 
     viz->bloomVerticalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
     viz->bloomVerticalPasses[pass].AddTextureInput(viz->bloomHorizontalPasses[pass].Output(0));
-    viz->bloomVerticalPasses[pass].SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f)); // 1 in X is vertical pass.
+    viz->bloomVerticalPasses[pass].SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f), c2w); // 1 in X is vertical pass.
     viz->bloomVerticalPasses[pass].Execute(false);
   }
 
@@ -4529,7 +4530,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->finalPass.AddTextureInput(viz->sceneColor);
   viz->finalPass.AddDepthInput(viz->sceneDepth);
   // The fog parameters are the input. Half-distance density, half-height, and height offset.
-  viz->finalPass.SetParams(Vector4(200.0f, 1000.0f, viz->flyCam.mapMin.z + 50.0f, 0.0f));
+  viz->finalPass.SetParams(Vector4(200.0f, 1000.0f, viz->flyCam.mapMin.z + 50.0f, 0.0f), c2w);
   RasterPassEncoder final = viz->finalPass.Execute( true );
 
   // ---  UI  ---
