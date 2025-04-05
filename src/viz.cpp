@@ -33,6 +33,8 @@
 #include <random>
 #include <stdlib.h>
 
+static constexpr float PI = 3.14159265358979323846f;
+
 namespace NavUtils
 {
 	using madrona::math::Vector3;
@@ -242,10 +244,19 @@ struct Camera {
   Vector3 up;
   Vector3 right;
 
-  bool perspective = true;
-  bool fine_aim = false;
+  Vector3 mapMin;
+  Vector3 mapMax;
+  Vector3 target;
+
   float fov = 60.f;
   float orthoHeight = 5.f;
+
+  float heading = 0.0f;
+  float azimuth = 45.0f;
+  float zoom = 1.0f;
+  bool perspective = true;
+  bool fine_aim = false;
+  bool orbit = true;
 };
 
 enum class AnalyticsThreadCtrl : u32 {
@@ -289,11 +300,12 @@ static Camera initCam(Vector3 pos, Vector3 fwd, Vector3 up)
   Vector3 right = normalize(cross(fwd, up));
   up = normalize(cross(right, fwd));
 
-  return Camera {
+  return Camera{
     .position = pos,
     .fwd = fwd,
     .up = up,
     .right = right,
+    .target = Vector3(0.0f, 0.0f, 0.0f),
   };
 }
 
@@ -1013,6 +1025,35 @@ static void loadAssets(VizState *viz)
 namespace VizSystem {
 
 static void vizStep(VizState *viz, Manager &mgr);
+
+static void initMapCamera(VizState* viz, Manager& mgr)
+{
+  // Loop through all of the navmesh points and find the total bounding box.
+  Engine &ctx = mgr.getWorldContext(viz->curWorld);
+  const Navmesh& navmesh = ctx.singleton<LevelData>().navmesh;
+  float unreasonablyLargeNum = 1e6f;
+  viz->flyCam.mapMin = {
+    unreasonablyLargeNum,
+    unreasonablyLargeNum,
+    unreasonablyLargeNum,
+  };
+  viz->flyCam.mapMax = {
+    -unreasonablyLargeNum,
+    -unreasonablyLargeNum,
+    -unreasonablyLargeNum,
+  };
+  for (unsigned int i = 0; i < navmesh.numVerts; i++)
+  {
+    const Vector3& vert = navmesh.vertices[i];
+    viz->flyCam.mapMin.x = std::min(viz->flyCam.mapMin.x, vert.x);
+    viz->flyCam.mapMin.y = std::min(viz->flyCam.mapMin.y, vert.y);
+    viz->flyCam.mapMin.z = std::min(viz->flyCam.mapMin.z, vert.z);
+    viz->flyCam.mapMax.x = std::max(viz->flyCam.mapMax.x, vert.x);
+    viz->flyCam.mapMax.y = std::max(viz->flyCam.mapMax.y, vert.y);
+    viz->flyCam.mapMax.z = std::max(viz->flyCam.mapMax.z, vert.z);
+  }
+  viz->flyCam.target = (viz->flyCam.mapMax + viz->flyCam.mapMin) * 0.5f;
+}
 
 static constexpr inline f32 MOUSE_SPEED = 2.0f;// 1e-1f;
 // FIXME
@@ -2686,65 +2727,129 @@ static void handleCamera(VizState *viz, float delta_t)
 {
   Camera &cam = viz->flyCam;
 
+  // Toggle this to switch the free camera between oribit and fly.
+  cam.orbit = true;
+
   Vector3 translate = Vector3::zero();
 
   const UserInput &input = viz->ui->inputState();
 
-  if (input.isDown(InputID::MouseRight) ||
+  if (cam.orbit) {
+    // Rotate around the focus point.
+    cam.fine_aim = false;
+    if (input.isDown(InputID::MouseRight) ||
       input.isDown(InputID::Shift)) {
-    viz->ui->enableRawMouseInput(viz->window);
+      viz->ui->enableRawMouseInput(viz->window);
+
+      Vector2 mouse_delta = input.mouseDelta();
+
+      cam.azimuth -= mouse_delta.y * MOUSE_SPEED * delta_t;
+      cam.heading += mouse_delta.x * MOUSE_SPEED * delta_t;
+      cam.azimuth = fmin(fmax(cam.azimuth, -PI * 0.49f), PI * 0.49f);
+      while (cam.heading > PI)
+        cam.heading -= PI * 2.0f;
+      while (cam.heading < -PI) 
+        cam.heading += PI * 2.0f;
+    }
+    else if (input.isDown(InputID::MouseMiddle) ||
+      input.isDown(InputID::MouseLeft)) {
+      viz->ui->enableRawMouseInput(viz->window);
+      Vector2 mouse_delta = input.mouseDelta();
+      float zoomChange = mouse_delta.y * MOUSE_SPEED * delta_t;
+      if (zoomChange < 0.0f)
+        cam.zoom /= 1.0f - zoomChange;
+      if (zoomChange > 0.0f)
+        cam.zoom *= 1.0f + zoomChange;
+    }
+    else {
+      viz->ui->disableRawMouseInput(viz->window);
+    }
+
+    // Move the focus point.
+    if (input.isDown(InputID::W)) {
+      translate += normalize(cross(Vector3(0.0f, 0.0f, 1.0f), cam.right));
+    }
+    if (input.isDown(InputID::A)) {
+      translate -= cam.right;
+    }
+    if (input.isDown(InputID::S)) {
+      translate -= normalize(cross(Vector3(0.0f, 0.0f, 1.0f), cam.right));
+    }
+    if (input.isDown(InputID::D)) {
+      translate += cam.right;
+    }
+
+    // Convert from heading / azimuth to transform.
+    cam.fwd = Vector3(cos(cam.heading) * cos(cam.azimuth), sin(cam.heading) * cos(cam.azimuth), -sin(cam.azimuth));
+    cam.up = Vector3(0.0f, 0.0f, 1.0f);
+    cam.right = normalize(cross(cam.fwd, cam.up));
+    cam.up = normalize(cross(cam.right, cam.fwd));
     cam.fine_aim = false;
 
-    Vector2 mouse_delta = input.mouseDelta();
-
-    auto around_right = Quat::angleAxis(
-      -mouse_delta.y * MOUSE_SPEED * delta_t, cam.right);
-
-    auto around_up = Quat::angleAxis(
-      -mouse_delta.x * MOUSE_SPEED * delta_t, math::up);
-
-    auto rotation = (around_up * around_right).normalize();
-
-    cam.up = rotation.rotateVec(cam.up);
-    cam.fwd = rotation.rotateVec(cam.fwd);
-    cam.right = rotation.rotateVec(cam.right);
-
-    if (input.isDown(InputID::W)) {
-      translate += cam.fwd;
-    }
-
-    if (input.isDown(InputID::A)) {
-      translate -= cam.right;
-    }
-
-    if (input.isDown(InputID::S)) {
-      translate -= cam.fwd;
-    }
-
-    if (input.isDown(InputID::D)) {
-      translate += cam.right;
-    }
-  } else {
-    viz->ui->disableRawMouseInput(viz->window);
-
-    if (input.isDown(InputID::W)) {
-      translate += cam.up;
-    }
-
-    if (input.isDown(InputID::A)) {
-      translate -= cam.right;
-    }
-
-    if (input.isDown(InputID::S)) {
-      translate -= cam.up;
-    }
-
-    if (input.isDown(InputID::D)) {
-      translate += cam.right;
-    }
+    cam.target += translate * viz->cameraMoveSpeed * delta_t;
+    cam.position = cam.target - cam.fwd * (cam.mapMax - cam.mapMin).length() * cam.zoom;
   }
+  else
+  {
 
-  cam.position += translate * viz->cameraMoveSpeed * delta_t;
+    if (input.isDown(InputID::MouseRight) ||
+      input.isDown(InputID::Shift)) {
+      viz->ui->enableRawMouseInput(viz->window);
+      cam.fine_aim = false;
+
+      Vector2 mouse_delta = input.mouseDelta();
+
+      auto around_right = Quat::angleAxis(
+        -mouse_delta.y * MOUSE_SPEED * delta_t, cam.right);
+
+      auto around_up = Quat::angleAxis(
+        -mouse_delta.x * MOUSE_SPEED * delta_t, math::up);
+
+      auto rotation = (around_up * around_right).normalize();
+
+      cam.up = rotation.rotateVec(cam.up);
+      cam.fwd = rotation.rotateVec(cam.fwd);
+      cam.right = rotation.rotateVec(cam.right);
+
+      if (input.isDown(InputID::W)) {
+        translate += cam.fwd;
+      }
+
+      if (input.isDown(InputID::A)) {
+        translate -= cam.right;
+      }
+
+      if (input.isDown(InputID::S)) {
+        translate -= cam.fwd;
+      }
+
+      if (input.isDown(InputID::D)) {
+        translate += cam.right;
+      }
+    }
+    else {
+      viz->ui->disableRawMouseInput(viz->window);
+
+      if (input.isDown(InputID::W)) {
+        translate += cam.up;
+      }
+
+      if (input.isDown(InputID::A)) {
+        translate -= cam.right;
+      }
+
+      if (input.isDown(InputID::S)) {
+        translate -= cam.up;
+      }
+
+      if (input.isDown(InputID::D)) {
+        translate += cam.right;
+      }
+    }
+
+    cam.position += translate * viz->cameraMoveSpeed * delta_t;
+
+  }
 
   //printf("\n"
   //       "(%f %f %f)\n"
@@ -2932,6 +3037,8 @@ void loop(VizState *viz, Manager &mgr)
 
   auto last_sim_tick_time = std::chrono::steady_clock::now();
   auto last_frontend_tick_time = std::chrono::steady_clock::now();
+
+  initMapCamera(viz, mgr);
 
   bool running = true;
   while (running) {
@@ -3786,7 +3893,7 @@ static void renderGeo(Engine &ctx, VizState *viz,
       raster_enc.drawData(OpaqueGeoPerDraw {
         .txfm = computeNonUniformScaleTxfm(pos, rot, scale),
         .baseColor = Vector4::fromVec3W(
-            viz->meshMaterials[mesh.materialIndex].color, 1.f),
+            viz->meshMaterials[mesh.materialIndex % viz->meshMaterials.size()].color, 1.f),
       });
 
       raster_enc.setVertexBuffer(0, mesh.buffer);
@@ -4421,7 +4528,8 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   }
   viz->finalPass.AddTextureInput(viz->sceneColor);
   viz->finalPass.AddDepthInput(viz->sceneDepth);
-  viz->finalPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // No parameters for final composite.
+  // The fog parameters are the input. Half-distance density, half-height, and height offset.
+  viz->finalPass.SetParams(Vector4(200.0f, 1000.0f, viz->flyCam.mapMin.z + 50.0f, 0.0f));
   RasterPassEncoder final = viz->finalPass.Execute( true );
 
   // ---  UI  ---

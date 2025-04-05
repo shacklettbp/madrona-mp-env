@@ -166,13 +166,14 @@ float HeightFog(float2 uv)
     float3 camPos;
     float3 worldPos = ClipToWorld(float3(uv * 2 - 1, depth), consts.c2w, camPos);
 
-    //return saturate((worldPos.z+200) / 1000);
-
     // Use the world position to get the fog amount.
-    float d = 400.0; // Half Distance.
-    float h = 100.0; // Half Height.
+    float d = consts.params.x; // Half Distance.
+    float h = consts.params.y; // Half Height.
+    float offset = consts.params.z;
 
     // Ensure both points are at or below to fog plane.
+    camPos.z -= offset;
+    worldPos.z -= offset;
     if( camPos.z > 0 && worldPos.z > 0 )
         return 0;
 
