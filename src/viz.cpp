@@ -3458,22 +3458,6 @@ static void cfgUI(VizState *viz, Manager &mgr)
           .pitch = consts::discreteAimNumPitchBuckets / 2,
         });
       }
-
-      if (viz->curControl != 0) {
-        mgr.setAgentPolicy(viz->curWorld, viz->curControl - 1, {consts::humanPolicyID});
-        mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
-          .moveAmount = 0,
-          .moveAngle = 0,
-          .fire = 0,
-          .stand = 0,
-        }, PvPAimAction {
-          .yaw = 0,
-          .pitch = 0,
-        }, PvPDiscreteAimAction {
-          .yaw = consts::discreteAimNumYawBuckets / 2,
-          .pitch = consts::discreteAimNumPitchBuckets / 2,
-        });
-      }
     }
   }
 
@@ -3780,6 +3764,22 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
 
   if (viz->curView == 0) {
     cfgUI(viz, mgr);
+  }
+
+  if (viz->curControl != 0) {
+    mgr.setAgentPolicy(viz->curWorld, viz->curControl - 1, {consts::humanPolicyID});
+    mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
+      .moveAmount = 0,
+      .moveAngle = 0,
+      .fire = 0,
+      .stand = 0,
+    }, PvPAimAction {
+      .yaw = 0,
+      .pitch = 0,
+    }, PvPDiscreteAimAction {
+      .yaw = consts::discreteAimNumYawBuckets / 2,
+      .pitch = consts::discreteAimNumPitchBuckets / 2,
+    });
   }
 
   Engine &ctx = mgr.getWorldContext(viz->curWorld);
