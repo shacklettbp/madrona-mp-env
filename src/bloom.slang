@@ -39,7 +39,7 @@ float4 fragMain(VSOutput input) : SV_Target {
 
     float4 color = float4(0.0, 0.0, 0.0, 1.0);
 
-    bool vertical = consts.params.x > 0.0;
+    bool vertical = consts.params1.x > 0.0;
     
     if(vertical)
     {

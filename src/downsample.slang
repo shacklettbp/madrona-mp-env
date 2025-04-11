@@ -31,7 +31,7 @@ float4 fragMain(VSOutput input) : SV_Target {
 
     float4 color = float4(0.0, 0.0, 0.0, 1.0);
 
-    int2 ratio = (int2)consts.params.xy;
+    int2 ratio = (int2)consts.params1.xy;
 
     for( int x = 0; x < ratio.x; x++ )
     {

@@ -25,7 +25,10 @@ struct GlobalPassData {
 struct PostEffectData {
   ViewData view;
   float3x4 c2w;
-  float4 params;
+  float4 params1;
+  float4 params2;
+  float4 mapBBMin;
+  float4 mapBBMax;
 };
 
 struct OpaqueGeoPerDraw {

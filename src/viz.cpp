@@ -372,7 +372,7 @@ class PostEffectPass
 public:
   PostEffectPass();
   void Prepare(struct VizState* _viz, const char *shaderName, float resXMult, float resYMult, int colorOutputs, bool outputDepth);
-  void AddTextureInput(gas::Texture& texture);
+  void AddTextureInput(gas::Texture& texture, bool volumeTexture = false );
   void AddDepthInput(gas::Texture& depth);
   void SetParams(const Vector4 &shaderParams, const float3x4 &c2w);
   gas::RasterPassEncoder Execute(bool final);
@@ -420,6 +420,7 @@ struct VizState {
   Texture sceneDepth;
   Sampler sceneSampler;
   Sampler depthSampler;
+  Texture heatmapTexture;
 
   RasterPassInterface offscreenPassInterface;
   RasterPass offscreenPass;
@@ -601,13 +602,19 @@ void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, flo
   }
 }
 
-void PostEffectPass::AddTextureInput(gas::Texture& texture)
+void PostEffectPass::AddTextureInput(gas::Texture& texture, bool volumeTexture /* = false*/)
 {
   if (initialized)
     return;
   inputs.push_back(texture);
   samplers.push_back(viz->sceneSampler);
-  bindings.push_back({ .shaderUsage = ShaderStage::Fragment });
+  if( volumeTexture )
+    bindings.push_back({
+      .type = TextureBindingType::Texture3D,
+      .shaderUsage = ShaderStage::Fragment
+      });
+  else
+    bindings.push_back({ .shaderUsage = ShaderStage::Fragment });
   samplerBindings.push_back({ .shaderUsage = ShaderStage::Fragment });
 }
 
@@ -631,7 +638,10 @@ void PostEffectPass::SetParams(const Vector4 &shaderParams, const float3x4 &c2w)
     (PostEffectData*)param_staging.ptr;
 
   viz->postEffectData.view.fbDims = { resX, resY };
-  viz->postEffectData.params = shaderParams;
+  viz->postEffectData.params1 = shaderParams;
+  viz->postEffectData.params2 = Vector4(0.f, 0.f, 0.f, 0.f);
+  viz->postEffectData.mapBBMin = Vector4(viz->flyCam.mapMin.x, viz->flyCam.mapMin.y, viz->flyCam.mapMin.z, 0.f);
+  viz->postEffectData.mapBBMax = Vector4(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f, 0.f);
   viz->postEffectData.c2w = c2w;
   memcpy(param_staging_ptr, &viz->postEffectData, sizeof(PostEffectData));
 
@@ -2402,6 +2412,14 @@ VizState * init(const VizConfig &cfg)
       .width = (u16)viz->window->pixelWidth,
       .height = (u16)viz->window->pixelHeight,
       .usage = TextureUsage::DepthAttachment | TextureUsage::ShaderSampled,
+    });
+
+  viz->heatmapTexture = gpu->createTexture({
+    .format = swapchain_properties.format,
+    .width = (u16)512,
+    .height = (u16)512,
+    .depth = (u16)3,
+    .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
     });
 
   viz->offscreenPassInterface = gpu->createRasterPassInterface({
@@ -4527,6 +4545,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   {
     viz->finalPass.AddTextureInput(viz->bloomVerticalPasses[i].Output(0));
   }
+  viz->finalPass.AddTextureInput(viz->heatmapTexture, true );
   viz->finalPass.AddTextureInput(viz->sceneColor);
   viz->finalPass.AddDepthInput(viz->sceneDepth);
   // The fog parameters are the input. Half-distance density, half-height, and height offset.
