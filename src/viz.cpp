@@ -2495,9 +2495,9 @@ VizState * init(const VizConfig &cfg)
     .height = (u16)512,
     .depth = (u16)3,
     .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
-    /*.initData = {
+    .initData = {
       .ptr = heatmapBytes,
-    },*/
+    },
     }, viz->mainQueue);
   gpu->waitUntilWorkFinished(viz->mainQueue);
 
