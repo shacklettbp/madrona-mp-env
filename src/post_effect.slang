@@ -280,10 +280,10 @@ float SampleVolume( float3 samplePos )
 {
     // Sample the volume texture.
     float3 uvw = (samplePos) / ( consts.mapBBMax.xyz - consts.mapBBMin.xyz ) + 0.5;
-    float4 sample = float4(0.0, 0.0, 0.0, 0.0);
+    /*float4 sample = float4(0.0, 0.0, 0.0, 0.0);
     sample.x = saturate( 1- length(uvw * 2.0 - 1.0));
-    return sample.x;
-    //return params.heatmapTexture.Sample(params.samplerState, uvw).x;
+    return sample.x;*/
+    return params.heatmapTexture.Sample(params.samplerState, uvw).x;
 }
 
 float4 VolumetricFog(float2 uv)
@@ -292,8 +292,7 @@ float4 VolumetricFog(float2 uv)
 
     // We need to reconstruct actual world position from sampled depth.
     float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
-    if( depth == 0 )
-        return float4(0.0, 0.0, 0.0, 0.0);
+    bool failure = ( depth == 0 );
     depth = LinearDepth(depth);
     float3 camPos;
     float3 worldPos = ClipToWorld(float3(uv * 2 - 1, depth), consts.c2w, camPos);
@@ -310,17 +309,19 @@ float4 VolumetricFog(float2 uv)
     float2 ix = ixRayBox(boxSize, rayOrigin, rayDir);
     ix.y = min(depth, ix.y);
     if( ix.x >= ix.y || ix.y <= 0.0 )
-        return float4(0.0, 0.0, 0.0, 0.0);
+        failure = true;
         
     // Ray march through the volume.
     float stepSize = 0.09 * (ix.y - ix.x);
     float alpha = 0.0;
     float3 color = float3(0.0, 0.0, 0.0);
     float t = ix.x;
+    
     for(int i = 0; i < 10; i++)
     {
         float3 samplePos = rayOrigin + rayDir * t;
-        float sample = SampleVolume(samplePos);
+        float3 uvw = (samplePos) / ( consts.mapBBMax.xyz - consts.mapBBMin.xyz ) + 0.5;
+        float sample = params.heatmapTexture.Sample(params.samplerState, uvw).x;
 
         // Fade from zero alpha to density, and from green through yellow to red.
         alpha += sample;
@@ -334,8 +335,13 @@ float4 VolumetricFog(float2 uv)
         }
         t += stepSize;
     }
+    
+    
     if( alpha > 0.0 )
         color = color / alpha;
+
+    if( failure )
+        return float4(0.0, 0.0, 0.0, 0.0);
     return float4( color, saturate(alpha * density) );
 }
 
@@ -369,7 +375,7 @@ float3 Scanlines( float3 color, float2 uv )
 float4 fragMain(VSOutput input) : SV_Target {
     input.uv.y = 1 - input.uv.y;
 
-    //input.uv = LensDistortion(input.uv);
+    input.uv = LensDistortion(input.uv);
 
     // Main Sample
     float4 color = params.inputTexture.Sample(params.samplerState, input.uv);
@@ -378,7 +384,7 @@ float4 fragMain(VSOutput input) : SV_Target {
 
     color.rgb *= SSAO(input.uv);
 
-    //color.rgb = lerp(color.rgb, float3(0.7, 0.8, 1.0), HeightFog(input.uv));
+    color.rgb = lerp(color.rgb, float3(0.7, 0.8, 1.0), HeightFog(input.uv));
 
     float4 vfog = VolumetricFog(input.uv);
     color.rgb = lerp(color.rgb, vfog.rgb, vfog.a);
@@ -388,7 +394,7 @@ float4 fragMain(VSOutput input) : SV_Target {
 
     color.rgb = Bloom(color.rgb, input.uv);
 
-    //color.rgb *= Vignette(input.uv);
+    color.rgb *= Vignette(input.uv);
 
     //color.rgb = Scanlines( color.rgb, input.uv );
 

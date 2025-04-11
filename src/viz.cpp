@@ -2368,6 +2368,51 @@ static void analyticsBGThread(AnalyticsDB &db)
 
 VizState * init(const VizConfig &cfg)
 {
+  // TEMP GENERATE HEATMAP DATA!
+  float * heatmapPixels = new float[512 * 512 * 3 * 3];
+  // Generate random walk noise.
+  float variance = 0.1f;
+  for (int x = 0; x < 512; x++)
+  {
+    for (int y = 0; y < 512; y++)
+    {
+      for (int z = 0; z < 3; z++)
+      {
+        // Average the values of all the neighbors we've already visited.
+        float prev = 0.0f;
+        float norm = 0.0f;
+        if (x > 0)
+        {
+          norm++;
+          prev += heatmapPixels[(z * 512 * 512 + y * 512 + (x - 1)) * 3];
+        }
+        if (y > 0)
+        {
+          norm++;
+          prev += heatmapPixels[(z * 512 * 512 + (y-1) * 512 + x) * 3];
+        }
+        if (z > 0)
+        {
+          norm++;
+          prev += heatmapPixels[((z-1) * 512 * 512 + y * 512 + x) * 3];
+        }
+        if (norm > 0)
+          prev /= norm;
+
+        // Generate a new value randomly offset.
+        heatmapPixels[(z * 512 * 512 + y * 512 + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
+      }
+    }
+  }
+  u8 *heatmapBytes = new u8[512 * 512 * 3 * 4];
+  for (int i = 0; i < 512 * 512 * 3; i++)
+  {
+    heatmapBytes[i * 4 + 0] = (u8)(heatmapPixels[i] * 255);
+    heatmapBytes[i * 4 + 1] = (u8)(heatmapPixels[i] * 255);
+    heatmapBytes[i * 4 + 2] = (u8)(heatmapPixels[i] * 255);
+    heatmapBytes[i * 4 + 3] = (u8)255;
+  }
+
   VizState *viz = new VizState {};
 
   viz->ui = UISystem::init(UISystem::Config {
@@ -2414,14 +2459,6 @@ VizState * init(const VizConfig &cfg)
       .usage = TextureUsage::DepthAttachment | TextureUsage::ShaderSampled,
     });
 
-  viz->heatmapTexture = gpu->createTexture({
-    .format = swapchain_properties.format,
-    .width = (u16)512,
-    .height = (u16)512,
-    .depth = (u16)3,
-    .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
-    });
-
   viz->offscreenPassInterface = gpu->createRasterPassInterface({
       .uuid = "offscreen_raster_pass"_to_uuid,
       .depthAttachment = {
@@ -2451,6 +2488,18 @@ VizState * init(const VizConfig &cfg)
   ImGuiSystem::init(viz->ui, gpu, viz->mainQueue, viz->shaderc,
       viz->offscreenPassInterface,
       DATA_DIR "imgui_font.ttf", 12.f);
+
+  viz->heatmapTexture = gpu->createTexture({
+    .format = swapchain_properties.format,
+    .width = (u16)512,
+    .height = (u16)512,
+    .depth = (u16)3,
+    .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
+    /*.initData = {
+      .ptr = heatmapBytes,
+    },*/
+    }, viz->mainQueue);
+  gpu->waitUntilWorkFinished(viz->mainQueue);
 
   viz->enc = gpu->createCommandEncoder(viz->mainQueue);
 
