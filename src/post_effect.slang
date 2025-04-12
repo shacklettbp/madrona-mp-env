@@ -280,10 +280,7 @@ float SampleVolume( float3 samplePos )
 {
     // Sample the volume texture.
     float3 uvw = (samplePos) / ( consts.mapBBMax.xyz - consts.mapBBMin.xyz ) + 0.5;
-    /*float4 sample = float4(0.0, 0.0, 0.0, 0.0);
-    sample.x = saturate( 1- length(uvw * 2.0 - 1.0));
-    return sample.x;*/
-    return params.heatmapTexture.Sample(params.samplerState, uvw).x;
+    return saturate(params.heatmapTexture.Sample(params.samplerState, uvw).x * 1.5 - 0.5);
 }
 
 float4 VolumetricFog(float2 uv)
@@ -312,37 +309,41 @@ float4 VolumetricFog(float2 uv)
         failure = true;
         
     // Ray march through the volume.
-    float stepSize = 0.09 * (ix.y - ix.x);
+    float stepSize = (0.99 / 64.0) * (ix.y - ix.x);
     float alpha = 0.0;
     float3 color = float3(0.0, 0.0, 0.0);
     float t = ix.x;
     
-    for(int i = 0; i < 10; i++)
+    for(int i = 0; i < 64; i++)
     {
         float3 samplePos = rayOrigin + rayDir * t;
-        float3 uvw = (samplePos) / ( consts.mapBBMax.xyz - consts.mapBBMin.xyz ) + 0.5;
-        float sample = params.heatmapTexture.Sample(params.samplerState, uvw).x;
+        float sample = SampleVolume(samplePos);
 
-        // Fade from zero alpha to density, and from green through yellow to red.
-        alpha += sample;
+        // Calculate a color for this sample.
+        float3 sampleColor = float3(0.0, 0.0, 0.0);
         if( sample < 0.5 )
         {
-            color += sample * lerp(float3(0.0, 1.0, 0.0), float3(1.0, 1.0, 0.0), sample * 2.0);
+            sampleColor += lerp(float3(0.0, 1.0, 0.0), float3(1.0, 1.0, 0.0), sample * 2.0);
         }
         else
         {
-            color += sample * lerp(float3(1.0, 1.0, 0.0), float3(1.0, 0.0, 0.0), (sample - 0.5) * 2.0);
+            sampleColor += lerp(float3(1.0, 1.0, 0.0), float3(1.0, 0.0, 0.0), (sample - 0.5) * 2.0);
         }
+
+        // Occlude this sample from all preceding samples.
+        // It would be nice to early out on full alpha, but conditional texture samples crash the shader compiler.
+        float density = 0.01 * stepSize * min(sample, 0.25);
+        if( density > 0 )
+            color = lerp(color, sampleColor, 1.0 - alpha / saturate(alpha+density));
+        alpha = saturate(alpha+density);
+
         t += stepSize;
     }
     
     
-    if( alpha > 0.0 )
-        color = color / alpha;
-
     if( failure )
         return float4(0.0, 0.0, 0.0, 0.0);
-    return float4( color, saturate(alpha * density) );
+    return float4( color, saturate(alpha) );
 }
 
 float3 Scanlines( float3 color, float2 uv )

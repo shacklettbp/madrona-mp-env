@@ -641,7 +641,7 @@ void PostEffectPass::SetParams(const Vector4 &shaderParams, const float3x4 &c2w)
   viz->postEffectData.params1 = shaderParams;
   viz->postEffectData.params2 = Vector4(0.f, 0.f, 0.f, 0.f);
   viz->postEffectData.mapBBMin = Vector4(viz->flyCam.mapMin.x, viz->flyCam.mapMin.y, viz->flyCam.mapMin.z, 0.f);
-  viz->postEffectData.mapBBMax = Vector4(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f, 0.f);
+  viz->postEffectData.mapBBMax = Vector4(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f * 2.0f, 0.f);
   viz->postEffectData.c2w = c2w;
   memcpy(param_staging_ptr, &viz->postEffectData, sizeof(PostEffectData));
 
@@ -2369,14 +2369,17 @@ static void analyticsBGThread(AnalyticsDB &db)
 VizState * init(const VizConfig &cfg)
 {
   // TEMP GENERATE HEATMAP DATA!
-  float * heatmapPixels = new float[512 * 512 * 3 * 3];
+  int heatmapWidth = 64;
+  int heatmapHeight = 64;
+  int heatmapDepth = 5;
+  float * heatmapPixels = new float[heatmapWidth * heatmapHeight * heatmapDepth * 3];
   // Generate random walk noise.
-  float variance = 0.1f;
-  for (int x = 0; x < 512; x++)
+  float variance = 0.2f;
+  for (int x = 0; x < heatmapWidth; x++)
   {
-    for (int y = 0; y < 512; y++)
+    for (int y = 0; y < heatmapHeight; y++)
     {
-      for (int z = 0; z < 3; z++)
+      for (int z = 0; z < heatmapDepth; z++)
       {
         // Average the values of all the neighbors we've already visited.
         float prev = 0.0f;
@@ -2384,32 +2387,33 @@ VizState * init(const VizConfig &cfg)
         if (x > 0)
         {
           norm++;
-          prev += heatmapPixels[(z * 512 * 512 + y * 512 + (x - 1)) * 3];
+          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + (x - 1)) * 3];
         }
         if (y > 0)
         {
           norm++;
-          prev += heatmapPixels[(z * 512 * 512 + (y-1) * 512 + x) * 3];
+          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + (y-1) * heatmapWidth + x) * 3];
         }
         if (z > 0)
         {
           norm++;
-          prev += heatmapPixels[((z-1) * 512 * 512 + y * 512 + x) * 3];
+          prev += heatmapPixels[((z-1) * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
         }
         if (norm > 0)
           prev /= norm;
 
         // Generate a new value randomly offset.
-        heatmapPixels[(z * 512 * 512 + y * 512 + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
+        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
       }
     }
   }
-  u8 *heatmapBytes = new u8[512 * 512 * 3 * 4];
-  for (int i = 0; i < 512 * 512 * 3; i++)
+  u8 *heatmapBytes = new u8[heatmapWidth * heatmapHeight * heatmapDepth * 4];
+  for (int i = 0; i < heatmapWidth * heatmapHeight * heatmapDepth; i++)
   {
-    heatmapBytes[i * 4 + 0] = (u8)(heatmapPixels[i] * 255);
-    heatmapBytes[i * 4 + 1] = (u8)(heatmapPixels[i] * 255);
-    heatmapBytes[i * 4 + 2] = (u8)(heatmapPixels[i] * 255);
+
+    heatmapBytes[i * 4 + 0] = (u8)(heatmapPixels[i * 3 + 2] * 255);
+    heatmapBytes[i * 4 + 1] = (u8)(heatmapPixels[i * 3 + 1] * 255);
+    heatmapBytes[i * 4 + 2] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth-2))? 0 :(heatmapPixels[i * 3 + 0] * 255);
     heatmapBytes[i * 4 + 3] = (u8)255;
   }
 
@@ -2491,9 +2495,9 @@ VizState * init(const VizConfig &cfg)
 
   viz->heatmapTexture = gpu->createTexture({
     .format = swapchain_properties.format,
-    .width = (u16)512,
-    .height = (u16)512,
-    .depth = (u16)3,
+    .width = (u16)heatmapWidth,
+    .height = (u16)heatmapHeight,
+    .depth = (u16)heatmapDepth,
     .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
     .initData = {
       .ptr = heatmapBytes,
