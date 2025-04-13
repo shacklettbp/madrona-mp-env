@@ -289,8 +289,8 @@ float4 VolumetricFog(float2 uv)
 
     // We need to reconstruct actual world position from sampled depth.
     float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
-    bool failure = ( depth == 0 );
-    depth = LinearDepth(depth);
+    bool failure = false;
+    depth = depth == 0.0 ? 132000.0 : LinearDepth(depth);
     float3 camPos;
     float3 worldPos = ClipToWorld(float3(uv * 2 - 1, depth), consts.c2w, camPos);
 
@@ -332,7 +332,7 @@ float4 VolumetricFog(float2 uv)
 
         // Occlude this sample from all preceding samples.
         // It would be nice to early out on full alpha, but conditional texture samples crash the shader compiler.
-        float density = 0.01 * stepSize * min(sample, 0.25);
+        float density = 0.03 * stepSize * min(sample, 0.25) * (1.0f - alpha);
         if( density > 0 )
             color = lerp(color, sampleColor, 1.0 - alpha / saturate(alpha+density));
         alpha = saturate(alpha+density);
