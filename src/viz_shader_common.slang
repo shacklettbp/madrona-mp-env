@@ -36,7 +36,7 @@ VIS struct GlobalPassData {
 
 VIS struct PostEffectData {
   VIS float4 params1;
-  VIS float4 params2;
+  VIS uint4 params2;
   VIS float4 mapBBMin;
   VIS float4 mapBBMax;
 };

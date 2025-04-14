@@ -54,6 +54,5 @@ float4 fragMain(V2F v2f) : SV_Target0
   //    pow(clamp(v2f.worldZ / 500, 0.0, 1.0), 0.4));
   //return color * float4(float3(brightness), 1.f);
 
-  float4 color = float4(1.0, 1.0, 1.0, 1.0);
-  return color;
+  return perDraw.baseColor;
 }

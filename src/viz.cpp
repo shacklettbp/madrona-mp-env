@@ -632,7 +632,7 @@ void PostEffectPass::SetParams(const Vector4 &shaderParams)
 
   *param_staging_ptr = PostEffectData {
     .params1 = shaderParams,
-    .params2 = Vector4::zero(),
+    .params2 = { resX, resY, 0, 0 },
     .mapBBMin = Vector4(viz->flyCam.mapMin.x, viz->flyCam.mapMin.y, viz->flyCam.mapMin.z, 0.f),
     .mapBBMax = Vector4(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f * 2.0f, 0.f),
   };
@@ -3979,7 +3979,7 @@ static void renderMap(VizState *viz,
     const MapGeoMesh &mesh = viz->mapMeshes[mesh_idx];
 
     raster_enc.drawData(MapPerDraw {
-      .wireframeConfig = { 0.1f, 0.1f, 0.1f, 1.5f },
+      .wireframeConfig = { 0.1f, 0.1f, 0.1f, 1.0f },
       .meshVertexOffset = mesh.vertOffset,
       .meshIndexOffset = mesh.indexOffset,
     });
@@ -4603,7 +4603,6 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   // Do a multi-pass bloom.
   for (int pass = 0; pass < DownsamplePasses; pass++)
   {
-
     // ---  DOWN SAMPLE  ---
 
     float downsample_factor = 0.25f / (pass + 1);

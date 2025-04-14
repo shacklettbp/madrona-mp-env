@@ -47,7 +47,7 @@ float4 fragMain(VSOutput input) : SV_Target {
         // Loop on the vertical across the specified number of steps and apply the gaussian factor.
         [unroll]
         for (int i = -bloomSize; i <= bloomSize; i++) {
-            float2 offset = float2(0, i) / (float)global.view.fbDims.y;
+            float2 offset = float2(0, i) / (float)consts.params2.y;
             float2 uv = saturate(input.uv + offset);
             float3 sample = params.inputTexture.Sample(params.samplerState, uv).rgb;
             color.rgb += sample * GaussianFactor(float(i), bloomSize);// / (float)bloomSize * 0.5;
@@ -58,7 +58,7 @@ float4 fragMain(VSOutput input) : SV_Target {
         // Loop on the horizontal across the specified number of steps and apply the gaussian factor.
         [unroll]
         for (int i = -bloomSize; i <= bloomSize; i++) {
-            float2 offset = float2(i, 0) / (float)global.view.fbDims.x;
+            float2 offset = float2(i, 0) / (float)consts.params2.x;
             float2 uv = saturate(input.uv + offset);
             float3 sample = params.inputTexture.Sample(params.samplerState, uv).rgb;
             // If the color is high saturation, it will bloom.

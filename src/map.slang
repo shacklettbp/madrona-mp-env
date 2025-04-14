@@ -183,7 +183,6 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
   float3 mesh_color = lerp(perDraw.wireframeConfig.xyz, base_color, edgeFactor(barys));
 
   float dot_view = clamp(dot(view_fwd, n), 0, 1);
-  dot_view = 1;
 
   float3 lighting = lerp(0.25, 1, dot_view) * mesh_color;
 
