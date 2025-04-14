@@ -3930,7 +3930,7 @@ static void setupLightData(VizState *viz, GlobalPassData *out)
     viz->flyCam.mapMax.z,
   };
 
-  lights.sunColor = { 1.f, 0.9f, 0.1f };
+  lights.sunColor = { 0.3f, 0.7f, 0.7f };
   lights.sunColor *= 2.f;
 
   out->lights = lights;
