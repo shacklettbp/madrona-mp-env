@@ -30,8 +30,16 @@ VIS struct NonUniformScaleObjectTransform {
   VIS float3x4 w2o;
 };
 
+VIS struct LightData {
+  VIS float3 sunPosition;
+  float pad1;
+  VIS float3 sunColor;
+  float pad2;
+};
+
 VIS struct GlobalPassData {
   VIS ViewData view;
+  VIS LightData lights;
 };
 
 VIS struct PostEffectData {
@@ -50,6 +58,8 @@ VIS struct MapPerDraw {
   VIS float4 wireframeConfig;
   VIS uint meshVertexOffset;
   VIS uint meshIndexOffset;
+  VIS float metallic;
+  VIS float roughness;
 };
 
 VIS struct GoalRegionPerDraw {
