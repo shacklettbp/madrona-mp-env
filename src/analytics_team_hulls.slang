@@ -1,5 +1,4 @@
-#include "viz_shader_common.h"
-
+import viz_shader_common;
 import utils;
 
 ParameterBlock<GlobalPassData> global;
@@ -14,7 +13,7 @@ struct VertInput {
 float4 vertMain(VertInput v) : SV_Position
 {
   float3 pos_w = v.position;
-  float4 clip_pos = worldToClip(global.view.w2c, pos_w, 0.01);
+  float4 clip_pos = worldToClip(global.view, pos_w);
 
   return clip_pos;
 }

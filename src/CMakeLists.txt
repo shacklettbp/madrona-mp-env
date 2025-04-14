@@ -38,6 +38,7 @@ target_link_libraries(madrona_mp_env_importer PUBLIC
     madrona_physics_assets
     madrona_bvh_builder
     madrona_embree
+    meshoptimizer
 )
 
 add_subdirectory(nav)

@@ -1,5 +1,4 @@
-#include "viz_shader_common.h"
-
+import viz_shader_common;
 import utils;
 
 ParameterBlock<GlobalPassData> global;
@@ -20,7 +19,7 @@ float4 vertMain(uint id : SV_VertexID,
   pos_o *= 0.5f;
 
   float3 pos_w = objectPositionToWorld(perDraw.txfm.o2w, pos_o);
-  float4 pos_clip = worldToClip(global.view.w2c, pos_w, 0.01);
+  float4 pos_clip = worldToClip(global.view, pos_w);
 
   v2f.normal = objectNormalToWorld(perDraw.txfm.w2o, normal_o);
 
@@ -30,7 +29,7 @@ float4 vertMain(uint id : SV_VertexID,
 [shader("fragment")]
 float4 fragMain(V2F v2f) : SV_Target0
 {
-  float3 view_fwd = global.view.w2c[2].xyz;
+  float3 view_fwd = global.view.camTxfm[2].xyz;
   float3 n = normalize(v2f.normal);
   float dot_view = clamp(-dot(view_fwd, n), 0, 1);
 
@@ -55,7 +54,7 @@ struct O2CTransform : IObject2ClipTransform {
   float4 object2Clip(float3 pos_o)
   {
     float3 pos_w = objectPositionToWorld(txfmData.o2w, pos_o);
-    float4 pos_clip = worldToClip(viewData.w2c, pos_w, 0.01);
+    float4 pos_clip = worldToClip(viewData, pos_w);
     return pos_clip;
   }
 };

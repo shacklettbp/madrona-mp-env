@@ -4,6 +4,7 @@
 #include "mesh_bvh_builder.hpp"
 
 #include <fstream>
+#include <meshoptimizer.h>
 
 using namespace madrona;
 
@@ -254,157 +255,110 @@ MapCollisionAssets importCollisionData(const char *path,
     };
 }
 
-static void convertToRenderMeshes(const MapCollisionAssets &assets,
-                                  CountT &render_vert_offset,
-                                  HeapArray<Vector3> &render_positions,
-                                  HeapArray<Vector3> &render_normals,
-                                  HeapArray<Vector2> &render_uvs,
-                                  HeapArray<uint32_t> &render_indices)
-{
-    for (const MapCollisionAssets::MeshInfo &mesh : assets.meshes) {
-        const Vector3 *mesh_verts = assets.vertices.data() +
-            mesh.vertexOffset;
-
-        const uint32_t *mesh_indices = assets.indices.data() +
-            mesh.triOffset * 3;
-
-        for (uint32_t i = 0; i < mesh.numTris; i++) {
-            uint32_t a_i = 3 * i;
-            uint32_t b_i = 3 * i + 1;
-            uint32_t c_i = 3 * i + 2;
-
-            uint32_t a_read_idx = mesh_indices[a_i];
-            uint32_t b_read_idx = mesh_indices[b_i];
-            uint32_t c_read_idx = mesh_indices[c_i];
-
-
-            uint32_t a_write_idx = render_vert_offset + a_i;
-            uint32_t b_write_idx = render_vert_offset + b_i;
-            uint32_t c_write_idx = render_vert_offset + c_i;
-
-            Vector3 a = mesh_verts[a_read_idx];
-            Vector3 b = mesh_verts[b_read_idx];
-            Vector3 c = mesh_verts[c_read_idx];
-
-            Vector3 tri_normal = cross(b - a, c - a).normalize();
-
-            render_positions[a_write_idx] = a;
-            render_positions[b_write_idx] = b;
-            render_positions[c_write_idx] = c;
-
-            render_normals[a_write_idx] = tri_normal;
-            render_normals[b_write_idx] = tri_normal;
-            render_normals[c_write_idx] = tri_normal;
-
-            render_uvs[a_write_idx] = Vector2 { 0, 0 };
-            render_uvs[b_write_idx] = Vector2 { 0, 0 };
-            render_uvs[c_write_idx] = Vector2 { 0, 0 };
-
-            render_indices[a_write_idx] = a_write_idx;
-            render_indices[b_write_idx] = b_write_idx;
-            render_indices[c_write_idx] = c_write_idx;
-        }
-
-        render_vert_offset += mesh.numTris * 3;
-    }
-
-    for (const MapCollisionAssets::MeshInfo &mesh : assets.meshes) {
-        const Vector3 *mesh_verts = assets.vertices.data() +
-            mesh.vertexOffset;
-
-        const uint32_t *mesh_indices = assets.indices.data() +
-            mesh.triOffset * 3;
-
-        for (uint32_t i = 0; i < mesh.numTris; i++) {
-            uint32_t a_i = 3 * i;
-            uint32_t b_i = 3 * i + 1;
-            uint32_t c_i = 3 * i + 2;
-
-            uint32_t a_read_idx = mesh_indices[a_i];
-            uint32_t b_read_idx = mesh_indices[b_i];
-            uint32_t c_read_idx = mesh_indices[c_i];
-
-            uint32_t a_write_idx = render_vert_offset + a_i;
-            uint32_t b_write_idx = render_vert_offset + b_i;
-            uint32_t c_write_idx = render_vert_offset + c_i;
-
-            Vector3 a = mesh_verts[a_read_idx];
-            Vector3 b = mesh_verts[b_read_idx];
-            Vector3 c = mesh_verts[c_read_idx];
-
-            Vector3 tri_normal = -cross(b - a, c - a).normalize();
-
-            render_positions[a_write_idx] = a;
-            render_positions[b_write_idx] = b;
-            render_positions[c_write_idx] = c;
-
-            render_normals[a_write_idx] = tri_normal;
-            render_normals[b_write_idx] = tri_normal;
-            render_normals[c_write_idx] = tri_normal;
-
-            render_uvs[a_write_idx] = Vector2 { 0, 0 };
-            render_uvs[b_write_idx] = Vector2 { 0, 0 };
-            render_uvs[c_write_idx] = Vector2 { 0, 0 };
-
-            render_indices[a_write_idx] = c_write_idx;
-            render_indices[b_write_idx] = b_write_idx;
-            render_indices[c_write_idx] = a_write_idx;
-        }
-
-        render_vert_offset += mesh.numTris * 3;
-    }
-}
-
 MapRenderableCollisionData convertCollisionDataToRenderMeshes(
     const MapCollisionAssets &collision_data)
 {
-    using namespace madrona::imp;
+  using namespace madrona::imp;
 
-    HeapArray<Vector3> render_positions(
-        collision_data.indices.size() * 2);
+  using VertexType = Vector3;
 
-    HeapArray<Vector3> render_normals(render_positions.size());
-    HeapArray<Vector2> render_uvs(render_positions.size());
-    HeapArray<uint32_t> render_indices(render_positions.size());
+  DynArray<VertexType> all_verts(0);
+  DynArray<uint32_t> all_indices(0);
+  HeapArray<MapGeoMesh> meshes_out(collision_data.meshes.size());
 
-    CountT render_vert_offset = 0;
-    convertToRenderMeshes(collision_data,
-                          render_vert_offset,
-                          render_positions,
-                          render_normals,
-                          render_uvs,
-                          render_indices);
+  for (uint32_t mesh_idx = 0; mesh_idx < (uint32_t)collision_data.meshes.size();
+       mesh_idx++) {
+    const MapCollisionAssets::MeshInfo &mesh = collision_data.meshes[mesh_idx];
+    const Vector3 *mesh_verts = collision_data.vertices.data() +
+        mesh.vertexOffset;
 
-    HeapArray<SourceMesh> src_meshes(1);
-    HeapArray<SourceObject> src_objs(src_meshes.size());
+    const uint32_t *mesh_indices = collision_data.indices.data() +
+        mesh.triOffset * 3;
 
-    src_meshes[0] = SourceMesh {
-        .positions = render_positions.data(),
-        .normals = render_normals.data(),
-        .tangentAndSigns = nullptr,
-        .uvs = render_uvs.data(),
-        .indices = render_indices.data(),
-        .faceCounts = nullptr,
-        .faceMaterials = nullptr,
-        .numVertices = (uint32_t)render_vert_offset,
-        .numFaces = (uint32_t)render_vert_offset / 3,
-        .materialIDX = (uint32_t)0,
-    };
+    HeapArray<VertexType> unindexed_verts(mesh.numTris * 3);
+    for (uint32_t i = 0; i < mesh.numTris; i++) {
+      uint32_t a_i = 3 * i;
+      uint32_t b_i = 3 * i + 1;
+      uint32_t c_i = 3 * i + 2;
 
-    for (CountT i = 0; i < src_meshes.size(); i++) {
-        src_objs[i] = SourceObject {
-            .meshes = Span<SourceMesh>(&src_meshes[i], 1),
-        };
+      uint32_t a_read_idx = mesh_indices[a_i];
+      uint32_t b_read_idx = mesh_indices[b_i];
+      uint32_t c_read_idx = mesh_indices[c_i];
+
+      Vector3 a = mesh_verts[a_read_idx];
+      Vector3 b = mesh_verts[b_read_idx];
+      Vector3 c = mesh_verts[c_read_idx];
+
+      unindexed_verts[a_i] = a;
+      unindexed_verts[b_i] = b;
+      unindexed_verts[c_i] = c;
     }
 
-    return MapRenderableCollisionData {
-        .positions = std::move(render_positions),
-        .normals = std::move(render_normals),
-        .uvs = std::move(render_uvs),
-        .indices = std::move(render_indices),
-        .meshes = std::move(src_meshes),
-        .objects = std::move(src_objs),
+    HeapArray<uint32_t> vert_remap(mesh.numTris * 3);
+    uint32_t num_unique_verts = meshopt_generateVertexRemap(
+      vert_remap.data(), nullptr, unindexed_verts.size(),
+      unindexed_verts.data(), unindexed_verts.size(), sizeof(VertexType));
+
+    HeapArray<VertexType> unique_verts(num_unique_verts);
+    meshopt_remapVertexBuffer(unique_verts.data(), unindexed_verts.data(),
+      unindexed_verts.size(), sizeof(VertexType), vert_remap.data());
+
+    HeapArray<uint32_t> unique_vert_idxs(mesh.numTris * 3);
+    meshopt_remapIndexBuffer(
+      unique_vert_idxs.data(), nullptr, unindexed_verts.size(), vert_remap.data());
+    
+    HeapArray<uint32_t> cache_optimized_index_buffer(unique_vert_idxs.size());
+    meshopt_optimizeVertexCache(cache_optimized_index_buffer.data(),
+      unique_vert_idxs.data(), unique_vert_idxs.size(), unique_verts.size());
+
+    HeapArray<uint32_t> provoking_index_buffer(cache_optimized_index_buffer.size());
+
+    HeapArray<uint32_t> provoking_reorder(num_unique_verts + mesh.numTris);
+
+    size_t num_reorder = meshopt_generateProvokingIndexBuffer(
+      provoking_index_buffer.data(), provoking_reorder.data(),
+      cache_optimized_index_buffer.data(), cache_optimized_index_buffer.size(),
+      num_unique_verts);
+
+    HeapArray<VertexType> provoking_reordered_verts(num_reorder);
+    for (uint32_t i = 0; i < (uint32_t)num_reorder; i++) {
+      uint32_t reorder_idx = provoking_reorder[i];
+      provoking_reordered_verts[i] = unique_verts[reorder_idx];
+    }
+
+    MapGeoMesh mesh_out {
+      .vertOffset = (uint32_t)all_verts.size(),
+      .indexOffset = (uint32_t)all_indices.size(),
+      .numVertices = (uint32_t)provoking_reordered_verts.size(),
+      .numTris = mesh.numTris,
     };
+
+    for (uint32_t i = 0; i < (uint32_t)provoking_reordered_verts.size(); i++) {
+      all_verts.push_back(provoking_reordered_verts[i]);
+    }
+
+    for (uint32_t i = 0; i < mesh.numTris * 3; i++) {
+      all_indices.push_back(provoking_index_buffer[i]);
+    }
+
+    meshes_out[mesh_idx] = mesh_out;
+  }
+
+  HeapArray<VertexType> verts_out(all_verts.size());
+  for (uint32_t i = 0; i < all_verts.size(); i++) {
+    verts_out[i] = all_verts[i];
+  }
+
+  HeapArray<uint32_t> idxs_out(all_indices.size());
+  for (uint32_t i = 0; i < all_indices.size(); i++) {
+    idxs_out[i] = all_indices[i];
+  }
+
+  return MapRenderableCollisionData {
+      .positions = std::move(verts_out),
+      .indices = std::move(idxs_out),
+      .meshes = std::move(meshes_out),
+  };
 }
 
 void * buildMeshBVH(

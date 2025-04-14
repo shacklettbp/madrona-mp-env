@@ -1,6 +1,7 @@
 // post_effect.slang
 
-#include "viz_shader_common.h"
+import viz_shader_common;
+import utils;
 
 struct PostParams {
   Texture2D ssaoTexture;
@@ -19,6 +20,7 @@ struct PostParams {
   SamplerState depthSamplerState;
 };
 
+ParameterBlock<GlobalPassData> global;
 ParameterBlock<PostParams> params;
 ParameterBlock<PostEffectData> consts;
 
@@ -26,12 +28,6 @@ struct VSOutput {
     float4 position : SV_POSITION;
     float2 uv : TEXCOORD0;
 };
-
-static float near = 0.01;
-float LinearDepth(float depth)
-{
-    return near / depth;
-}
 
 float2 ixRayBox( float3 size, float3 origin, float3 dir ) 
 { 
@@ -149,7 +145,7 @@ float SSAO(float2 uv)
     {
         for( int y = -1; y < 3; y++)
         {
-            float2 offset = float2(x, y) / (float2)consts.view.fbDims;
+            float2 offset = float2(x, y) / (float2)global.view.fbDims;
             ssao += params.ssaoTexture.Sample(params.ssaoSamplerState, uv + offset).x;
         }
     }
@@ -161,7 +157,7 @@ float3 DepthOfField(float3 color, float2 uv, inout float3 bloomColor)
 {
     // Sample depth.
     float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
-    depth = LinearDepth(depth);
+    depth = convertToLinearDepth(global.view, depth);
     //color.rgb = lerp( color.rgb, float3(1, 1, 1), saturate(depth / 1000) * 0.5);
 
     // Sampler around the pixel for various blur use cases.
@@ -175,7 +171,7 @@ float3 DepthOfField(float3 color, float2 uv, inout float3 bloomColor)
             float2 offset = float2(x, y) / (float)sampleCount * kernelSize - kernelSize.xx * 0.5;
             float2 sampleUV = uv + offset;
             float depthSample = params.depthTexture.Sample(params.depthSamplerState, sampleUV).x;
-            depthSample = LinearDepth(depthSample);
+            depthSample = convertToLinearDepth(global.view, depthSample);
             float3 colorSample = params.inputTexture.Sample(params.samplerState, sampleUV).rgb;
 
             // If the color is high saturation, it will bloom.
@@ -210,26 +206,17 @@ float3 Bloom(float3 color, float2 uv)
     return color;
 }
 
-float3 ClipToWorld(float3 pos, float3x4 c2w, inout float3 camPos)
-{
-    float3 worldPos = float3(c2w[0].w, c2w[1].w, c2w[2].w);
-    camPos = worldPos;
-    worldPos += c2w[0].xyz * pos.x * pos.z;
-    worldPos += c2w[1].xyz * pos.y * pos.z;
-    worldPos += c2w[2].xyz * pos.z;
-
-    return worldPos;
-}
-
 float HeightFog(float2 uv)
 {
     // We need to reconstruct actual world position from sampled depth.
     float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
     if( depth == 0 )
         return 1;
-    depth = LinearDepth(depth);
-    float3 camPos;
-    float3 worldPos = ClipToWorld(float3(uv * 2 - 1, depth), consts.c2w, camPos);
+
+    float3 camPos = cameraPosition(global.view);
+    float3 worldPos = clipToWorld(global.view, float3(2 * uv.x - 1, -2 * uv.y + 1, depth));
+
+    depth = convertToLinearDepth(global.view, depth);
 
     // Use the world position to get the fog amount.
     float d = consts.params1.x; // Half Distance.
@@ -290,9 +277,8 @@ float4 VolumetricFog(float2 uv)
     // We need to reconstruct actual world position from sampled depth.
     float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
     bool failure = false;
-    depth = depth == 0.0 ? 132000.0 : LinearDepth(depth);
-    float3 camPos;
-    float3 worldPos = ClipToWorld(float3(uv * 2 - 1, depth), consts.c2w, camPos);
+    float3 camPos = cameraPosition(global.view);
+    float3 worldPos = clipToWorld(global.view, float3(2 * uv.x - 1, -2 * uv.y + 1, depth));
 
     // Now we can transform the end points into a ray in volume space, relative to the center.
     float3 boxCenter = (consts.mapBBMin.xyz + consts.mapBBMax.xyz) * 0.5;
@@ -348,8 +334,8 @@ float4 VolumetricFog(float2 uv)
 
 float3 Scanlines( float3 color, float2 uv )
 {
-    float pixelf = (uv.x + 1)*0.5 * consts.view.fbDims.x;
-    float vertf = (uv.y + 1)*0.5 * consts.view.fbDims.y;
+    float pixelf = (uv.x + 1)*0.5 * global.view.fbDims.x;
+    float vertf = (uv.y + 1)*0.5 * global.view.fbDims.y;
     int pixel = (int)pixelf;
     int vert = (int)vertf;
     float pfrac = frac(pixelf);

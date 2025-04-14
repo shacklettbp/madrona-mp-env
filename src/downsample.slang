@@ -1,12 +1,13 @@
 // downsample.slang
 
-#include "viz_shader_common.h"
+import viz_shader_common;
 
 struct PostParams {
   Texture2D inputTexture;
   SamplerState samplerState;
 };
 
+ParameterBlock<GlobalPassData> global;
 ParameterBlock<PostParams> params;
 ParameterBlock<PostEffectData> consts;
 
@@ -37,7 +38,7 @@ float4 fragMain(VSOutput input) : SV_Target {
     {
         for( int y = 0; y < ratio.y; y++ )
         {
-            float2 offset = float2(x, y) / (float2)consts.view.fbDims.xy / (float2)ratio;
+            float2 offset = float2(x, y) / (float2)global.view.fbDims.xy / (float2)ratio;
             float2 uv = saturate(input.uv + offset);
             float3 sample = params.inputTexture.Sample(params.samplerState, uv).rgb;
             color.rgb += sample / (float)(ratio.x * ratio.y);

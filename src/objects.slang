@@ -1,5 +1,4 @@
-#include "viz_shader_common.h"
-
+import viz_shader_common;
 import utils;
 
 ParameterBlock<GlobalPassData> global;
@@ -30,10 +29,8 @@ V2F vertMain(VertInput v)
 
   float3 pos_w = objectPositionToWorld(o2w, pos_o);
 
-  const float z_near = 0.01;
-
   V2F out;
-  out.pos = worldToClip(global.view.w2c, pos_w, 0.01);
+  out.pos = worldToClip(global.view, pos_w);
   out.normal = objectNormalToWorld(w2o, normal_o);
   out.uv = v.uv;
 
@@ -45,7 +42,7 @@ V2F vertMain(VertInput v)
 [shader("fragment")]
 float4 fragMain(V2F v2f) : SV_Target0
 {
-  float3 view_fwd = global.view.w2c[2].xyz;
+  float3 view_fwd = global.view.camTxfm[2].xyz;
 
   float3 n = normalize(v2f.normal);
 
