@@ -2404,6 +2404,8 @@ VizState * init(const VizConfig &cfg)
 
         // Generate a new value randomly offset.
         heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
+        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3 + 1] = heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
+        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3 + 2] = heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
       }
     }
   }
@@ -2411,9 +2413,9 @@ VizState * init(const VizConfig &cfg)
   for (int i = 0; i < heatmapWidth * heatmapHeight * heatmapDepth; i++)
   {
 
-    heatmapBytes[i * 4 + 0] = (u8)(heatmapPixels[i * 3 + 2] * 255);
-    heatmapBytes[i * 4 + 1] = (u8)(heatmapPixels[i * 3 + 1] * 255);
-    heatmapBytes[i * 4 + 2] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth-2))? 0 :(heatmapPixels[i * 3 + 0] * 255);
+    heatmapBytes[i * 4 + 0] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth - 2)) ? 0 : (heatmapPixels[i * 3 + 0] * 255);
+    heatmapBytes[i * 4 + 1] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth - 2)) ? 0 : (heatmapPixels[i * 3 + 1] * 255);
+    heatmapBytes[i * 4 + 2] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth - 2)) ? 0 : (heatmapPixels[i * 3 + 2] * 255);
     heatmapBytes[i * 4 + 3] = (u8)255;
   }
 
