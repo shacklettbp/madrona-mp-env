@@ -16,7 +16,7 @@ public float3 viewDirection(ViewData view_data)
 
 public float convertToLinearDepth(ViewData view_data, float proj_depth)
 {
-  return proj_dir == 0.0 ? FLT_MAX : view_data.zNear / proj_depth;
+  return proj_depth == 0.0 ? 132000.f : view_data.zNear / proj_depth;
 }
 
 public float4 worldToClip(ViewData view_data, float3 pos_w)

@@ -280,8 +280,6 @@ float4 VolumetricFog(float2 uv)
     float3 camPos = cameraPosition(global.view);
     float3 worldPos = clipToWorld(global.view, float3(2 * uv.x - 1, -2 * uv.y + 1, depth));
 
-    depth = depth == 0.0 ? 132000.0 : LinearDepth(depth);
-
     // Now we can transform the end points into a ray in volume space, relative to the center.
     float3 boxCenter = (consts.mapBBMin.xyz + consts.mapBBMax.xyz) * 0.5;
     float3 boxSize = (consts.mapBBMax.xyz - consts.mapBBMin.xyz) * 0.5;
