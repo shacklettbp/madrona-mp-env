@@ -381,7 +381,7 @@ float4 fragMain(VSOutput input) : SV_Target {
     //float3 blurColor;
     //color.rgb = DepthOfField(color.rgb, input.uv, blurColor);
 
-    //color.rgb = Bloom(color.rgb, input.uv);
+    color.rgb = Bloom(color.rgb, input.uv);
 
     color.rgb *= Vignette(input.uv);
 

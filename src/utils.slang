@@ -9,6 +9,11 @@ public float3 cameraPosition(ViewData view_data)
                 view_data.camTxfm[2].w);
 }
 
+public float3 viewDirection(ViewData view_data)
+{
+  return view_data.camTxfm[2].xyz;
+}
+
 public float convertToLinearDepth(ViewData view_data, float proj_depth)
 {
   return proj_dir == 0.0 ? FLT_MAX : view_data.zNear / proj_depth;

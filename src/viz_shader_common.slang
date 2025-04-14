@@ -48,6 +48,7 @@ VIS struct OpaqueGeoPerDraw {
 
 VIS struct MapPerDraw {
   VIS float4 wireframeConfig;
+  VIS uint meshVertexOffset;
   VIS uint meshIndexOffset;
 };
 

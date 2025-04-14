@@ -3918,7 +3918,7 @@ static void setupViewData(Engine &ctx,
   out->view.fbDims =
     { (u32)viz->window->pixelWidth, (u32)viz->window->pixelHeight };
   out->view.screenScale = Vector2(screen_x_scale, screen_y_scale);
-  out->view.zNear = 0.01f;
+  out->view.zNear = 1.f;
 }
 
 static NonUniformScaleObjectTransform computeNonUniformScaleTxfm(
@@ -3979,11 +3979,12 @@ static void renderMap(VizState *viz,
     const MapGeoMesh &mesh = viz->mapMeshes[mesh_idx];
 
     raster_enc.drawData(MapPerDraw {
-      .wireframeConfig = { 1.f, 1.f, 0.f, 2.f },
+      .wireframeConfig = { 0.1f, 0.1f, 0.1f, 1.5f },
+      .meshVertexOffset = mesh.vertOffset,
       .meshIndexOffset = mesh.indexOffset,
     });
 
-    raster_enc.drawIndexed(mesh.vertOffset, mesh.indexOffset, mesh.numTris);
+    raster_enc.drawIndexed(0, mesh.indexOffset, mesh.numTris);
   }
 }
 
