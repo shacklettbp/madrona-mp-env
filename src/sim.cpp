@@ -4361,9 +4361,10 @@ inline void fullTeamDoneRewardSystem(
 }
 
 inline void pvpRecordSystem(Engine &ctx,
-                            MatchInfo &)
+                            MatchInfo &match_info)
 {
     StepLog &step_log = *ctx.data().recordLog;
+    step_log.curStep = match_info.curStep;
 
     for (CountT i = 0; i < consts::maxTeamSize * 2; i++) {
         if (i >= (CountT)ctx.data().numAgents) {
@@ -4404,9 +4405,10 @@ inline void pvpRecordSystem(Engine &ctx,
 }
 
 inline void pvpReplaySystem(Engine &ctx,
-                            MatchInfo &)
+                            MatchInfo &match_info)
 {
     StepLog step_log = *ctx.data().replayLog;
+    match_info.curStep = step_log.curStep;
 
     for (CountT i = 0; i < consts::maxTeamSize * 2; i++) {
         if (i >= (CountT)ctx.data().numAgents) {

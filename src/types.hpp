@@ -541,6 +541,7 @@ struct AgentLogData {
 
 struct StepLog {
   AgentLogData agentData[consts::maxTeamSize * 2];
+  i32 curStep;
 };
 
 struct EventLogGlobalState {

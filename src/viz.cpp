@@ -401,6 +401,11 @@ private:
 
 const int DownsamplePasses = 3;
 
+struct AgentRecentTrajectory {
+  std::array<Vector3, 256> points;
+  i32 curOffset = 0;
+};
+
 struct VizState {
   UISystem *ui;
   Window *window;
@@ -447,6 +452,9 @@ struct VizState {
   RasterShader goalRegionsShaderWireframe;
   RasterShader goalRegionsShaderWireframeNoDepth;
   RasterShader analyticsTeamHullShader;
+
+  ParamBlockType agentPathsParamBlockType;
+  RasterShader agentPathsShader;
 
   ParamBlockType shotVizParamBlockType;
 
@@ -514,6 +522,8 @@ struct VizState {
   bool debugMenus = false;
 
   AnalyticsDB db = {};
+
+  AgentRecentTrajectory agentTrajectories[consts::maxTeamSize * 2] = {};
 };
 
 PostEffectPass::PostEffectPass()
@@ -2657,6 +2667,7 @@ VizState * init(const VizConfig &cfg)
       .rasterConfig = {
         .depthCompare = DepthCompare::GreaterOrEqual,
         .writeDepth = false,
+        .cullMode = CullMode::None,
       },
     });
 
@@ -2692,6 +2703,35 @@ VizState * init(const VizConfig &cfg)
       .rasterConfig = {
         .depthCompare = DepthCompare::Disabled,
         .writeDepth = false,
+        .blending = { BlendingConfig::additiveDefault() },
+      },
+    });
+
+  viz->agentPathsParamBlockType = gpu->createParamBlockType({
+    .uuid = "agent_paths_pb"_to_uuid,
+    .buffers = {
+      {
+        .type = BufferBindingType::Storage,
+        .shaderUsage = ShaderStage::Vertex,
+      },
+    },
+  });
+  viz->agentPathsShader = loadShader(viz,
+    MADRONA_MP_ENV_SRC_DIR "paths.slang", {
+      .byteCode = {},
+      .vertexEntry = "pathVert",
+      .fragmentEntry = "pathFrag",
+      .rasterPass = viz->offscreenPassInterface,
+      .paramBlockTypes = {
+        viz->globalParamBlockType,
+        viz->agentPathsParamBlockType,
+      },
+      .numPerDrawBytes = sizeof(Vector4),
+      .rasterConfig = {
+        .depthBias = 200000,
+        .depthBiasSlope = 2e-2f,
+        .depthBiasClamp = 1e-4f,
+        .cullMode = CullMode::None,
         .blending = { BlendingConfig::additiveDefault() },
       },
     });
@@ -2765,6 +2805,9 @@ void shutdown(VizState *viz)
   }
 
   gpu->destroyCommandEncoder(viz->enc);
+
+  gpu->destroyRasterShader(viz->agentPathsShader);
+  gpu->destroyParamBlockType(viz->agentPathsParamBlockType);
 
   gpu->destroyRasterShader(viz->shotVizShader);
   gpu->destroyParamBlockType(viz->shotVizParamBlockType);
@@ -3103,6 +3146,30 @@ void doAI(VizState* viz, Manager& mgr, int world, int player)
         {});
 }
 
+static void populateAgentTrajectories(VizState *viz, Manager &mgr)
+{
+  Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+  const auto &query = ctx.query<Position, TeamInfo, Done, CombatState>();
+
+  MatchInfo &match_info = ctx.singleton<MatchInfo>();
+
+  ctx.iterateQuery(query,
+    [&]
+  (Vector3 pos, TeamInfo team_info, Done &done, CombatState &combat_state)
+  {
+    i32 agent_idx = team_info.team * viz->teamSize + team_info.offset;
+    AgentRecentTrajectory &traj = viz->agentTrajectories[agent_idx];
+
+    if (done.v || combat_state.wasKilled || match_info.curStep == 1) {
+      traj.curOffset = 0;
+    }
+
+    traj.points[traj.curOffset++ % traj.points.size()] = pos;
+  });
+
+}
+
 void loop(VizState *viz, Manager &mgr)
 {
   auto action_tensor = mgr.pvpDiscreteActionTensor();
@@ -3307,6 +3374,8 @@ void loop(VizState *viz, Manager &mgr)
 
       mgr.step();
       viz->simEventsState.clear();
+
+      populateAgentTrajectories(viz, mgr);
 
       //step_fn(step_data);
 
@@ -4294,6 +4363,69 @@ static void renderAgents(Engine &ctx, VizState *viz,
   });
 }
 
+static void renderAgentPaths(VizState *viz, RasterPassEncoder &raster_enc)
+{
+  raster_enc.setShader(viz->agentPathsShader);
+  raster_enc.setParamBlock(0, viz->globalParamBlock);
+
+
+  for (int team_idx = 0; team_idx < 2; team_idx++) {
+    uint32_t total_num_line_verts = 0;
+    for (int i = 0; i < viz->teamSize; i++) {
+      AgentRecentTrajectory &traj = viz->agentTrajectories[team_idx * viz->teamSize + i];
+
+      if (traj.curOffset == 0) {
+        continue;
+      }
+
+      total_num_line_verts += 2 * (std::min(traj.curOffset, (i32)traj.points.size()) - 1);
+    }
+
+    if (total_num_line_verts == 0) {
+      continue;
+    }
+
+    uint32_t num_buffer_bytes = total_num_line_verts * sizeof(Vector4);
+
+    MappedTmpBuffer paths_buffer = raster_enc.tmpBuffer(num_buffer_bytes);
+
+    Vector4 *path_vert_staging = (Vector4 *)paths_buffer.ptr;
+    for (int i = 0; i < viz->teamSize; i++) {
+      AgentRecentTrajectory &traj = viz->agentTrajectories[team_idx * viz->teamSize + i];
+
+      i32 start_offset = std::max(i32(traj.curOffset - traj.points.size()), 0);
+      i32 traj_len = traj.curOffset - start_offset;
+
+      i32 cur_offset = start_offset;
+      while (cur_offset != traj.curOffset - 1) {
+        Vector3 a = traj.points[cur_offset % traj.points.size()];
+        Vector3 b = traj.points[(cur_offset + 1) % traj.points.size()];
+
+        float a_alpha = float(cur_offset - start_offset) / float(traj_len);
+        float b_alpha = float(cur_offset + 1 - start_offset) / float(traj_len);
+
+        *path_vert_staging++ = Vector4::fromVec3W(a, a_alpha);
+        *path_vert_staging++ = Vector4::fromVec3W(b, b_alpha);
+
+        cur_offset++;
+      }
+    }
+
+    assert((char *)path_vert_staging == (char *)paths_buffer.ptr + num_buffer_bytes);
+
+    ParamBlock paths_tmp_pb = raster_enc.createTemporaryParamBlock({
+      .typeID = viz->agentPathsParamBlockType,
+      .buffers = {
+        { .buffer = paths_buffer.buffer, .offset = paths_buffer.offset, .numBytes = num_buffer_bytes },
+      },
+    });
+
+    raster_enc.setParamBlock(1, paths_tmp_pb);
+    raster_enc.drawData(team_idx == 0 ? Vector4(0, 0, 1, 1) : Vector4(1, 0, 0, 1));
+    raster_enc.draw(0, total_num_line_verts);
+  }
+}
+
 #ifdef DB_SUPPORT
 static void renderAnalyticsViz(Engine &ctx, VizState *viz,
                                RasterPassEncoder &raster_enc)
@@ -4606,6 +4738,9 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   (void)renderGoalRegions;
   renderShotViz(ctx, viz, offscreen_raster_enc);
   renderZones(ctx, viz, offscreen_raster_enc);
+  if (viz->curView == 0) {
+    renderAgentPaths(viz, offscreen_raster_enc);
+  }
 #ifdef DB_SUPPORT
   renderAnalyticsViz(ctx, viz, offscreen_raster_enc);
 #endif
