@@ -1,12 +1,14 @@
 // post_effect.slang
 
-#include "viz_shader_common.h"
+import viz_shader_common;
+import utils;
 
 struct PostParams {
   Texture2D depthTexture;
   SamplerState depthSamplerState;
 };
 
+ParameterBlock<GlobalPassData> global;
 ParameterBlock<PostParams> params;
 ParameterBlock<PostEffectData> consts;
 
@@ -48,7 +50,7 @@ float2(-0.783, 0.534)
 float2 RotatedDisk(float2 uv, int sample)
 {
     // Generate a random angle from the uv.
-    float2 sceneResolution = (float2)consts.view.fbDims;
+    float2 sceneResolution = (float2)global.view.fbDims;
     int angleSelect = (((int)(uv.y * sceneResolution.y) % 4) * 4 + ((int)(uv.x * sceneResolution.x) % 4));
     float angle = poissonDisk[angleSelect / 2][angleSelect % 2] * 3.1415;
     float s = sin(angle);
@@ -61,12 +63,6 @@ struct VSOutput {
     float4 position : SV_POSITION;
     float2 uv : TEXCOORD0;
 };
-
-static float near = 0.01;
-float LinearDepth(float depth)
-{
-    return near / depth;
-}
 
 float GaussianFactor(float x, float y, float sigma)
 {
@@ -95,11 +91,11 @@ float SSAO(float2 uv)
 
     float occlusion = 0.0;
     float depth = params.depthTexture.Sample(params.depthSamplerState, uv).x;
-    float linearDepth = LinearDepth(depth);
+    float linearDepth = convertToLinearDepth(global.view, depth);
     for (int i = 0; i < poissonDiskSize; i++) {
         float2 offset = RotatedDisk(uv, i / 2) * (size / linearDepth);
         float sampleDepth = params.depthTexture.Sample(params.depthSamplerState, uv + offset).x;
-        float sampleLinearDepth = LinearDepth(sampleDepth);
+        float sampleLinearDepth = convertToLinearDepth(global.view, sampleDepth);
         float sampleOcclusion = saturate((linearDepth - sampleLinearDepth) / ssaoDepth);
         occlusion += sampleOcclusion;
     }

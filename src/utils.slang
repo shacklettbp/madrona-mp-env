@@ -1,10 +1,50 @@
-public float4 worldToClip(float3x4 w2c, float3 pos_w, float z_near)
+module utils;
+
+import viz_shader_common;
+
+public float3 cameraPosition(ViewData view_data)
 {
+  return float3(view_data.camTxfm[0].w,
+                view_data.camTxfm[1].w,
+                view_data.camTxfm[2].w);
+}
+
+public float convertToLinearDepth(ViewData view_data, float proj_depth)
+{
+  return proj_dir == 0.0 ? FLT_MAX : view_data.zNear / proj_depth;
+}
+
+public float4 worldToClip(ViewData view_data, float3 pos_w)
+{
+  float3x4 cam = view_data.camTxfm;
+  float3x3 w2c = float3x3(cam[0].xyz, cam[1].xyz, cam[2].xyz);
+  float3 cam_pos = float3(cam[0].w, cam[1].w, cam[2].w);
+
+  float3 pos_cam_relative = pos_w - cam_pos;
+
   return float4(
-    dot(pos_w, w2c[0].xyz) + w2c[0].w,
-    dot(pos_w, w2c[1].xyz) + w2c[1].w,
-    z_near,
-    dot(pos_w, w2c[2].xyz) + w2c[2].w);
+    view_data.screenScale.x * dot(pos_cam_relative, w2c[0]),
+    view_data.screenScale.y * dot(pos_cam_relative, w2c[1]),
+    view_data.zNear,
+    dot(pos_cam_relative, w2c[2]));
+}
+
+public float3 clipToWorld(ViewData view_data, float3 clip_pos)
+{
+  float3x4 cam = view_data.camTxfm;
+  float3 cam_pos = float3(cam[0].w, cam[1].w, cam[2].w);
+
+  float2 inv_screen_scale = 1.0 / view_data.screenScale;
+
+  float linear_depth = convertToLinearDepth(view_data, clip_pos.z);
+
+  float2 unproject = float2(inv_screen_scale.x * clip_pos.x * linear_depth, 
+                            inv_screen_scale.y * clip_pos.y * linear_depth);
+
+  return cam_pos + 
+        cam[0].xyz * unproject.x + 
+        cam[1].xyz * unproject.y + 
+        cam[2].xyz * linear_depth;
 }
 
 public float3 objectPositionToWorld(float3x4 o2w, float3 pos_o)

@@ -374,7 +374,7 @@ public:
   void Prepare(struct VizState* _viz, const char *shaderName, float resXMult, float resYMult, int colorOutputs, bool outputDepth);
   void AddTextureInput(gas::Texture& texture, bool volumeTexture = false );
   void AddDepthInput(gas::Texture& depth);
-  void SetParams(const Vector4 &shaderParams, const float3x4 &c2w);
+  void SetParams(const Vector4 &shaderParams);
   gas::RasterPassEncoder Execute(bool final);
   void Destroy();
   gas::Texture& Output(int i);
@@ -434,13 +434,14 @@ struct VizState {
   PostEffectPass finalPass;
 
   ParamBlockType globalParamBlockType;
+  ParamBlockType mapGeoParamBlockType;
   ParamBlockType postEffectParamBlockType;
   Buffer globalPassDataBuffer;
   Buffer postEffectDataBuffer;
   ParamBlock globalParamBlock;
-  PostEffectData postEffectData;
 
-  RasterShader opaqueGeoShader;
+  RasterShader mapShader;
+  RasterShader renderableObjectsShader;
   RasterShader agentShader;
   RasterShader goalRegionsShader;
   RasterShader goalRegionsShaderWireframe;
@@ -504,24 +505,16 @@ struct VizState {
   std::vector<Object> objects = {};
   std::vector<AssetGroup> objectAssetGroups = {};
 
+  Buffer mapBuffer = {};
+  ParamBlock mapGeoParamBlock = {};
+  std::vector<MapGeoMesh> mapMeshes = {};
+
   bool mainMenu = true;
   bool gameRunning = false;
   bool debugMenus = false;
 
   AnalyticsDB db = {};
 };
-
-static void setupInverseViewMatrix(const Camera& cam, VizState* viz, float3x4 * out_c2w)
-{
-  float aspect_ratio = (f32)viz->window->pixelWidth / viz->window->pixelHeight;
-
-  float fov = cam.fine_aim ? cam.fov * 0.5f : cam.fov;
-  float fov_scale = 1.f / tanf(math::toRadians(fov * 0.5f));
-
-  out_c2w->rows[0] = Vector4::fromVec3W(cam.right / fov_scale * aspect_ratio, cam.position.x);
-  out_c2w->rows[1] = Vector4::fromVec3W(-cam.up / fov_scale, cam.position.y);
-  out_c2w->rows[2] = Vector4::fromVec3W(cam.fwd, cam.position.z);
-}
 
 PostEffectPass::PostEffectPass()
 {
@@ -628,7 +621,7 @@ void PostEffectPass::AddDepthInput(gas::Texture& texture)
   samplerBindings.push_back({ .type = SamplerBindingType::NonFiltering,.shaderUsage = ShaderStage::Fragment });
 }
 
-void PostEffectPass::SetParams(const Vector4 &shaderParams, const float3x4 &c2w)
+void PostEffectPass::SetParams(const Vector4 &shaderParams)
 {
   CopyPassEncoder copy_enc = viz->enc.beginCopyPass();
   MappedTmpBuffer param_staging =
@@ -637,13 +630,12 @@ void PostEffectPass::SetParams(const Vector4 &shaderParams, const float3x4 &c2w)
   PostEffectData* param_staging_ptr =
     (PostEffectData*)param_staging.ptr;
 
-  viz->postEffectData.view.fbDims = { resX, resY };
-  viz->postEffectData.params1 = shaderParams;
-  viz->postEffectData.params2 = Vector4(0.f, 0.f, 0.f, 0.f);
-  viz->postEffectData.mapBBMin = Vector4(viz->flyCam.mapMin.x, viz->flyCam.mapMin.y, viz->flyCam.mapMin.z, 0.f);
-  viz->postEffectData.mapBBMax = Vector4(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f * 2.0f, 0.f);
-  viz->postEffectData.c2w = c2w;
-  memcpy(param_staging_ptr, &viz->postEffectData, sizeof(PostEffectData));
+  *param_staging_ptr = PostEffectData {
+    .params1 = shaderParams,
+    .params2 = Vector4::zero(),
+    .mapBBMin = Vector4(viz->flyCam.mapMin.x, viz->flyCam.mapMin.y, viz->flyCam.mapMin.z, 0.f),
+    .mapBBMax = Vector4(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f * 2.0f, 0.f),
+  };
 
   copy_enc.copyBufferToBuffer(
     param_staging.buffer, viz->postEffectDataBuffer,
@@ -690,7 +682,7 @@ gas::RasterPassEncoder PostEffectPass::Execute( bool final )
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = interface,
-      .paramBlockTypes = { paramType, viz->postEffectParamBlockType },
+      .paramBlockTypes = { viz->globalParamBlockType, paramType, viz->postEffectParamBlockType },
       .rasterConfig = {
         .depthCompare = DepthCompare::Disabled,
       },
@@ -700,8 +692,9 @@ gas::RasterPassEncoder PostEffectPass::Execute( bool final )
   initialized = true;
   gas::RasterPassEncoder enc = viz->enc.beginRasterPass(pass);
   enc.setShader(shader);
-  enc.setParamBlock(0, params);
-  enc.setParamBlock(1, params2);
+  enc.setParamBlock(0, viz->globalParamBlock);
+  enc.setParamBlock(1, params);
+  enc.setParamBlock(2, params2);
   enc.draw(0, 1);
   if (!final)
     viz->enc.endRasterPass(enc);
@@ -730,7 +723,7 @@ void PostEffectPass::Destroy()
 struct VizWorld {
   VizState *viz;
 
-  Query<Position, Rotation, Scale, ObjectID> opaqueGeoQuery;
+  Query<Position, Rotation, Scale, ObjectID> renderableObjectsQuery;
 };
 
 static inline float srgbToLinear(float srgb)
@@ -2498,7 +2491,7 @@ VizState * init(const VizConfig &cfg)
     .width = (u16)heatmapWidth,
     .height = (u16)heatmapHeight,
     .depth = (u16)heatmapDepth,
-    .usage = TextureUsage::ColorAttachment | TextureUsage::ShaderSampled,
+    .usage = TextureUsage::ShaderSampled,
     .initData = {
       .ptr = heatmapBytes,
     },
@@ -2525,6 +2518,20 @@ VizState * init(const VizConfig &cfg)
         .shaderUsage = ShaderStage::Vertex | ShaderStage::Fragment,
       },
     },
+  });
+
+  viz->mapGeoParamBlockType = gpu->createParamBlockType({
+    .uuid = "map_geometry_pb"_to_uuid,
+    .buffers = {
+      {
+        .type = BufferBindingType::Storage,
+        .shaderUsage = ShaderStage::Vertex | ShaderStage::Fragment,
+      },
+      {
+        .type = BufferBindingType::Storage,
+        .shaderUsage = ShaderStage::Vertex | ShaderStage::Fragment,
+      },
+    }
   });
 
   viz->globalPassDataBuffer = gpu->createBuffer({
@@ -2569,8 +2576,22 @@ VizState * init(const VizConfig &cfg)
 
   using enum VertexFormat;
 
-  viz->opaqueGeoShader = loadShader(viz, 
-    MADRONA_MP_ENV_SRC_DIR "opaque_geo.slang", {
+  viz->mapShader = loadShader(viz, 
+    MADRONA_MP_ENV_SRC_DIR "map.slang", {
+      .byteCode = {},
+      .vertexEntry = "vertMain",
+      .fragmentEntry = "fragMain",
+      .rasterPass = viz->offscreenPassInterface,
+      .paramBlockTypes = { viz->globalParamBlockType, viz->mapGeoParamBlockType },
+      .numPerDrawBytes = sizeof(MapPerDraw),
+      .rasterConfig = {
+        .depthCompare = DepthCompare::GreaterOrEqual,
+        .cullMode = CullMode::None,
+      },
+    });
+
+  viz->renderableObjectsShader = loadShader(viz, 
+    MADRONA_MP_ENV_SRC_DIR "objects.slang", {
       .byteCode = {},
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
@@ -2735,6 +2756,10 @@ void shutdown(VizState *viz)
   gpu->waitUntilWorkFinished(viz->mainQueue);
   gpu->waitUntilIdle();
 
+  if (!viz->mapBuffer.null()) {
+    gpu->destroyBuffer(viz->mapBuffer);
+  }
+
   for (AssetGroup &group : viz->objectAssetGroups) {
     gpu->destroyBuffer(group.geometryBuffer);
   }
@@ -2752,7 +2777,8 @@ void shutdown(VizState *viz)
 
   gpu->destroyRasterShader(viz->agentShader);
 
-  gpu->destroyRasterShader(viz->opaqueGeoShader);
+  gpu->destroyRasterShader(viz->renderableObjectsShader);
+  gpu->destroyRasterShader(viz->mapShader);
 
   ImGuiSystem::shutdown(gpu);
 
@@ -2790,7 +2816,7 @@ void initWorld(Context &ctx, VizState *viz)
   auto &viz_world = ctx.singleton<VizWorld>();
   viz_world.viz = viz;
 
-  viz_world.opaqueGeoQuery = ctx.query<Position, Rotation, Scale, ObjectID>();
+  viz_world.renderableObjectsQuery = ctx.query<Position, Rotation, Scale, ObjectID>();
 }
 
 static void handleCamera(VizState *viz, float delta_t)
@@ -3885,20 +3911,14 @@ static void setupViewData(Engine &ctx,
   float screen_x_scale = fov_scale / aspect_ratio;
   float screen_y_scale = fov_scale;
 
-  float right_dot_pos = -dot(cam.right, cam.position);
-  float up_dot_pos = -dot(cam.up, cam.position);
-  float fwd_dot_pos = -dot(cam.fwd, cam.position);
-
-  Vector4 w2v_r0 = Vector4::fromVec3W(cam.right, right_dot_pos);
-  Vector4 w2v_r1 = Vector4::fromVec3W(cam.up, up_dot_pos);
-  Vector4 w2v_r2 = Vector4::fromVec3W(cam.fwd, fwd_dot_pos);
-
-  out->view.w2c.rows[0] = w2v_r0 * screen_x_scale;
-  out->view.w2c.rows[1] = w2v_r1 * screen_y_scale;
-  out->view.w2c.rows[2] = w2v_r2;
+  out->view.camTxfm.rows[0] = Vector4::fromVec3W(cam.right, cam.position.x);
+  out->view.camTxfm.rows[1] = Vector4::fromVec3W(cam.up, cam.position.y);
+  out->view.camTxfm.rows[2] = Vector4::fromVec3W(cam.fwd, cam.position.z);
 
   out->view.fbDims =
     { (u32)viz->window->pixelWidth, (u32)viz->window->pixelHeight };
+  out->view.screenScale = Vector2(screen_x_scale, screen_y_scale);
+  out->view.zNear = 0.01f;
 }
 
 static NonUniformScaleObjectTransform computeNonUniformScaleTxfm(
@@ -3945,16 +3965,42 @@ static NonUniformScaleObjectTransform computeNonUniformScaleTxfm(
   return out;
 }
 
-static void renderGeo(Engine &ctx, VizState *viz,
+static void renderMap(VizState *viz,
                       RasterPassEncoder &raster_enc)
 {
-  raster_enc.setShader(viz->opaqueGeoShader);
+  raster_enc.setShader(viz->mapShader);
+  raster_enc.setParamBlock(0, viz->globalParamBlock);
+  raster_enc.setParamBlock(1, viz->mapGeoParamBlock);
+
+  raster_enc.setIndexBufferU32(viz->mapBuffer);
+
+  for (uint32_t mesh_idx = 0; mesh_idx < (uint32_t)viz->mapMeshes.size();
+       mesh_idx++) {
+    const MapGeoMesh &mesh = viz->mapMeshes[mesh_idx];
+
+    raster_enc.drawData(MapPerDraw {
+      .wireframeConfig = { 1.f, 1.f, 0.f, 2.f },
+      .meshIndexOffset = mesh.indexOffset,
+    });
+
+    raster_enc.drawIndexed(mesh.vertOffset, mesh.indexOffset, mesh.numTris);
+  }
+}
+
+static void renderObjects(Engine &ctx, VizState *viz,
+                          RasterPassEncoder &raster_enc)
+{
+  raster_enc.setShader(viz->renderableObjectsShader);
   raster_enc.setParamBlock(0, viz->globalParamBlock);
 
-  ctx.iterateQuery(ctx.singleton<VizWorld>().opaqueGeoQuery,
+  ctx.iterateQuery(ctx.singleton<VizWorld>().renderableObjectsQuery,
     [&]
   (Position pos, Rotation rot, Scale scale, ObjectID obj_id)
   {
+    if ((size_t)obj_id.idx >= viz->objects.size()) {
+      return;
+    }
+
     Object obj = viz->objects[obj_id.idx];
 
     for (i32 i = 0; i < obj.numMeshes; i++) {
@@ -4479,7 +4525,6 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   viz->enc.beginEncoding();
 
-  float3x4 c2w;
   {
     CopyPassEncoder copy_enc = viz->enc.beginCopyPass();
     MappedTmpBuffer global_param_staging =
@@ -4521,10 +4566,6 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     }
 
     setupViewData(ctx, cam, viz, global_param_staging_ptr);
-    setupInverseViewMatrix(cam, viz, &c2w);
-
-    memcpy(&viz->postEffectData.view, global_param_staging_ptr, sizeof(GlobalPassData));
-
     copy_enc.copyBufferToBuffer(
         global_param_staging.buffer, viz->globalPassDataBuffer,
         global_param_staging.offset, 0, sizeof(GlobalPassData));
@@ -4536,7 +4577,8 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   RasterPassEncoder offscreen_raster_enc = viz->enc.beginRasterPass(viz->offscreenPass);
 
-  renderGeo(ctx, viz, offscreen_raster_enc);
+  renderMap(viz, offscreen_raster_enc);
+  renderObjects(ctx, viz, offscreen_raster_enc);
   renderAgents(ctx, viz, offscreen_raster_enc);
   //renderGoalRegions(ctx, viz, offscreen_raster_enc);
   (void)renderGoalRegions;
@@ -4544,12 +4586,6 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   renderZones(ctx, viz, offscreen_raster_enc);
 #ifdef DB_SUPPORT
   renderAnalyticsViz(ctx, viz, offscreen_raster_enc);
-#endif
-
-#if 0
-  raster_enc.setShader(viz->opaqueGeoShader);
-  raster_enc.drawData(Vector3 { 1, 0, 1 });
-  raster_enc.draw(0, 1);
 #endif
 
   viz->enc.endRasterPass(offscreen_raster_enc);
@@ -4560,7 +4596,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
 
   viz->ssaoPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", 1.0f, 1.0f, 1, false);
   viz->ssaoPass.AddDepthInput(viz->sceneDepth);
-  viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f), c2w);
+  viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f));
   viz->ssaoPass.Execute( false );
 
   // Do a multi-pass bloom.
@@ -4572,21 +4608,21 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     float downsample_factor = 0.25f / (pass + 1);
     viz->downsamplePasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "downsample.slang", downsample_factor, downsample_factor, 1, false);
     viz->downsamplePasses[pass].AddTextureInput( pass == 0 ? viz->sceneColor : viz->downsamplePasses[pass-1].Output(0));
-    viz->downsamplePasses[pass].SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f), c2w); // X and Y are downsample factors.
+    viz->downsamplePasses[pass].SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f)); // X and Y are downsample factors.
     viz->downsamplePasses[pass].Execute(false);
 
     // ---  BLOOM HORIZONTAL  ---
 
     viz->bloomHorizontalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
     viz->bloomHorizontalPasses[pass].AddTextureInput(viz->downsamplePasses[pass].Output(0));
-    viz->bloomHorizontalPasses[pass].SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f), c2w); // 0 in X is horizontal pass.
+    viz->bloomHorizontalPasses[pass].SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // 0 in X is horizontal pass.
     viz->bloomHorizontalPasses[pass].Execute(false);
 
     // ---  BLOOM VERTICAL  ---
 
     viz->bloomVerticalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
     viz->bloomVerticalPasses[pass].AddTextureInput(viz->bloomHorizontalPasses[pass].Output(0));
-    viz->bloomVerticalPasses[pass].SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f), c2w); // 1 in X is vertical pass.
+    viz->bloomVerticalPasses[pass].SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f)); // 1 in X is vertical pass.
     viz->bloomVerticalPasses[pass].Execute(false);
   }
 
@@ -4602,7 +4638,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   viz->finalPass.AddTextureInput(viz->sceneColor);
   viz->finalPass.AddDepthInput(viz->sceneDepth);
   // The fog parameters are the input. Half-distance density, half-height, and height offset.
-  viz->finalPass.SetParams(Vector4(200.0f, 1000.0f, viz->flyCam.mapMin.z + 50.0f, 0.0f), c2w);
+  viz->finalPass.SetParams(Vector4(200.0f, 1000.0f, viz->flyCam.mapMin.z + 50.0f, 0.0f));
   RasterPassEncoder final = viz->finalPass.Execute( true );
 
   // ---  UI  ---
@@ -4668,9 +4704,95 @@ void loadMapAssets(VizState *viz, const char *map_assets_path)
   
   MapRenderableCollisionData map_render_data =
       convertCollisionDataToRenderMeshes(collision_data);
-  loadObjects(viz, map_render_data.objects, {
-    { rgb8ToFloat(230, 230, 230), -1, 0.8f, 1.0f },
-  }, {});
+
+  GPURuntime *gpu = viz->gpu;
+  CommandEncoder &enc = viz->enc;
+
+  u32 total_num_bytes;
+  {
+    u32 cur_num_bytes = 0;
+    for (const MapGeoMesh &in_mesh : map_render_data.meshes) {
+      cur_num_bytes = utils::roundUp(cur_num_bytes, (u32)sizeof(MapGeoVertex));
+      cur_num_bytes += sizeof(MapGeoVertex) * in_mesh.numVertices;
+      cur_num_bytes += sizeof(u32) * in_mesh.numTris * 3;
+    }
+    
+    total_num_bytes = cur_num_bytes;
+  }
+
+  Buffer staging = gpu->createStagingBuffer(total_num_bytes);
+  Buffer map_buffer = gpu->createBuffer({
+    .numBytes = total_num_bytes,
+    .usage = BufferUsage::DrawVertex | BufferUsage::DrawIndex |
+        BufferUsage::CopyDst | BufferUsage::ShaderStorage,
+  });
+
+  u8 *staging_ptr;
+  gpu->prepareStagingBuffers(1, &staging, (void **)&staging_ptr);
+
+  u32 cur_buf_offset = 0;
+  for (const MapGeoMesh &in_mesh : map_render_data.meshes) {
+    cur_buf_offset = utils::roundUp(cur_buf_offset, (u32)sizeof(MapGeoVertex));
+    u32 vertex_offset = cur_buf_offset / sizeof(MapGeoVertex);
+
+    MapGeoVertex *vertex_staging =
+        (MapGeoVertex *)(staging_ptr + cur_buf_offset);
+
+    for (i32 i = 0; i < (i32)in_mesh.numVertices; i++) {
+      vertex_staging[i] = MapGeoVertex {
+        .pos = map_render_data.positions[in_mesh.vertOffset + i],
+      };
+    }
+
+    cur_buf_offset += sizeof(MapGeoVertex) * in_mesh.numVertices;
+
+    u32 index_offset = cur_buf_offset / sizeof(u32);
+    u32 *indices_staging = (u32 *)(staging_ptr + cur_buf_offset);
+
+    u32 num_index_bytes = sizeof(u32) * in_mesh.numTris * 3;
+    memcpy(indices_staging, map_render_data.indices.data() + in_mesh.indexOffset,
+           num_index_bytes);
+    cur_buf_offset += num_index_bytes;
+
+    viz->mapMeshes.push_back({
+      .vertOffset = vertex_offset,
+      .indexOffset = index_offset, 
+      .numVertices = in_mesh.numVertices,
+      .numTris = in_mesh.numTris,
+    });
+  }
+  
+  assert(cur_buf_offset == total_num_bytes);
+
+  gpu->flushStagingBuffers(1, &staging);
+
+  gpu->waitUntilReady(viz->mainQueue);
+
+  {
+    enc.beginEncoding();
+    CopyPassEncoder copy_enc = enc.beginCopyPass();
+
+    copy_enc.copyBufferToBuffer(staging, map_buffer, 0, 0, total_num_bytes);
+
+    enc.endCopyPass(copy_enc);
+    enc.endEncoding();
+  }
+
+  gpu->submit(viz->mainQueue, enc);
+  gpu->waitUntilWorkFinished(viz->mainQueue);
+
+  gpu->destroyStagingBuffer(staging);
+
+  assert(viz->mapBuffer.null());
+  viz->mapBuffer = map_buffer;
+
+  viz->mapGeoParamBlock = gpu->createParamBlock({
+    .typeID = viz->mapGeoParamBlockType,
+    .buffers = {
+      { .buffer = viz->mapBuffer },
+      { .buffer = viz->mapBuffer },
+    },
+  });
 }
 
 }

@@ -1,6 +1,5 @@
-#include "viz_shader_common.h"
-
 import utils;
+import viz_shader_common;
 
 ParameterBlock<GlobalPassData> global;
 
@@ -27,8 +26,8 @@ float4 vertMain(uint id : SV_VertexID, out V2F v2f) : SV_Position
   float3 start_pos_w = line_data.start;
   float3 end_pos_w = line_data.end;
 
-  float4 start_clip_pos = worldToClip(global.view.w2c, start_pos_w, 0.01);
-  float4 end_clip_pos = worldToClip(global.view.w2c, end_pos_w, 0.01);
+  float4 start_clip_pos = worldToClip(global.view, start_pos_w);
+  float4 end_clip_pos = worldToClip(global.view, end_pos_w);
 
   float2 start_screen_pos = start_clip_pos.xy / start_clip_pos.w;
   float2 end_screen_pos = end_clip_pos.xy / end_clip_pos.w;

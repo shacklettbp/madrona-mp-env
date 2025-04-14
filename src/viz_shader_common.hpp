@@ -20,10 +20,13 @@ using float2 = Vector2;
 using uint2 = std::array<uint32_t, 2>;
 using uint = uint32_t;
 
-#include "viz_shader_common.h"
+#define VIZ_SHADER_COMMON_HOST_INCLUDE
+#include "viz_shader_common.slang"
+#undef VIZ_SHADER_COMMON_HOST_INCLUDE
 }
 
 using shader::OpaqueGeoVertex;
+using shader::MapGeoVertex;
 using shader::ViewData;
 using shader::NonUniformScaleObjectTransform;
 using shader::GlobalPassData;
@@ -33,5 +36,6 @@ using shader::GoalRegionPerDraw;
 using shader::AnalyticsTeamHullPerDraw;
 using shader::ShotVizLineData;
 using shader::AgentPerDraw;
+using shader::MapPerDraw;
 
 }

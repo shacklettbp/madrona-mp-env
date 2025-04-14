@@ -33,14 +33,18 @@ struct MapCollisionAssets {
     madrona::HeapArray<MeshInfo> meshes;
 };
 
+struct MapGeoMesh {
+    uint32_t vertOffset;
+    uint32_t indexOffset;
+    uint32_t numVertices;
+    uint32_t numTris;
+};
+
 struct MapRenderableCollisionData {
     madrona::HeapArray<madrona::math::Vector3> positions;
-    madrona::HeapArray<madrona::math::Vector3> normals;
-    madrona::HeapArray<madrona::math::Vector2> uvs;
     madrona::HeapArray<uint32_t> indices;
 
-    madrona::HeapArray<madrona::imp::SourceMesh> meshes;
-    madrona::HeapArray<madrona::imp::SourceObject> objects;
+    madrona::HeapArray<MapGeoMesh> meshes;
 };
 
 struct MapNavmesh {
