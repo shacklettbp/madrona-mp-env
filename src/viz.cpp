@@ -3931,7 +3931,7 @@ static void setupLightData(VizState *viz, GlobalPassData *out)
   };
 
   lights.sunColor = { 0.3f, 0.7f, 0.7f };
-  lights.sunColor *= 2.f;
+  lights.sunColor *= 1.2f;
 
   out->lights = lights;
 }
@@ -3989,12 +3989,14 @@ static void renderMap(VizState *viz,
 
   raster_enc.setIndexBufferU32(viz->mapBuffer);
 
+  float wireframe_width = viz->curView == 0 ? 0.5f : 1.0f;
+
   for (uint32_t mesh_idx = 0; mesh_idx < (uint32_t)viz->mapMeshes.size();
        mesh_idx++) {
     const MapGeoMesh &mesh = viz->mapMeshes[mesh_idx];
 
     raster_enc.drawData(MapPerDraw {
-      .wireframeConfig = { 0.9f, 0.9f, 0.2f, 1.0f },
+      .wireframeConfig = { 1.0f, 0.8f, 0.2f, wireframe_width },
       .meshVertexOffset = mesh.vertOffset,
       .meshIndexOffset = mesh.indexOffset,
       .metallic = 0.1f,
