@@ -18,6 +18,8 @@ using float3 = Vector3;
 using float2 = Vector2;
 
 using uint2 = std::array<uint32_t, 2>;
+using uint3 = std::array<uint32_t, 3>;
+using uint4 = std::array<uint32_t, 4>;
 using uint = uint32_t;
 
 #define VIZ_SHADER_COMMON_HOST_INCLUDE

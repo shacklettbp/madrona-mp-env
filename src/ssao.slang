@@ -50,7 +50,7 @@ float2(-0.783, 0.534)
 float2 RotatedDisk(float2 uv, int sample)
 {
     // Generate a random angle from the uv.
-    float2 sceneResolution = (float2)global.view.fbDims;
+    float2 sceneResolution = (float2)consts.params2.xy;
     int angleSelect = (((int)(uv.y * sceneResolution.y) % 4) * 4 + ((int)(uv.x * sceneResolution.x) % 4));
     float angle = poissonDisk[angleSelect / 2][angleSelect % 2] * 3.1415;
     float s = sin(angle);
