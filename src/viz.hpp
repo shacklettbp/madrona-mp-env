@@ -31,6 +31,7 @@ struct VizConfig {
 
   const char *analyticsDBPath;
   const char *trajectoriesDBPath;
+  const char *recordedDataPath;
 };
 
 struct VizCamera {};

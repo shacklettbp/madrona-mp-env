@@ -91,7 +91,7 @@ namespace NavUtils
     {
         if (visited[cell])
             return false;
-        path.push_back(cell);
+path.push_back(cell);
         visited[cell] = true;
 
         if (cell == targetCell)
@@ -524,6 +524,8 @@ struct VizState {
   AnalyticsDB db = {};
 
   AgentRecentTrajectory agentTrajectories[consts::maxTeamSize * 2] = {};
+
+  const char *recordedDataPath = nullptr;
 };
 
 PostEffectPass::PostEffectPass()
@@ -1065,6 +1067,142 @@ static void initMapCamera(VizState* viz, Manager& mgr)
     viz->flyCam.mapMax.z = std::max(viz->flyCam.mapMax.z, vert.z);
   }
   viz->flyCam.target = (viz->flyCam.mapMax + viz->flyCam.mapMin) * 0.5f;
+}
+
+static void loadHeatmapData(VizState *viz, Manager &mgr)
+{
+  // TEMP GENERATE HEATMAP DATA!
+  constexpr int heatmapWidth = 64;
+  constexpr int heatmapHeight = 64;
+  constexpr int heatmapDepth = 5;
+  i64 * heatmapPixels = new i64[heatmapWidth * heatmapHeight * heatmapDepth];
+#if 0
+  // Generate random walk noise.
+  float variance = 0.2f;
+  for (int x = 0; x < heatmapWidth; x++)
+  {
+    for (int y = 0; y < heatmapHeight; y++)
+    {
+      for (int z = 0; z < heatmapDepth; z++)
+      {
+        // Average the values of all the neighbors we've already visited.
+        float prev = 0.0f;
+        float norm = 0.0f;
+        if (x > 0)
+        {
+          norm++;
+          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + (x - 1)) * 3];
+        }
+        if (y > 0)
+        {
+          norm++;
+          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + (y-1) * heatmapWidth + x) * 3];
+        }
+        if (z > 0)
+        {
+          norm++;
+          prev += heatmapPixels[((z-1) * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
+        }
+        if (norm > 0)
+          prev /= norm;
+
+        // Generate a new value randomly offset.
+        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
+      }
+    }
+  }
+#endif
+  memset(heatmapPixels, 0,
+    sizeof(float) * heatmapWidth * heatmapHeight * heatmapDepth * 3);
+
+  float heatmap_rescale = 1.f;
+
+  if (viz->recordedDataPath) {
+    auto fileNumElems =
+      []<typename T>
+    (std::ifstream &f)
+    {
+      f.seekg(0, f.end);
+      i64 size = f.tellg();
+      f.seekg(0, f.beg);
+
+      assert(size % sizeof(T) == 0);
+
+      return size / sizeof(T);
+    };
+
+    std::ifstream steps_file(viz->recordedDataPath, std::ios::binary);
+    assert(steps_file.is_open());
+
+    i64 num_steps = fileNumElems.template operator()<PackedStepSnapshot>(steps_file);
+    HeapArray<PackedStepSnapshot> steps(num_steps);
+    steps_file.read((char *)steps.data(), sizeof(PackedStepSnapshot) * num_steps);
+
+    Vector3 mapBBMin(viz->flyCam.mapMin.x, viz->flyCam.mapMin.y, viz->flyCam.mapMin.z);
+    Vector3 mapBBMax(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f * 2.0f);
+
+    Vector3 boxExtent = mapBBMax - mapBBMin;
+
+    i64 max_heatmap_count = 0;
+    for (i64 step_idx = 0; step_idx < num_steps; step_idx++) {
+      PackedStepSnapshot &snapshot = steps[step_idx];
+
+      for (i64 player_idx = 0; player_idx < viz->teamSize * 2; player_idx++) {
+        PackedPlayerSnapshot &player = snapshot.players[player_idx];
+
+        Vector3 pos(player.pos[0], player.pos[1], player.pos[2]);
+
+        Vector3 uvw = (pos - mapBBMin);
+        uvw.x /= boxExtent.x;
+        uvw.y /= boxExtent.y;
+        uvw.z /= boxExtent.z;
+
+        int coord_x = std::clamp(int(uvw.x * heatmapWidth + 0.5f), 0, heatmapWidth - 1);
+        int coord_y = std::clamp(int(uvw.y * heatmapHeight + 0.5f), 0, heatmapHeight - 1);
+        int coord_z = std::clamp(int(uvw.z * heatmapDepth + 0.5f), 0, heatmapDepth - 1);
+
+        int linear_idx = coord_z * heatmapWidth * heatmapHeight + coord_y * heatmapWidth + coord_x;
+
+        heatmapPixels[linear_idx] += 1;
+
+        if (heatmapPixels[linear_idx] > max_heatmap_count) {
+          max_heatmap_count = heatmapPixels[linear_idx];
+        }
+      }
+    }
+
+    if (max_heatmap_count > 0) {
+      heatmap_rescale = 1.f / float(max_heatmap_count);
+    }
+  }
+
+  u8 *heatmapBytes = new u8[heatmapWidth * heatmapHeight * heatmapDepth * 4];
+  for (int i = 0; i < heatmapWidth * heatmapHeight * heatmapDepth; i++)
+  {
+    float v = 10.f * heatmapPixels[i] * heatmap_rescale;
+
+    heatmapBytes[i * 4 + 0] = (u8)(v * 255);
+    heatmapBytes[i * 4 + 1] = (u8)(v * 255);
+    heatmapBytes[i * 4 + 2] = (u8)(v * 255);
+    heatmapBytes[i * 4 + 3] = (u8)255;
+  }
+
+  GPURuntime *gpu = viz->gpu;
+
+  viz->heatmapTexture = gpu->createTexture({
+    .format = TextureFormat::RGBA8_UNorm,
+    .width = (u16)heatmapWidth,
+    .height = (u16)heatmapHeight,
+    .depth = (u16)heatmapDepth,
+    .usage = TextureUsage::ShaderSampled,
+    .initData = {
+      .ptr = heatmapBytes,
+    },
+    }, viz->mainQueue);
+  gpu->waitUntilWorkFinished(viz->mainQueue);
+
+  delete[] heatmapPixels;
+  delete[] heatmapBytes;
 }
 
 static constexpr inline f32 MOUSE_SPEED = 2.0f;// 1e-1f;
@@ -2371,55 +2509,6 @@ static void analyticsBGThread(AnalyticsDB &db)
 
 VizState * init(const VizConfig &cfg)
 {
-  // TEMP GENERATE HEATMAP DATA!
-  int heatmapWidth = 64;
-  int heatmapHeight = 64;
-  int heatmapDepth = 5;
-  float * heatmapPixels = new float[heatmapWidth * heatmapHeight * heatmapDepth * 3];
-  // Generate random walk noise.
-  float variance = 0.2f;
-  for (int x = 0; x < heatmapWidth; x++)
-  {
-    for (int y = 0; y < heatmapHeight; y++)
-    {
-      for (int z = 0; z < heatmapDepth; z++)
-      {
-        // Average the values of all the neighbors we've already visited.
-        float prev = 0.0f;
-        float norm = 0.0f;
-        if (x > 0)
-        {
-          norm++;
-          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + (x - 1)) * 3];
-        }
-        if (y > 0)
-        {
-          norm++;
-          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + (y-1) * heatmapWidth + x) * 3];
-        }
-        if (z > 0)
-        {
-          norm++;
-          prev += heatmapPixels[((z-1) * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
-        }
-        if (norm > 0)
-          prev /= norm;
-
-        // Generate a new value randomly offset.
-        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
-      }
-    }
-  }
-  u8 *heatmapBytes = new u8[heatmapWidth * heatmapHeight * heatmapDepth * 4];
-  for (int i = 0; i < heatmapWidth * heatmapHeight * heatmapDepth; i++)
-  {
-
-    heatmapBytes[i * 4 + 0] = (u8)(heatmapPixels[i * 3 + 2] * 255);
-    heatmapBytes[i * 4 + 1] = (u8)(heatmapPixels[i * 3 + 1] * 255);
-    heatmapBytes[i * 4 + 2] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth-2))? 0 :(heatmapPixels[i * 3 + 0] * 255);
-    heatmapBytes[i * 4 + 3] = (u8)255;
-  }
-
   VizState *viz = new VizState {};
 
   viz->ui = UISystem::init(UISystem::Config {
@@ -2496,16 +2585,7 @@ VizState * init(const VizConfig &cfg)
       viz->offscreenPassInterface,
       DATA_DIR "imgui_font.ttf", 12.f);
 
-  viz->heatmapTexture = gpu->createTexture({
-    .format = swapchain_properties.format,
-    .width = (u16)heatmapWidth,
-    .height = (u16)heatmapHeight,
-    .depth = (u16)heatmapDepth,
-    .usage = TextureUsage::ShaderSampled,
-    .initData = {
-      .ptr = heatmapBytes,
-    },
-    }, viz->mainQueue);
+  viz->heatmapTexture = {};
   gpu->waitUntilWorkFinished(viz->mainQueue);
 
   viz->enc = gpu->createCommandEncoder(viz->mainQueue);
@@ -2519,6 +2599,7 @@ VizState * init(const VizConfig &cfg)
   viz->doAI[1] = cfg.doAITeam2;
 
   viz->simTickRate = 0;
+  viz->recordedDataPath = cfg.recordedDataPath;
 
   viz->globalParamBlockType = gpu->createParamBlockType({
     .uuid = "global_pb"_to_uuid,
@@ -3202,6 +3283,8 @@ void loop(VizState *viz, Manager &mgr)
   auto last_frontend_tick_time = std::chrono::steady_clock::now();
 
   initMapCamera(viz, mgr);
+
+  loadHeatmapData(viz, mgr);
 
   bool running = true;
   while (running) {

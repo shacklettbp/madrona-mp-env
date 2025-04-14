@@ -62,6 +62,7 @@ int main(int argc, char *argv[])
     char *trajectories_db_path = nullptr;
     char *curriculum_data_path = nullptr;
     char *policy_weights_path = nullptr;
+    char *recorded_data_path = nullptr;
 
     for (int i = 1; i < argc; i++) {
       char *arg = argv[i];
@@ -172,6 +173,17 @@ int main(int argc, char *argv[])
           }
 
           policy_weights_path = argv[i];
+        } else if (!strcmp("load-recorded-data", arg)) {
+          if (recorded_data_path != nullptr) {
+            usageErr();
+          }
+
+          i += 1;
+          if (i == argc) {
+            usageErr();
+          }
+
+          recorded_data_path = argv[i];
         }
       } else {
         if (num_worlds_set) {
@@ -199,6 +211,7 @@ int main(int argc, char *argv[])
       .skipMainMenu = skip_main_menu,
       .analyticsDBPath = analytics_db_path,
       .trajectoriesDBPath = trajectories_db_path,
+      .recordedDataPath = recorded_data_path,
     });
 
     if (scene_dir.empty()) {
