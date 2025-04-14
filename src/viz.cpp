@@ -3923,6 +3923,21 @@ static void setupViewData(Engine &ctx,
   out->view.zNear = 1.f;
 }
 
+static void setupLightData(VizState *viz, GlobalPassData *out)
+{
+  shader::LightData lights;
+  lights.sunPosition = {
+    0.65f * (viz->flyCam.mapMin.x + viz->flyCam.mapMax.x),
+    0.45f * (viz->flyCam.mapMin.y + viz->flyCam.mapMax.y),
+    viz->flyCam.mapMax.z,
+  };
+
+  lights.sunColor = { 0.3f, 0.7f, 0.7f };
+  lights.sunColor *= 2.f;
+
+  out->lights = lights;
+}
+
 static NonUniformScaleObjectTransform computeNonUniformScaleTxfm(
     Vector3 t, Quat r, Diag3x3 s)
 {
@@ -3981,9 +3996,11 @@ static void renderMap(VizState *viz,
     const MapGeoMesh &mesh = viz->mapMeshes[mesh_idx];
 
     raster_enc.drawData(MapPerDraw {
-      .wireframeConfig = { 0.1f, 0.1f, 0.1f, 1.0f },
+      .wireframeConfig = { 0.9f, 0.9f, 0.2f, 1.0f },
       .meshVertexOffset = mesh.vertOffset,
       .meshIndexOffset = mesh.indexOffset,
+      .metallic = 0.1f,
+      .roughness = 0.7f,
     });
 
     raster_enc.drawIndexed(0, mesh.indexOffset, mesh.numTris);
@@ -4569,6 +4586,8 @@ inline void renderSystem(Engine &ctx, VizState *viz)
     }
 
     setupViewData(ctx, cam, viz, global_param_staging_ptr);
+    setupLightData(viz, global_param_staging_ptr);
+
     copy_enc.copyBufferToBuffer(
         global_param_staging.buffer, viz->globalPassDataBuffer,
         global_param_staging.offset, 0, sizeof(GlobalPassData));

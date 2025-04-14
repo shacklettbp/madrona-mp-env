@@ -23,6 +23,8 @@ struct BarycentricDeriv
   float3 d_dy;
 };
 
+static const float PI = 3.14159265359;
+
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 BarycentricDeriv calcFullBary(float4 pt0, float4 pt1, float4 pt2,
                               float2 pixel_ndc)
@@ -117,6 +119,46 @@ float edgeFactor(BarycentricDeriv barys) {
   return min(min(f.x, f.y), f.z);
 }
 
+float DistributionGGX(float3 N, float3 H, float roughness)
+{
+    float a      = roughness*roughness;
+    float a2     = a*a;
+    float NdotH  = max(dot(N, H), 0.0); // saturate
+    float NdotH2 = NdotH*NdotH;
+
+    float num    = a2;
+    float denom  = (NdotH2 * (a2 - 1.0) + 1.0);
+    denom        = PI * denom * denom;
+
+    return num / max(denom, 0.0000001); // avoid divide by zero
+}
+
+float GeometrySchlickGGX(float NdotV, float roughness)
+{
+    float r = (roughness + 1.0);
+    float k = (r*r) / 8.0;
+
+    float num   = NdotV;
+    float denom = NdotV * (1.0 - k) + k;
+
+    return num / max(denom, 0.0000001); // avoid divide by zero
+}
+
+float GeometrySmith(float3 N, float3 V, float3 L, float roughness)
+{
+    float NdotV = max(dot(N, V), 0.0);
+    float NdotL = max(dot(N, L), 0.0);
+    float ggx2  = GeometrySchlickGGX(NdotV, roughness);
+    float ggx1  = GeometrySchlickGGX(NdotL, roughness);
+
+    return ggx1 * ggx2;
+}
+
+float3 fresnelSchlick(float cosTheta, float3 F0)
+{
+    return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
 [shader("vertex")]
 void vertMain(uint vert_id : SV_VertexID,
               out float4 clip_pos_out : SV_Position,
@@ -141,7 +183,8 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
   float3 view_fwd = viewDirection(global.view);
 
   BarycentricDeriv barys;
-  float3 n;
+  float3 pos_w;
+  float3 geo_normal;
   {
     uint base_index_offset = perDraw.meshIndexOffset + 3 * v2f.primID;
 
@@ -163,8 +206,7 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
                       geoBlock.positions[base_vert_offsets.z + 1], 
                       geoBlock.positions[base_vert_offsets.z + 2]);
 
-    n = normalize(cross(b - a, c - a));
-    n = faceforward(n, -view_fwd, n);
+    geo_normal = normalize(cross(b - a, c - a));
 
     float4 a_clip = worldToClip(global.view, a);
     float4 b_clip = worldToClip(global.view, b);
@@ -175,17 +217,60 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
       -2.0 * (window_pos.y / global.view.fbDims.y) + 1);
 
     barys = calcFullBary(a_clip, b_clip, c_clip, pixel_ndc);
+
+    pos_w = a * barys.lambda.x + b * barys.lambda.y + c * barys.lambda.z;
   }
 
-  //float3 n = normalize(v2f.normal);
-  
-  float3 base_color = float3(1, 1, 1);
-  float3 mesh_color = lerp(perDraw.wireframeConfig.xyz, base_color, edgeFactor(barys));
+  float3 albedo = float3(1, 1, 1);
 
-  float dot_view = clamp(dot(view_fwd, n), 0, 1);
+  float3 to_sun = global.lights.sunPosition - pos_w;
+  float3 to_frag = cameraPosition(global.view) - pos_w;
+  float3 sun_color = global.lights.sunColor;
 
-  float3 lighting = lerp(0.25, 1, dot_view) * mesh_color;
+  float3 V = normalize(to_frag);
+  float3 N = faceforward(geo_normal, V, geo_normal);
+  float3 L = normalize(to_sun);
 
-  return float4(lighting, 1.f);
-  //return float4(getPrimitiveColor(perDraw.meshIndexOffset, v2f.primID), 1);
+  float metallic = perDraw.metallic;
+  float roughness = perDraw.roughness;
+
+  float3 H = normalize(V + L);
+
+  float NdotV = max(dot(N, V), 0.0);
+  float NdotL = max(dot(N, L), 0.0);
+  float NdotH = max(dot(N, H), 0.0);
+  float VdotH = max(dot(V, H), 0.0);
+
+
+  float3 F0 = float3(0.04, 0.04, 0.04); // Base reflectance for dielectrics
+  F0 = lerp(F0, albedo, metallic);      // Use albedo for metallic surfaces
+
+  float3 F = fresnelSchlick(VdotH, F0); // Use VdotH for Cook-Torrance
+  float D = DistributionGGX(N, H, roughness);
+  float G = GeometrySmith(N, V, L, roughness);
+
+  float3 numerator = D * G * F;
+  float denominator = 4.0 * NdotV * NdotL + 0.001;
+
+  float3 specular = numerator / denominator;
+
+
+  float3 kS = F;
+  float3 kD = float3(1.0, 1.0, 1.0) - kS;
+  kD *= (1.0 - metallic);
+
+
+  float3 radiance = sun_color * NdotL;
+
+  float3 Lo = (kD * albedo / PI + specular) * radiance;
+
+  float3 ambient = float3(0.05) * albedo * (1.0 - metallic);
+
+  float3 emissive = perDraw.wireframeConfig.xyz * (1.0 - edgeFactor(barys));
+  emissive /= max(1.0, (length(to_frag) * 0.001f));
+
+  float3 color = ambient + Lo + emissive;
+
+  return float4(color, 1.f);
+  // return float4(getPrimitiveColor(perDraw.meshIndexOffset, v2f.primID), 1);
 }
