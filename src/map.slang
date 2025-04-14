@@ -266,7 +266,7 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
   float3 ambient = float3(0.05) * albedo * (1.0 - metallic);
 
   float3 emissive = perDraw.wireframeConfig.xyz * (1.0 - edgeFactor(barys));
-  emissive /= max(1.0, (length(to_cam) * 0.00055f));
+  emissive /= max(1.0, (length(to_cam) * 0.001f));
 
   float3 color = ambient + Lo + emissive;
 

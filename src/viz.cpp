@@ -1074,7 +1074,7 @@ static void loadHeatmapData(VizState *viz, Manager &mgr)
   // TEMP GENERATE HEATMAP DATA!
   constexpr int heatmapWidth = 64;
   constexpr int heatmapHeight = 64;
-  constexpr int heatmapDepth = 5;
+  constexpr int heatmapDepth = 3;
   i64 * heatmapPixels = new i64[heatmapWidth * heatmapHeight * heatmapDepth];
 #if 0
   // Generate random walk noise.
@@ -1160,6 +1160,7 @@ static void loadHeatmapData(VizState *viz, Manager &mgr)
         int coord_x = std::clamp(int(uvw.x * heatmapWidth + 0.5f), 0, heatmapWidth - 1);
         int coord_y = std::clamp(int(uvw.y * heatmapHeight + 0.5f), 0, heatmapHeight - 1);
         int coord_z = std::clamp(int(uvw.z * heatmapDepth + 0.5f), 0, heatmapDepth - 1);
+        coord_z += 1;
 
         int linear_idx = coord_z * heatmapWidth * heatmapHeight + coord_y * heatmapWidth + coord_x;
 
