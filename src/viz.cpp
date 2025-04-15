@@ -1207,6 +1207,7 @@ static void loadHeatmapData(VizState *viz)
 }
 
 static constexpr inline f32 MOUSE_SPEED = 2.0f;// 1e-1f;
+static constexpr inline f32 MOUSE_SCROLL_SPEED = 2.0f;// 1e-1f;
 // FIXME
 
 #ifdef DB_SUPPORT
@@ -2955,6 +2956,9 @@ static void handleCamera(VizState *viz, float delta_t)
   Vector3 translate = Vector3::zero();
 
   const UserInput &input = viz->ui->inputState();
+  const UserInputEvents &input_events = viz->ui->inputEvents();
+
+  Vector2 mouse_scroll = input_events.mouseScroll();
 
   if (cam.orbit) {
     // Rotate around the focus point.
@@ -2972,19 +2976,16 @@ static void handleCamera(VizState *viz, float delta_t)
         cam.heading -= PI * 2.0f;
       while (cam.heading < -PI) 
         cam.heading += PI * 2.0f;
+    } else {
+      viz->ui->disableRawMouseInput(viz->window);
     }
-    else if (input.isDown(InputID::MouseMiddle) ||
-      input.isDown(InputID::MouseLeft)) {
-      viz->ui->enableRawMouseInput(viz->window);
-      Vector2 mouse_delta = input.mouseDelta();
-      float zoomChange = mouse_delta.y * MOUSE_SPEED * delta_t;
+
+    if (mouse_scroll.y != 0.f) {
+      float zoomChange = -mouse_scroll.y * MOUSE_SCROLL_SPEED * delta_t;
       if (zoomChange < 0.0f)
         cam.zoom /= 1.0f - zoomChange;
       if (zoomChange > 0.0f)
         cam.zoom *= 1.0f + zoomChange;
-    }
-    else {
-      viz->ui->disableRawMouseInput(viz->window);
     }
 
     // Move the focus point.
