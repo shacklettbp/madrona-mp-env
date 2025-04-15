@@ -1069,7 +1069,7 @@ static void initMapCamera(VizState* viz, Manager& mgr)
   viz->flyCam.target = (viz->flyCam.mapMax + viz->flyCam.mapMin) * 0.5f;
 }
 
-static void loadHeatmapData(VizState *viz, Manager &mgr)
+static void loadHeatmapData(VizState *viz)
 {
   // TEMP GENERATE HEATMAP DATA!
   constexpr int heatmapWidth = 64;
@@ -1113,7 +1113,7 @@ static void loadHeatmapData(VizState *viz, Manager &mgr)
   }
 #endif
   memset(heatmapPixels, 0,
-    sizeof(float) * heatmapWidth * heatmapHeight * heatmapDepth * 3);
+    sizeof(i64) * heatmapWidth * heatmapHeight * heatmapDepth);
 
   float heatmap_rescale = 1.f;
 
@@ -2526,7 +2526,8 @@ VizState * init(const VizConfig &cfg)
 
   SwapchainProperties swapchain_properties;
   viz->swapchain = gpu->createSwapchain(
-      viz->window->surface, &swapchain_properties);
+      viz->window->surface, { SwapchainFormat::SDR_SRGB },
+      &swapchain_properties);
   viz->swapchainFormat = swapchain_properties.format;
 
   viz->mainQueue = gpu->getMainQueue();
@@ -3285,7 +3286,7 @@ void loop(VizState *viz, Manager &mgr)
 
   initMapCamera(viz, mgr);
 
-  loadHeatmapData(viz, mgr);
+  loadHeatmapData(viz);
 
   bool running = true;
   while (running) {
