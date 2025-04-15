@@ -380,7 +380,7 @@ public:
   gas::Texture& Output(int i);
   gas::Texture& Depth();
 private:
-  struct VizState* viz;
+  struct VizState* viz = nullptr;
   RasterPassInterface interface;
   RasterPass pass;
   std::vector<Texture> targets;
@@ -725,6 +725,10 @@ gas::Texture& PostEffectPass::Depth()
 
 void PostEffectPass::Destroy()
 {
+  if (!viz) {
+    return;
+  }
+
   viz->gpu->destroyRasterShader(shader);
   viz->gpu->destroyRasterPass(pass);
   viz->gpu->destroyRasterPassInterface(interface);
@@ -2519,7 +2523,8 @@ VizState * init(const VizConfig &cfg)
   });
 
   viz->window = viz->ui->createMainWindow(
-      "MadronaMPEnv", cfg.windowWidth, cfg.windowHeight);
+      "MadronaMPEnv", cfg.windowWidth, cfg.windowHeight,
+      WindowInitFlags::Resizable);
   
   viz->gpuAPI = viz->ui->gpuAPI();
   GPURuntime *gpu = viz->gpu =
