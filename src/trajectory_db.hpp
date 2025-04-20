@@ -31,8 +31,10 @@ struct TrajectoryDB;
 TrajectoryDB * openTrajectoryDB(const char *path);
 void closeTrajectoryDB(TrajectoryDB *db);
 
-bool saveTrajectory(TrajectoryDB *db, TrajectoryType type, i64 id,
-                    const char *tag,
-                    Span<const AgentTrajectoryStep> trajectory);
+i64 saveTrajectory(TrajectoryDB *db, TrajectoryType type, i64 id,
+                   const char *tag,
+                   Span<const AgentTrajectoryStep> trajectory);
+
+void removeTrajectory(TrajectoryDB *db, i64 id);
 
 }
