@@ -16,6 +16,8 @@
 #include "db.hpp"
 #endif
 
+#include "trajectory_db.hpp"
+
 #include "viz_shader_common.hpp"
 
 #include <madrona/navmesh.hpp>
@@ -526,6 +528,9 @@ struct VizState {
   AgentRecentTrajectory agentTrajectories[consts::maxTeamSize * 2] = {};
 
   const char *recordedDataPath = nullptr;
+  
+  TrajectoryDB *trajectoryDB = nullptr;
+  std::vector<AgentTrajectoryStep> humanTrace = {};
 };
 
 PostEffectPass::PostEffectPass()
@@ -2857,6 +2862,11 @@ VizState * init(const VizConfig &cfg)
 
   loadAssets(viz);
 
+  if (cfg.trajectoryDBPath) {
+    viz->trajectoryDB = openTrajectoryDB(cfg.trajectoryDBPath);
+    assert(viz->trajectoryDB);
+  }
+
 #ifdef DB_SUPPORT
   if (cfg.analyticsDBPath != nullptr) {
     loadAnalyticsDB(viz, cfg);
@@ -3259,6 +3269,54 @@ static void populateAgentTrajectories(VizState *viz, Manager &mgr)
 
 }
 
+static void trackHumanTrace(VizState *viz, Manager &mgr,
+                            float mouse_yaw_delta, float mouse_pitch_delta)
+{
+  if (!viz->trajectoryDB) {
+    return;
+  }
+
+  if (viz->curControl == 0) {
+    viz->humanTrace.clear();
+    return;
+  }
+
+  if (viz->simEventsState.downEvent(InputID::T)) {
+    u32 num_timesteps = (u32)viz->humanTrace.size();
+
+    if (num_timesteps > 0) {
+      saveTrajectory(viz->trajectoryDB, TrajectoryType::Human, -1, nullptr,
+                     viz->humanTrace);
+      viz->humanTrace.clear();
+    }
+  }
+
+  Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+  i32 agent_idx = viz->curControl - 1;
+  Entity agent = ctx.data().agents[agent_idx];
+
+  Aim aim = ctx.get<Aim>(agent);
+
+  AgentTrajectoryStep snapshot;
+  snapshot.pos = ctx.get<Position>(agent);
+  snapshot.yaw = aim.yaw;
+  snapshot.pitch = aim.pitch;
+
+  snapshot.discreteAction = ctx.get<PvPDiscreteAction>(agent);
+  snapshot.continuousAimAction = {
+    .yaw = mouse_yaw_delta,
+    .pitch = mouse_pitch_delta,
+  };
+
+  snapshot.selfObs = ctx.get<SelfObservation>(agent);
+  snapshot.teammateObs = ctx.get<TeammateObservation>(agent);
+  snapshot.opponentObs = ctx.get<OpponentObservation>(agent);
+  snapshot.opponentLastKnownObs = ctx.get<OpponentLastKnownObservations>(agent);
+
+  viz->humanTrace.push_back(snapshot);
+}
+
 void loop(VizState *viz, Manager &mgr)
 {
   auto action_tensor = mgr.pvpDiscreteActionTensor();
@@ -3294,6 +3352,7 @@ void loop(VizState *viz, Manager &mgr)
 
   loadHeatmapData(viz);
 
+  float mouse_yaw_delta = 0, mouse_pitch_delta = 0;
   bool running = true;
   while (running) {
     gpu->waitUntilReady(viz->mainQueue);
@@ -3321,6 +3380,50 @@ void loop(VizState *viz, Manager &mgr)
       frontend_delta_t = duration.count();
     }
     last_frontend_tick_time = cur_frame_start_time;
+
+    if (viz->curControl == 0) {
+      handleCamera(viz, frontend_delta_t);
+    } else {
+      viz->ui->enableRawMouseInput(viz->window);
+      const UserInput &input = viz->ui->inputState();
+      Vector2 mouse_move = input.mouseDelta();
+      mouse_move.x /= (0.5f * viz->window->pixelWidth);
+      mouse_move.y /= (0.5f * viz->window->pixelHeight);
+
+      Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+      Entity agent = ctx.data().agents[viz->curControl - 1];
+
+      const float mouse_max_move = 1000.f;
+      const float mouse_accelleration = 0.8f;
+      const float fine_aim_multiplier = 0.3f;
+
+      Vector2 mouse_delta = mouse_move * viz->mouseSensitivity * frontend_delta_t;
+      // If we're holding right-mouse, do fine aim.
+      viz->flyCam.fine_aim = false;
+      if (input.isDown(InputID::MouseRight)) {
+        mouse_delta *= fine_aim_multiplier;
+        viz->flyCam.fine_aim = true;
+      }
+
+      // Mouse accelleration.
+      static Vector2 prev_mouse_delta = { 0.f, 0.f };
+      float mouse_delta_len = fmaxf(mouse_delta.length(), 0.01f);
+      mouse_delta = mouse_delta / mouse_delta_len;
+      mouse_delta_len = fminf(mouse_delta_len + fmaxf(0.0f, prev_mouse_delta.dot(mouse_delta)) * mouse_accelleration, mouse_max_move);
+      mouse_delta *= mouse_delta_len;
+      prev_mouse_delta = mouse_delta;
+
+      mouse_yaw_delta -= mouse_delta.x;
+      mouse_pitch_delta -= mouse_delta.y;
+
+      Aim aim = ctx.get<Aim>(agent);
+      aim.yaw -= mouse_delta.x;
+      aim.pitch -= mouse_delta.y;
+
+      ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
+      ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
+    }
 
     auto sim_delta_t = std::chrono::duration<float>(1.f / (float)viz->simTickRate);
 
@@ -3463,6 +3566,10 @@ void loop(VizState *viz, Manager &mgr)
         mgr.setUniformAgentPolicy(AgentPolicy { 0 });
       }
 
+      trackHumanTrace(viz, mgr, mouse_yaw_delta, mouse_pitch_delta);
+      mouse_yaw_delta = 0;
+      mouse_pitch_delta = 0;
+
       mgr.step();
       viz->simEventsState.clear();
 
@@ -3473,47 +3580,6 @@ void loop(VizState *viz, Manager &mgr)
       last_sim_tick_time = cur_frame_start_time;
     }
 
-    if (viz->curControl == 0) {
-      handleCamera(viz, frontend_delta_t);
-    } else {
-      viz->ui->enableRawMouseInput(viz->window);
-      const UserInput &input = viz->ui->inputState();
-      Vector2 mouse_move = input.mouseDelta();
-      mouse_move.x /= (0.5f * viz->window->pixelWidth);
-      mouse_move.y /= (0.5f * viz->window->pixelHeight);
-
-      Engine &ctx = mgr.getWorldContext(viz->curWorld);
-
-      Entity agent = ctx.data().agents[viz->curControl - 1];
-
-      const float mouse_max_move = 1000.f;
-      const float mouse_accelleration = 0.8f;
-      const float fine_aim_multiplier = 0.3f;
-
-      Vector2 mouse_delta = mouse_move * viz->mouseSensitivity * frontend_delta_t;
-      // If we're holding right-mouse, do fine aim.
-      viz->flyCam.fine_aim = false;
-      if (input.isDown(InputID::MouseRight)) {
-        mouse_delta *= fine_aim_multiplier;
-        viz->flyCam.fine_aim = true;
-      }
-
-      // Mouse accelleration.
-      static Vector2 prev_mouse_delta = { 0.f, 0.f };
-      float mouse_delta_len = fmaxf(mouse_delta.length(), 0.01f);
-      mouse_delta = mouse_delta / mouse_delta_len;
-      mouse_delta_len = fminf(mouse_delta_len + fmaxf(0.0f, prev_mouse_delta.dot(mouse_delta)) * mouse_accelleration, mouse_max_move);
-      mouse_delta *= mouse_delta_len;
-      prev_mouse_delta = mouse_delta;
-
-      Aim aim = ctx.get<Aim>(agent);
-      aim.yaw -= mouse_delta.x;
-      aim.pitch -= mouse_delta.y;
-
-      ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
-      ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
-    }
-    
     vizStep(viz, mgr);
 
     gpu->presentSwapchainImage(viz->swapchain);

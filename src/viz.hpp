@@ -30,8 +30,8 @@ struct VizConfig {
   bool skipMainMenu;
 
   const char *analyticsDBPath;
-  const char *trajectoriesDBPath;
   const char *recordedDataPath;
+  const char *trajectoryDBPath;
 };
 
 struct VizCamera {};

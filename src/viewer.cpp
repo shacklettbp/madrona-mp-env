@@ -59,7 +59,7 @@ int main(int argc, char *argv[])
     bool skip_main_menu = false;
 
     char *analytics_db_path = nullptr;
-    char *trajectories_db_path = nullptr;
+    char *trajectory_db_path = nullptr;
     char *curriculum_data_path = nullptr;
     char *policy_weights_path = nullptr;
     char *recorded_data_path = nullptr;
@@ -138,18 +138,6 @@ int main(int argc, char *argv[])
           }
 
           analytics_db_path = argv[i];
-        } else if (!strcmp("trajectories-db", arg)) {
-          if (trajectories_db_path != nullptr) {
-            usageErr();
-          }
-          
-          i += 1;
-
-          if (i == argc) {
-            usageErr();
-          }
-
-          trajectories_db_path = argv[i];
         } else if (!strcmp("curriculum-data", arg)) {
           if (curriculum_data_path != nullptr) {
             usageErr();
@@ -184,6 +172,17 @@ int main(int argc, char *argv[])
           }
 
           recorded_data_path = argv[i];
+        } else if (!strcmp("trajectory-db", arg)) {
+          if (trajectory_db_path != nullptr) {
+            usageErr();
+          }
+
+          i += 1;
+          if (i == argc) {
+            usageErr();
+          }
+
+          trajectory_db_path = argv[i];
         }
       } else {
         if (num_worlds_set) {
@@ -210,8 +209,8 @@ int main(int argc, char *argv[])
       .doAITeam2 = doAITeam2,
       .skipMainMenu = skip_main_menu,
       .analyticsDBPath = analytics_db_path,
-      .trajectoriesDBPath = trajectories_db_path,
       .recordedDataPath = recorded_data_path,
+      .trajectoryDBPath = trajectory_db_path,
     });
 
     if (scene_dir.empty()) {
