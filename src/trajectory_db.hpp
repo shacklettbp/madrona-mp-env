@@ -15,6 +15,8 @@ struct AgentTrajectoryStep {
   float yaw;
   float pitch;
 
+  CombatState combatState;
+
   PvPDiscreteAction discreteAction;
   PvPAimAction continuousAimAction;
 
@@ -36,5 +38,11 @@ i64 saveTrajectory(TrajectoryDB *db, TrajectoryType type, i64 id,
                    Span<const AgentTrajectoryStep> trajectory);
 
 void removeTrajectory(TrajectoryDB *db, i64 id);
+
+i64 numTrajectories(TrajectoryDB *db);
+
+Span<const AgentTrajectoryStep> getTrajectorySteps(TrajectoryDB *db, i64 id);
+TrajectoryType getTrajectoryType(TrajectoryDB *db, i64 id);
+const char * getTrajectoryTag(TrajectoryDB *db, i64 id);
 
 }

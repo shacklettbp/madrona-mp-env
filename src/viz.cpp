@@ -531,6 +531,8 @@ struct VizState {
   
   TrajectoryDB *trajectoryDB = nullptr;
   std::vector<AgentTrajectoryStep> humanTrace = {};
+
+  i32 curVizTrajectory = -1;
 };
 
 PostEffectPass::PostEffectPass()
@@ -2884,6 +2886,10 @@ VizState * init(const VizConfig &cfg)
 
 void shutdown(VizState *viz)
 {
+  if (viz->trajectoryDB) {
+    closeTrajectoryDB(viz->trajectoryDB);
+  }
+
 #ifdef DB_SUPPORT
   if (viz->db.hdl != nullptr) {
     unloadAnalyticsDB(viz->db);
@@ -3283,12 +3289,24 @@ static void trackHumanTrace(VizState *viz, Manager &mgr,
 
   if (viz->simEventsState.downEvent(InputID::T)) {
     u32 num_timesteps = (u32)viz->humanTrace.size();
+    printf("Saving trajectory %d\n", num_timesteps);
 
-    if (num_timesteps > 0) {
-      saveTrajectory(viz->trajectoryDB, TrajectoryType::Human, -1, nullptr,
-                     viz->humanTrace);
-      viz->humanTrace.clear();
+    for (u32 cur_offset = 0; cur_offset < num_timesteps; cur_offset++) {
+      u32 start_offset = cur_offset;
+      for (; cur_offset < num_timesteps; cur_offset++) {
+        if (viz->humanTrace[cur_offset].combatState.wasKilled) {
+          break;
+        }
+      }
+
+      if (cur_offset - start_offset > 0) {
+        Span<AgentTrajectoryStep> trace_subset(
+            viz->humanTrace.data() + start_offset, cur_offset - start_offset);
+
+        saveTrajectory(viz->trajectoryDB, TrajectoryType::Human, -1, "", trace_subset);
+      }
     }
+    viz->humanTrace.clear();
   }
 
   Engine &ctx = mgr.getWorldContext(viz->curWorld);
@@ -3302,6 +3320,8 @@ static void trackHumanTrace(VizState *viz, Manager &mgr,
   snapshot.pos = ctx.get<Position>(agent);
   snapshot.yaw = aim.yaw;
   snapshot.pitch = aim.pitch;
+
+  snapshot.combatState = ctx.get<CombatState>(agent);
 
   snapshot.discreteAction = ctx.get<PvPDiscreteAction>(agent);
   snapshot.continuousAimAction = {
@@ -4057,6 +4077,34 @@ static void playerInfoUI(Engine &ctx, i32 agent_idx)
 
 }
 
+static void trajectoryDBUI(Engine &ctx, VizState *viz)
+{
+  ImGui::Begin("Trajectory DB");
+
+  ImGui::Text("Num Trajectories: %ld", numTrajectories(viz->trajectoryDB));
+
+  const float button_width = 100.f;
+
+  int num_trajectories = numTrajectories(viz->trajectoryDB);
+
+  ImGui::PushItemWidth(button_width);
+
+  if (num_trajectories == 0) {
+    ImGui::BeginDisabled();
+  }
+
+  ImGui::DragInt("Select Trajectory", &viz->curVizTrajectory, 0.25f, -1, num_trajectories - 1,
+                 viz->curVizTrajectory == -1 ? "None" : "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  if (num_trajectories == 0) {
+    ImGui::EndDisabled();
+  }
+
+  ImGui::PopItemWidth();
+
+  ImGui::End();
+}
+
 static Engine & uiLogic(VizState *viz, Manager &mgr)
 {
   const UserInputEvents &input_events = viz->ui->inputEvents();
@@ -4110,6 +4158,10 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
   if (viz->curView == 0) {
     if (viz->debugMenus) {
       agentInfoUI(ctx, viz);
+    }
+
+    if (viz->trajectoryDB) {
+      trajectoryDBUI(ctx, viz);
     }
 
 #ifdef DB_SUPPORT
@@ -4583,6 +4635,41 @@ static void renderAgentPaths(VizState *viz, RasterPassEncoder &raster_enc)
   }
 }
 
+static void trajectoryDBRender(VizState *viz, RasterPassEncoder &raster_enc)
+{
+  if (viz->curVizTrajectory != -1) {
+    Span<const AgentTrajectoryStep> steps = getTrajectorySteps(viz->trajectoryDB, viz->curVizTrajectory);
+
+    raster_enc.drawData(Vector4(0, 1, 0, 1));
+    i64 num_steps = steps.size();
+
+    i64 total_num_verts = (num_steps - 1) * 2;
+    i64 num_buffer_bytes = total_num_verts * sizeof(Vector4);
+
+    MappedTmpBuffer line_data_buf = raster_enc.tmpBuffer(num_buffer_bytes);
+
+    Vector4 *line_data_staging = (Vector4 *)line_data_buf.ptr;
+
+    for (i64 i = 0; i < num_steps - 1; i++) {
+      Vector3 a = steps[i].pos;
+      Vector3 b = steps[i + 1].pos;
+
+      *line_data_staging++ = Vector4::fromVec3W(a, 1.f);
+      *line_data_staging++ = Vector4::fromVec3W(b, 1.f);
+    }
+
+    ParamBlock tmp_geo_block = raster_enc.createTemporaryParamBlock({
+      .typeID = viz->agentPathsParamBlockType,
+      .buffers = {
+        { .buffer = line_data_buf.buffer, .offset = line_data_buf.offset, .numBytes = (u32)num_buffer_bytes },
+      },
+    });
+
+    raster_enc.setParamBlock(1, tmp_geo_block);
+    raster_enc.draw(0, total_num_verts);
+  }
+}
+
 #ifdef DB_SUPPORT
 static void renderAnalyticsViz(Engine &ctx, VizState *viz,
                                RasterPassEncoder &raster_enc)
@@ -4897,7 +4984,11 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   renderZones(ctx, viz, offscreen_raster_enc);
   if (viz->curView == 0) {
     renderAgentPaths(viz, offscreen_raster_enc);
+    if (viz->trajectoryDB) {
+      trajectoryDBRender(viz, offscreen_raster_enc);
+    }
   }
+
 #ifdef DB_SUPPORT
   renderAnalyticsViz(ctx, viz, offscreen_raster_enc);
 #endif
