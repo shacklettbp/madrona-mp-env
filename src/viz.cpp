@@ -11,6 +11,7 @@
 #include "map_importer.hpp"
 #include "mgr.hpp"
 #include "utils.hpp"
+#include <array>
 
 #ifdef DB_SUPPORT
 #include "db.hpp"
@@ -532,7 +533,8 @@ struct VizState {
   TrajectoryDB *trajectoryDB = nullptr;
   std::vector<AgentTrajectoryStep> humanTrace = {};
 
-  i32 curVizTrajectory = -1;
+  i64 curVizTrajectoryID = -1;
+  i32 curVizTrajectoryIndex = -1;
 };
 
 PostEffectPass::PostEffectPass()
@@ -4093,10 +4095,67 @@ static void trajectoryDBUI(Engine &ctx, VizState *viz)
     ImGui::BeginDisabled();
   }
 
-  ImGui::DragInt("Select Trajectory", &viz->curVizTrajectory, 0.25f, -1, num_trajectories - 1,
-                 viz->curVizTrajectory == -1 ? "None" : "%d", ImGuiSliderFlags_AlwaysClamp);
+  int new_index = viz->curVizTrajectoryIndex;
+  ImGui::DragInt("Select Trajectory", &new_index, 0.25f, -1, num_trajectories - 1,
+                 viz->curVizTrajectoryIndex == -1 ? "None" : "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  if (new_index == -1) {
+    viz->curVizTrajectoryID = -1;
+  } else if (new_index != viz->curVizTrajectoryIndex) {
+    viz->curVizTrajectoryID = advanceNTrajectories(viz->trajectoryDB,
+      viz->curVizTrajectoryID, new_index - viz->curVizTrajectoryIndex);
+  }
+  viz->curVizTrajectoryIndex = new_index;
 
   if (num_trajectories == 0) {
+    ImGui::EndDisabled();
+  }
+
+  const char *trajectory_type_str = nullptr;
+  const char *trajectory_tag_str = nullptr;
+  if (viz->curVizTrajectoryID == -1) {
+    ImGui::Text("Trajectory ID: [None]");
+    trajectory_type_str = "None";
+    trajectory_tag_str = "";
+  } else {
+    ImGui::Text("Trajectory ID: %ld", viz->curVizTrajectoryID);
+    TrajectoryType trajectory_type = getTrajectoryType(viz->trajectoryDB, viz->curVizTrajectoryID);
+    switch (trajectory_type) {
+      case TrajectoryType::Human: {
+        trajectory_type_str = "Human";
+      } break;
+      case TrajectoryType::RL: {
+        trajectory_type_str = "RL";
+      } break;
+      case TrajectoryType::Hardcoded: {
+        trajectory_type_str = "Hardcoded";
+      } break;
+      default: {
+        trajectory_type_str = "Unknown";
+      } break;
+    }
+
+    trajectory_tag_str = getTrajectoryTag(viz->trajectoryDB, viz->curVizTrajectoryID);
+    if (trajectory_tag_str == nullptr) {
+      trajectory_tag_str = "";
+    }
+  }
+
+  ImGui::Text("Trajectory Type: %s", trajectory_type_str);
+  ImGui::Text("Trajectory Tag: %s", trajectory_tag_str);
+
+  bool trajectory_selected = viz->curVizTrajectoryID != -1;
+  if (!trajectory_selected) {
+    ImGui::BeginDisabled();
+  }
+
+  if (ImGui::Button("Delete Trajectory")) {
+    removeTrajectory(viz->trajectoryDB, viz->curVizTrajectoryID);
+    viz->curVizTrajectoryID = -1;
+    viz->curVizTrajectoryIndex = -1;
+  }
+
+  if (!trajectory_selected) {
     ImGui::EndDisabled();
   }
 
@@ -4637,8 +4696,8 @@ static void renderAgentPaths(VizState *viz, RasterPassEncoder &raster_enc)
 
 static void trajectoryDBRender(VizState *viz, RasterPassEncoder &raster_enc)
 {
-  if (viz->curVizTrajectory != -1) {
-    Span<const AgentTrajectoryStep> steps = getTrajectorySteps(viz->trajectoryDB, viz->curVizTrajectory);
+  if (viz->curVizTrajectoryID != -1) {
+    Span<const AgentTrajectoryStep> steps = getTrajectorySteps(viz->trajectoryDB, viz->curVizTrajectoryID);
 
     raster_enc.drawData(Vector4(0, 1, 0, 1));
     i64 num_steps = steps.size();

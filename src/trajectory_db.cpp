@@ -142,6 +142,7 @@ i64 saveTrajectory(TrajectoryDB *db, TrajectoryType type,
 void removeTrajectory(TrajectoryDB *db, i64 id)
 {
   assert(id != -1);
+  db->trajectories[id].type = TrajectoryType::NUM_TYPES;
   db->trajectories[id].listNext = db->freeIDHead;
   db->freeIDHead = id;
   db->numTrajectories--;
@@ -150,6 +151,34 @@ void removeTrajectory(TrajectoryDB *db, i64 id)
 i64 numTrajectories(TrajectoryDB *db)
 {
   return db->numTrajectories;
+}
+
+i64 advanceNTrajectories(TrajectoryDB *db, i64 cur_id, i64 n)
+{
+  if (cur_id == -1) {
+    cur_id = 0;
+    n--;
+  }
+
+  i64 id_increment = 1;
+  if (n < 0) {
+    id_increment = -1;
+    n = -n;
+  }
+
+  i64 next_id = cur_id;
+  while (n > 0 && next_id < (i64)db->trajectories.size() && next_id >= 0) {
+    if (db->trajectories[next_id].type != TrajectoryType::NUM_TYPES) {
+      n--;
+    }
+    next_id += id_increment;
+  }
+
+  if (next_id == (i64)db->trajectories.size()) {
+    return -1;
+  }
+
+  return next_id;
 }
 
 Span<const AgentTrajectoryStep> getTrajectorySteps(TrajectoryDB *db, i64 id)

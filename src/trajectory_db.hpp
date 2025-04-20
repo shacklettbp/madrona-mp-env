@@ -8,6 +8,7 @@ enum class TrajectoryType : u32 {
   Human,
   RL,
   Hardcoded,
+  NUM_TYPES,
 };
 
 struct AgentTrajectoryStep {
@@ -40,6 +41,8 @@ i64 saveTrajectory(TrajectoryDB *db, TrajectoryType type, i64 id,
 void removeTrajectory(TrajectoryDB *db, i64 id);
 
 i64 numTrajectories(TrajectoryDB *db);
+
+i64 advanceNTrajectories(TrajectoryDB *db, i64 cur_id, i64 n = 1);
 
 Span<const AgentTrajectoryStep> getTrajectorySteps(TrajectoryDB *db, i64 id);
 TrajectoryType getTrajectoryType(TrajectoryDB *db, i64 id);
