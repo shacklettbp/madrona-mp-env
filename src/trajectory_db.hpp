@@ -48,4 +48,7 @@ Span<const AgentTrajectoryStep> getTrajectorySteps(TrajectoryDB *db, i64 id);
 TrajectoryType getTrajectoryType(TrajectoryDB *db, i64 id);
 const char * getTrajectoryTag(TrajectoryDB *db, i64 id);
 
+void buildTrajectoryTrainingSet(TrajectoryDB *db, Span<const i64> trajectory_ids,
+                                const char *output_path);
+
 }

@@ -531,6 +531,8 @@ struct VizState {
   const char *recordedDataPath = nullptr;
   
   TrajectoryDB *trajectoryDB = nullptr;
+  std::vector<i64> curWorkingTrajectories = {};
+
   std::vector<AgentTrajectoryStep> humanTrace = {};
 
   i64 curVizTrajectoryID = -1;
@@ -4091,6 +4093,35 @@ static void trajectoryDBUI(Engine &ctx, VizState *viz)
 
   ImGui::PushItemWidth(button_width);
 
+  ImGui::Text("Trajectory Working Set Size: %ld", viz->curWorkingTrajectories.size());
+
+  if (ImGui::Button("Clear Trajectory Working Set")) {
+    viz->curWorkingTrajectories.clear();
+  }
+
+  if (ImGui::Button("Select All Trajectories")) {
+    for (i64 i = 0; i < num_trajectories; i++) {
+      viz->curWorkingTrajectories.push_back(i);
+    }
+  }
+
+  bool working_trajectories_empty = viz->curWorkingTrajectories.size() == 0;
+
+  if (working_trajectories_empty) {
+    ImGui::BeginDisabled();
+  }
+
+  if (ImGui::Button("Create Training Set")) {
+    buildTrajectoryTrainingSet(viz->trajectoryDB, viz->curWorkingTrajectories, "training_set.bin");
+    viz->curWorkingTrajectories.clear();
+  }
+
+  if (working_trajectories_empty) {
+    ImGui::EndDisabled();
+  }
+
+  ImGui::NewLine();
+
   if (num_trajectories == 0) {
     ImGui::BeginDisabled();
   }
@@ -4144,8 +4175,8 @@ static void trajectoryDBUI(Engine &ctx, VizState *viz)
   ImGui::Text("Trajectory Type: %s", trajectory_type_str);
   ImGui::Text("Trajectory Tag: %s", trajectory_tag_str);
 
-  bool trajectory_selected = viz->curVizTrajectoryID != -1;
-  if (!trajectory_selected) {
+  bool is_valid_trajectory = viz->curVizTrajectoryID != -1;
+  if (!is_valid_trajectory) {
     ImGui::BeginDisabled();
   }
 
@@ -4155,7 +4186,11 @@ static void trajectoryDBUI(Engine &ctx, VizState *viz)
     viz->curVizTrajectoryIndex = -1;
   }
 
-  if (!trajectory_selected) {
+  if (ImGui::Button("Add Trajectory to Working Set")) {
+    viz->curWorkingTrajectories.push_back(viz->curVizTrajectoryID);
+  }
+
+  if (!is_valid_trajectory) {
     ImGui::EndDisabled();
   }
 

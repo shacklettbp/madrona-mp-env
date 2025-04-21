@@ -199,4 +199,10 @@ const char * getTrajectoryTag(TrajectoryDB *db, i64 id)
   return db->trajectories[id].tag.c_str();
 }
 
+void buildTrajectoryTrainingSet(TrajectoryDB *db, Span<const i64> trajectory_ids,
+                                const char *output_path)
+{
+
+}
+
 }
