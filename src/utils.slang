@@ -168,3 +168,34 @@ public float4 wireframeVertexShaderTransform<VertexFetchT, TransformT>(
 
   return clip_pos;
 }
+
+public float4 lineVertexShader(ViewData view, float line_width,
+   float3 start_pos_w, float3 end_pos_w, uint line_offset)
+{
+  bool is_start = line_offset % 2 == 0;
+
+  float4 start_clip_pos = worldToClip(view, start_pos_w);
+  float4 end_clip_pos = worldToClip(view, end_pos_w);
+
+  float2 start_screen_pos = start_clip_pos.xy / start_clip_pos.w;
+  float2 end_screen_pos = end_clip_pos.xy / end_clip_pos.w;
+
+  float2 screen_dir = normalize(end_screen_pos - start_screen_pos);
+
+  float4 clip_pos = is_start ? start_clip_pos : end_clip_pos;
+  float2 screen_pos = is_start ? start_screen_pos : end_screen_pos;
+
+  float2 px_offset = (line_offset >= 1 && line_offset <= 3) ?
+      float2(screen_dir.y, -screen_dir.x) : float2(-screen_dir.y, screen_dir.x);
+
+  if (is_start) {
+    px_offset -= screen_dir;
+  } else {
+    px_offset += screen_dir;
+  }
+
+  const float line_width = 4.0;
+  float2 adjusted = screen_pos + line_width * px_offset / view.fbDims;
+
+  return float4(adjusted * clip_pos.w, clip_pos.zw);
+}

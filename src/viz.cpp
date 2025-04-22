@@ -11,10 +11,13 @@
 #include "map_importer.hpp"
 #include "mgr.hpp"
 #include "utils.hpp"
+#include <array>
 
 #ifdef DB_SUPPORT
 #include "db.hpp"
 #endif
+
+#include "trajectory_db.hpp"
 
 #include "viz_shader_common.hpp"
 
@@ -91,7 +94,7 @@ namespace NavUtils
     {
         if (visited[cell])
             return false;
-        path.push_back(cell);
+path.push_back(cell);
         visited[cell] = true;
 
         if (cell == targetCell)
@@ -380,7 +383,7 @@ public:
   gas::Texture& Output(int i);
   gas::Texture& Depth();
 private:
-  struct VizState* viz;
+  struct VizState* viz = nullptr;
   RasterPassInterface interface;
   RasterPass pass;
   std::vector<Texture> targets;
@@ -400,6 +403,11 @@ private:
 };
 
 const int DownsamplePasses = 3;
+
+struct AgentRecentTrajectory {
+  std::array<Vector3, 256> points;
+  i32 curOffset = 0;
+};
 
 struct VizState {
   UISystem *ui;
@@ -447,6 +455,9 @@ struct VizState {
   RasterShader goalRegionsShaderWireframe;
   RasterShader goalRegionsShaderWireframeNoDepth;
   RasterShader analyticsTeamHullShader;
+
+  ParamBlockType agentPathsParamBlockType;
+  RasterShader agentPathsShader;
 
   ParamBlockType shotVizParamBlockType;
 
@@ -514,6 +525,18 @@ struct VizState {
   bool debugMenus = false;
 
   AnalyticsDB db = {};
+
+  AgentRecentTrajectory agentTrajectories[consts::maxTeamSize * 2] = {};
+
+  const char *recordedDataPath = nullptr;
+  
+  TrajectoryDB *trajectoryDB = nullptr;
+  std::vector<i64> curWorkingTrajectories = {};
+
+  std::vector<AgentTrajectoryStep> humanTrace = {};
+
+  i64 curVizTrajectoryID = -1;
+  i32 curVizTrajectoryIndex = -1;
 };
 
 PostEffectPass::PostEffectPass()
@@ -713,6 +736,10 @@ gas::Texture& PostEffectPass::Depth()
 
 void PostEffectPass::Destroy()
 {
+  if (!viz) {
+    return;
+  }
+
   viz->gpu->destroyRasterShader(shader);
   viz->gpu->destroyRasterPass(pass);
   viz->gpu->destroyRasterPassInterface(interface);
@@ -1057,7 +1084,145 @@ static void initMapCamera(VizState* viz, Manager& mgr)
   viz->flyCam.target = (viz->flyCam.mapMax + viz->flyCam.mapMin) * 0.5f;
 }
 
+static void loadHeatmapData(VizState *viz)
+{
+  // TEMP GENERATE HEATMAP DATA!
+  constexpr int heatmapWidth = 64;
+  constexpr int heatmapHeight = 64;
+  constexpr int heatmapDepth = 3;
+  i64 * heatmapPixels = new i64[heatmapWidth * heatmapHeight * heatmapDepth];
+#if 0
+  // Generate random walk noise.
+  float variance = 0.2f;
+  for (int x = 0; x < heatmapWidth; x++)
+  {
+    for (int y = 0; y < heatmapHeight; y++)
+    {
+      for (int z = 0; z < heatmapDepth; z++)
+      {
+        // Average the values of all the neighbors we've already visited.
+        float prev = 0.0f;
+        float norm = 0.0f;
+        if (x > 0)
+        {
+          norm++;
+          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + (x - 1)) * 3];
+        }
+        if (y > 0)
+        {
+          norm++;
+          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + (y-1) * heatmapWidth + x) * 3];
+        }
+        if (z > 0)
+        {
+          norm++;
+          prev += heatmapPixels[((z-1) * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
+        }
+        if (norm > 0)
+          prev /= norm;
+
+        // Generate a new value randomly offset.
+        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
+      }
+    }
+  }
+#endif
+  memset(heatmapPixels, 0,
+    sizeof(i64) * heatmapWidth * heatmapHeight * heatmapDepth);
+
+  float heatmap_rescale = 1.f;
+
+  if (viz->recordedDataPath) {
+    auto fileNumElems =
+      []<typename T>
+    (std::ifstream &f)
+    {
+      f.seekg(0, f.end);
+      i64 size = f.tellg();
+      f.seekg(0, f.beg);
+
+      assert(size % sizeof(T) == 0);
+
+      return size / sizeof(T);
+    };
+
+    std::ifstream steps_file(viz->recordedDataPath, std::ios::binary);
+    assert(steps_file.is_open());
+
+    i64 num_steps = fileNumElems.template operator()<PackedStepSnapshot>(steps_file);
+    HeapArray<PackedStepSnapshot> steps(num_steps);
+    steps_file.read((char *)steps.data(), sizeof(PackedStepSnapshot) * num_steps);
+
+    Vector3 mapBBMin(viz->flyCam.mapMin.x, viz->flyCam.mapMin.y, viz->flyCam.mapMin.z);
+    Vector3 mapBBMax(viz->flyCam.mapMax.x, viz->flyCam.mapMax.y, viz->flyCam.mapMax.z + 65.0f * 2.0f);
+
+    Vector3 boxExtent = mapBBMax - mapBBMin;
+
+    i64 max_heatmap_count = 0;
+    for (i64 step_idx = 0; step_idx < num_steps; step_idx++) {
+      PackedStepSnapshot &snapshot = steps[step_idx];
+
+      for (i64 player_idx = 0; player_idx < viz->teamSize * 2; player_idx++) {
+        PackedPlayerSnapshot &player = snapshot.players[player_idx];
+
+        Vector3 pos(player.pos[0], player.pos[1], player.pos[2]);
+
+        Vector3 uvw = (pos - mapBBMin);
+        uvw.x /= boxExtent.x;
+        uvw.y /= boxExtent.y;
+        uvw.z /= boxExtent.z;
+
+        int coord_x = std::clamp(int(uvw.x * heatmapWidth + 0.5f), 0, heatmapWidth - 1);
+        int coord_y = std::clamp(int(uvw.y * heatmapHeight + 0.5f), 0, heatmapHeight - 1);
+        int coord_z = std::clamp(int(uvw.z * heatmapDepth + 0.5f), 0, heatmapDepth - 1);
+        coord_z += 1;
+
+        int linear_idx = coord_z * heatmapWidth * heatmapHeight + coord_y * heatmapWidth + coord_x;
+
+        heatmapPixels[linear_idx] += 1;
+
+        if (heatmapPixels[linear_idx] > max_heatmap_count) {
+          max_heatmap_count = heatmapPixels[linear_idx];
+        }
+      }
+    }
+
+    if (max_heatmap_count > 0) {
+      heatmap_rescale = 1.f / float(max_heatmap_count);
+    }
+  }
+
+  u8 *heatmapBytes = new u8[heatmapWidth * heatmapHeight * heatmapDepth * 4];
+  for (int i = 0; i < heatmapWidth * heatmapHeight * heatmapDepth; i++)
+  {
+    float v = 10.f * heatmapPixels[i] * heatmap_rescale;
+
+    heatmapBytes[i * 4 + 0] = (u8)(v * 255);
+    heatmapBytes[i * 4 + 1] = (u8)(v * 255);
+    heatmapBytes[i * 4 + 2] = (u8)(v * 255);
+    heatmapBytes[i * 4 + 3] = (u8)255;
+  }
+
+  GPURuntime *gpu = viz->gpu;
+
+  viz->heatmapTexture = gpu->createTexture({
+    .format = TextureFormat::RGBA8_UNorm,
+    .width = (u16)heatmapWidth,
+    .height = (u16)heatmapHeight,
+    .depth = (u16)heatmapDepth,
+    .usage = TextureUsage::ShaderSampled,
+    .initData = {
+      .ptr = heatmapBytes,
+    },
+    }, viz->mainQueue);
+  gpu->waitUntilWorkFinished(viz->mainQueue);
+
+  delete[] heatmapPixels;
+  delete[] heatmapBytes;
+}
+
 static constexpr inline f32 MOUSE_SPEED = 2.0f;// 1e-1f;
+static constexpr inline f32 MOUSE_SCROLL_SPEED = 2.0f;// 1e-1f;
 // FIXME
 
 #ifdef DB_SUPPORT
@@ -2361,57 +2526,6 @@ static void analyticsBGThread(AnalyticsDB &db)
 
 VizState * init(const VizConfig &cfg)
 {
-  // TEMP GENERATE HEATMAP DATA!
-  int heatmapWidth = 64;
-  int heatmapHeight = 64;
-  int heatmapDepth = 5;
-  float * heatmapPixels = new float[heatmapWidth * heatmapHeight * heatmapDepth * 3];
-  // Generate random walk noise.
-  float variance = 0.2f;
-  for (int x = 0; x < heatmapWidth; x++)
-  {
-    for (int y = 0; y < heatmapHeight; y++)
-    {
-      for (int z = 0; z < heatmapDepth; z++)
-      {
-        // Average the values of all the neighbors we've already visited.
-        float prev = 0.0f;
-        float norm = 0.0f;
-        if (x > 0)
-        {
-          norm++;
-          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + (x - 1)) * 3];
-        }
-        if (y > 0)
-        {
-          norm++;
-          prev += heatmapPixels[(z * heatmapWidth * heatmapHeight + (y-1) * heatmapWidth + x) * 3];
-        }
-        if (z > 0)
-        {
-          norm++;
-          prev += heatmapPixels[((z-1) * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
-        }
-        if (norm > 0)
-          prev /= norm;
-
-        // Generate a new value randomly offset.
-        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3] = std::max(0.0f, std::min(1.0f, prev - variance + ((std::rand() % 1024)/1024.0f) * variance * 2.0f));
-        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3 + 1] = heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
-        heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3 + 2] = heatmapPixels[(z * heatmapWidth * heatmapHeight + y * heatmapWidth + x) * 3];
-      }
-    }
-  }
-  u8 *heatmapBytes = new u8[heatmapWidth * heatmapHeight * heatmapDepth * 4];
-  for (int i = 0; i < heatmapWidth * heatmapHeight * heatmapDepth; i++)
-  {
-
-    heatmapBytes[i * 4 + 0] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth - 2)) ? 0 : (heatmapPixels[i * 3 + 0] * 255);
-    heatmapBytes[i * 4 + 1] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth - 2)) ? 0 : (heatmapPixels[i * 3 + 1] * 255);
-    heatmapBytes[i * 4 + 2] = (u8)(i < heatmapWidth * heatmapHeight || i > heatmapWidth * heatmapHeight * (heatmapDepth - 2)) ? 0 : (heatmapPixels[i * 3 + 2] * 255);
-    heatmapBytes[i * 4 + 3] = (u8)255;
-  }
-
   VizState *viz = new VizState {};
 
   viz->ui = UISystem::init(UISystem::Config {
@@ -2420,7 +2534,8 @@ VizState * init(const VizConfig &cfg)
   });
 
   viz->window = viz->ui->createMainWindow(
-      "MadronaMPEnv", cfg.windowWidth, cfg.windowHeight);
+      "MadronaMPEnv", cfg.windowWidth, cfg.windowHeight,
+      WindowInitFlags::Resizable);
   
   viz->gpuAPI = viz->ui->gpuAPI();
   GPURuntime *gpu = viz->gpu =
@@ -2428,7 +2543,8 @@ VizState * init(const VizConfig &cfg)
 
   SwapchainProperties swapchain_properties;
   viz->swapchain = gpu->createSwapchain(
-      viz->window->surface, &swapchain_properties);
+      viz->window->surface, { SwapchainFormat::SDR_SRGB },
+      &swapchain_properties);
   viz->swapchainFormat = swapchain_properties.format;
 
   viz->mainQueue = gpu->getMainQueue();
@@ -2488,16 +2604,7 @@ VizState * init(const VizConfig &cfg)
       viz->offscreenPassInterface,
       DATA_DIR "imgui_font.ttf", 12.f);
 
-  viz->heatmapTexture = gpu->createTexture({
-    .format = swapchain_properties.format,
-    .width = (u16)heatmapWidth,
-    .height = (u16)heatmapHeight,
-    .depth = (u16)heatmapDepth,
-    .usage = TextureUsage::ShaderSampled,
-    .initData = {
-      .ptr = heatmapBytes,
-    },
-    }, viz->mainQueue);
+  viz->heatmapTexture = {};
   gpu->waitUntilWorkFinished(viz->mainQueue);
 
   viz->enc = gpu->createCommandEncoder(viz->mainQueue);
@@ -2511,6 +2618,7 @@ VizState * init(const VizConfig &cfg)
   viz->doAI[1] = cfg.doAITeam2;
 
   viz->simTickRate = 0;
+  viz->recordedDataPath = cfg.recordedDataPath;
 
   viz->globalParamBlockType = gpu->createParamBlockType({
     .uuid = "global_pb"_to_uuid,
@@ -2659,6 +2767,7 @@ VizState * init(const VizConfig &cfg)
       .rasterConfig = {
         .depthCompare = DepthCompare::GreaterOrEqual,
         .writeDepth = false,
+        .cullMode = CullMode::None,
       },
     });
 
@@ -2698,6 +2807,35 @@ VizState * init(const VizConfig &cfg)
       },
     });
 
+  viz->agentPathsParamBlockType = gpu->createParamBlockType({
+    .uuid = "agent_paths_pb"_to_uuid,
+    .buffers = {
+      {
+        .type = BufferBindingType::Storage,
+        .shaderUsage = ShaderStage::Vertex,
+      },
+    },
+  });
+  viz->agentPathsShader = loadShader(viz,
+    MADRONA_MP_ENV_SRC_DIR "paths.slang", {
+      .byteCode = {},
+      .vertexEntry = "pathVert",
+      .fragmentEntry = "pathFrag",
+      .rasterPass = viz->offscreenPassInterface,
+      .paramBlockTypes = {
+        viz->globalParamBlockType,
+        viz->agentPathsParamBlockType,
+      },
+      .numPerDrawBytes = sizeof(Vector4),
+      .rasterConfig = {
+        .depthBias = 200000,
+        .depthBiasSlope = 2e-2f,
+        .depthBiasClamp = 1e-4f,
+        .cullMode = CullMode::None,
+        .blending = { BlendingConfig::additiveDefault() },
+      },
+    });
+
   viz->shotVizParamBlockType = gpu->createParamBlockType({
     .uuid = "shot_vz_pb"_to_uuid,
     .buffers = {
@@ -2730,6 +2868,11 @@ VizState * init(const VizConfig &cfg)
 
   loadAssets(viz);
 
+  if (cfg.trajectoryDBPath) {
+    viz->trajectoryDB = openTrajectoryDB(cfg.trajectoryDBPath);
+    assert(viz->trajectoryDB);
+  }
+
 #ifdef DB_SUPPORT
   if (cfg.analyticsDBPath != nullptr) {
     loadAnalyticsDB(viz, cfg);
@@ -2747,6 +2890,10 @@ VizState * init(const VizConfig &cfg)
 
 void shutdown(VizState *viz)
 {
+  if (viz->trajectoryDB) {
+    closeTrajectoryDB(viz->trajectoryDB);
+  }
+
 #ifdef DB_SUPPORT
   if (viz->db.hdl != nullptr) {
     unloadAnalyticsDB(viz->db);
@@ -2767,6 +2914,9 @@ void shutdown(VizState *viz)
   }
 
   gpu->destroyCommandEncoder(viz->enc);
+
+  gpu->destroyRasterShader(viz->agentPathsShader);
+  gpu->destroyParamBlockType(viz->agentPathsParamBlockType);
 
   gpu->destroyRasterShader(viz->shotVizShader);
   gpu->destroyParamBlockType(viz->shotVizParamBlockType);
@@ -2831,6 +2981,9 @@ static void handleCamera(VizState *viz, float delta_t)
   Vector3 translate = Vector3::zero();
 
   const UserInput &input = viz->ui->inputState();
+  const UserInputEvents &input_events = viz->ui->inputEvents();
+
+  Vector2 mouse_scroll = input_events.mouseScroll();
 
   if (cam.orbit) {
     // Rotate around the focus point.
@@ -2848,19 +3001,16 @@ static void handleCamera(VizState *viz, float delta_t)
         cam.heading -= PI * 2.0f;
       while (cam.heading < -PI) 
         cam.heading += PI * 2.0f;
+    } else {
+      viz->ui->disableRawMouseInput(viz->window);
     }
-    else if (input.isDown(InputID::MouseMiddle) ||
-      input.isDown(InputID::MouseLeft)) {
-      viz->ui->enableRawMouseInput(viz->window);
-      Vector2 mouse_delta = input.mouseDelta();
-      float zoomChange = mouse_delta.y * MOUSE_SPEED * delta_t;
+
+    if (mouse_scroll.y != 0.f) {
+      float zoomChange = -mouse_scroll.y * MOUSE_SCROLL_SPEED * delta_t;
       if (zoomChange < 0.0f)
         cam.zoom /= 1.0f - zoomChange;
       if (zoomChange > 0.0f)
         cam.zoom *= 1.0f + zoomChange;
-    }
-    else {
-      viz->ui->disableRawMouseInput(viz->window);
     }
 
     // Move the focus point.
@@ -3105,6 +3255,92 @@ void doAI(VizState* viz, Manager& mgr, int world, int player)
         {});
 }
 
+static void populateAgentTrajectories(VizState *viz, Manager &mgr)
+{
+  Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+  const auto &query = ctx.query<Position, TeamInfo, Done, CombatState>();
+
+  MatchInfo &match_info = ctx.singleton<MatchInfo>();
+
+  ctx.iterateQuery(query,
+    [&]
+  (Vector3 pos, TeamInfo team_info, Done &done, CombatState &combat_state)
+  {
+    i32 agent_idx = team_info.team * viz->teamSize + team_info.offset;
+    AgentRecentTrajectory &traj = viz->agentTrajectories[agent_idx];
+
+    if (done.v || combat_state.wasKilled || match_info.curStep == 1) {
+      traj.curOffset = 0;
+    }
+
+    traj.points[traj.curOffset++ % traj.points.size()] = pos;
+  });
+
+}
+
+static void trackHumanTrace(VizState *viz, Manager &mgr,
+                            float mouse_yaw_delta, float mouse_pitch_delta)
+{
+  if (!viz->trajectoryDB) {
+    return;
+  }
+
+  if (viz->curControl == 0) {
+    viz->humanTrace.clear();
+    return;
+  }
+
+  if (viz->simEventsState.downEvent(InputID::T)) {
+    u32 num_timesteps = (u32)viz->humanTrace.size();
+    printf("Saving trajectory %d\n", num_timesteps);
+
+    for (u32 cur_offset = 0; cur_offset < num_timesteps; cur_offset++) {
+      u32 start_offset = cur_offset;
+      for (; cur_offset < num_timesteps; cur_offset++) {
+        if (viz->humanTrace[cur_offset].combatState.wasKilled) {
+          break;
+        }
+      }
+
+      if (cur_offset - start_offset > 0) {
+        Span<AgentTrajectoryStep> trace_subset(
+            viz->humanTrace.data() + start_offset, cur_offset - start_offset);
+
+        saveTrajectory(viz->trajectoryDB, TrajectoryType::Human, -1, "", trace_subset);
+      }
+    }
+    viz->humanTrace.clear();
+  }
+
+  Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+  i32 agent_idx = viz->curControl - 1;
+  Entity agent = ctx.data().agents[agent_idx];
+
+  Aim aim = ctx.get<Aim>(agent);
+
+  AgentTrajectoryStep snapshot;
+  snapshot.pos = ctx.get<Position>(agent);
+  snapshot.yaw = aim.yaw;
+  snapshot.pitch = aim.pitch;
+
+  snapshot.combatState = ctx.get<CombatState>(agent);
+
+  snapshot.discreteAction = ctx.get<PvPDiscreteAction>(agent);
+  snapshot.continuousAimAction = {
+    .yaw = mouse_yaw_delta,
+    .pitch = mouse_pitch_delta,
+  };
+
+  snapshot.selfObs = ctx.get<SelfObservation>(agent);
+  snapshot.teammateObs = ctx.get<TeammateObservation>(agent);
+  snapshot.opponentObs = ctx.get<OpponentObservation>(agent);
+  snapshot.opponentLastKnownObs = ctx.get<OpponentLastKnownObservations>(agent);
+
+  viz->humanTrace.push_back(snapshot);
+}
+
 void loop(VizState *viz, Manager &mgr)
 {
   auto action_tensor = mgr.pvpDiscreteActionTensor();
@@ -3138,6 +3374,9 @@ void loop(VizState *viz, Manager &mgr)
 
   initMapCamera(viz, mgr);
 
+  loadHeatmapData(viz);
+
+  float mouse_yaw_delta = 0, mouse_pitch_delta = 0;
   bool running = true;
   while (running) {
     gpu->waitUntilReady(viz->mainQueue);
@@ -3165,6 +3404,50 @@ void loop(VizState *viz, Manager &mgr)
       frontend_delta_t = duration.count();
     }
     last_frontend_tick_time = cur_frame_start_time;
+
+    if (viz->curControl == 0) {
+      handleCamera(viz, frontend_delta_t);
+    } else {
+      viz->ui->enableRawMouseInput(viz->window);
+      const UserInput &input = viz->ui->inputState();
+      Vector2 mouse_move = input.mouseDelta();
+      mouse_move.x /= (0.5f * viz->window->pixelWidth);
+      mouse_move.y /= (0.5f * viz->window->pixelHeight);
+
+      Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+      Entity agent = ctx.data().agents[viz->curControl - 1];
+
+      const float mouse_max_move = 1000.f;
+      const float mouse_accelleration = 0.8f;
+      const float fine_aim_multiplier = 0.3f;
+
+      Vector2 mouse_delta = mouse_move * viz->mouseSensitivity * frontend_delta_t;
+      // If we're holding right-mouse, do fine aim.
+      viz->flyCam.fine_aim = false;
+      if (input.isDown(InputID::MouseRight)) {
+        mouse_delta *= fine_aim_multiplier;
+        viz->flyCam.fine_aim = true;
+      }
+
+      // Mouse accelleration.
+      static Vector2 prev_mouse_delta = { 0.f, 0.f };
+      float mouse_delta_len = fmaxf(mouse_delta.length(), 0.01f);
+      mouse_delta = mouse_delta / mouse_delta_len;
+      mouse_delta_len = fminf(mouse_delta_len + fmaxf(0.0f, prev_mouse_delta.dot(mouse_delta)) * mouse_accelleration, mouse_max_move);
+      mouse_delta *= mouse_delta_len;
+      prev_mouse_delta = mouse_delta;
+
+      mouse_yaw_delta -= mouse_delta.x;
+      mouse_pitch_delta -= mouse_delta.y;
+
+      Aim aim = ctx.get<Aim>(agent);
+      aim.yaw -= mouse_delta.x;
+      aim.pitch -= mouse_delta.y;
+
+      ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
+      ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
+    }
 
     auto sim_delta_t = std::chrono::duration<float>(1.f / (float)viz->simTickRate);
 
@@ -3307,55 +3590,20 @@ void loop(VizState *viz, Manager &mgr)
         mgr.setUniformAgentPolicy(AgentPolicy { 0 });
       }
 
+      trackHumanTrace(viz, mgr, mouse_yaw_delta, mouse_pitch_delta);
+      mouse_yaw_delta = 0;
+      mouse_pitch_delta = 0;
+
       mgr.step();
       viz->simEventsState.clear();
+
+      populateAgentTrajectories(viz, mgr);
 
       //step_fn(step_data);
 
       last_sim_tick_time = cur_frame_start_time;
     }
 
-    if (viz->curControl == 0) {
-      handleCamera(viz, frontend_delta_t);
-    } else {
-      viz->ui->enableRawMouseInput(viz->window);
-      const UserInput &input = viz->ui->inputState();
-      Vector2 mouse_move = input.mouseDelta();
-      mouse_move.x /= (0.5f * viz->window->pixelWidth);
-      mouse_move.y /= (0.5f * viz->window->pixelHeight);
-
-      Engine &ctx = mgr.getWorldContext(viz->curWorld);
-
-      Entity agent = ctx.data().agents[viz->curControl - 1];
-
-      const float mouse_max_move = 1000.f;
-      const float mouse_accelleration = 0.8f;
-      const float fine_aim_multiplier = 0.3f;
-
-      Vector2 mouse_delta = mouse_move * viz->mouseSensitivity * frontend_delta_t;
-      // If we're holding right-mouse, do fine aim.
-      viz->flyCam.fine_aim = false;
-      if (input.isDown(InputID::MouseRight)) {
-        mouse_delta *= fine_aim_multiplier;
-        viz->flyCam.fine_aim = true;
-      }
-
-      // Mouse accelleration.
-      static Vector2 prev_mouse_delta = { 0.f, 0.f };
-      float mouse_delta_len = fmaxf(mouse_delta.length(), 0.01f);
-      mouse_delta = mouse_delta / mouse_delta_len;
-      mouse_delta_len = fminf(mouse_delta_len + fmaxf(0.0f, prev_mouse_delta.dot(mouse_delta)) * mouse_accelleration, mouse_max_move);
-      mouse_delta *= mouse_delta_len;
-      prev_mouse_delta = mouse_delta;
-
-      Aim aim = ctx.get<Aim>(agent);
-      aim.yaw -= mouse_delta.x;
-      aim.pitch -= mouse_delta.y;
-
-      ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
-      ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
-    }
-    
     vizStep(viz, mgr);
 
     gpu->presentSwapchainImage(viz->swapchain);
@@ -3833,6 +4081,124 @@ static void playerInfoUI(Engine &ctx, i32 agent_idx)
 
 }
 
+static void trajectoryDBUI(Engine &ctx, VizState *viz)
+{
+  ImGui::Begin("Trajectory DB");
+
+  ImGui::Text("Num Trajectories: %ld", numTrajectories(viz->trajectoryDB));
+
+  const float button_width = 100.f;
+
+  int num_trajectories = numTrajectories(viz->trajectoryDB);
+
+  ImGui::PushItemWidth(button_width);
+
+  ImGui::Text("Trajectory Working Set Size: %ld", viz->curWorkingTrajectories.size());
+
+  if (ImGui::Button("Clear Trajectory Working Set")) {
+    viz->curWorkingTrajectories.clear();
+  }
+
+  if (ImGui::Button("Select All Trajectories")) {
+    for (i64 i = 0; i < num_trajectories; i++) {
+      viz->curWorkingTrajectories.push_back(i);
+    }
+  }
+
+  bool working_trajectories_empty = viz->curWorkingTrajectories.size() == 0;
+
+  if (working_trajectories_empty) {
+    ImGui::BeginDisabled();
+  }
+
+  if (ImGui::Button("Create Training Set")) {
+    buildTrajectoryTrainingSet(viz->trajectoryDB, viz->curWorkingTrajectories, "training_set.bin");
+    viz->curWorkingTrajectories.clear();
+  }
+
+  if (working_trajectories_empty) {
+    ImGui::EndDisabled();
+  }
+
+  ImGui::NewLine();
+
+  if (num_trajectories == 0) {
+    ImGui::BeginDisabled();
+  }
+
+  int new_index = viz->curVizTrajectoryIndex;
+  ImGui::DragInt("Select Trajectory", &new_index, 0.25f, -1, num_trajectories - 1,
+                 viz->curVizTrajectoryIndex == -1 ? "None" : "%d", ImGuiSliderFlags_AlwaysClamp);
+
+  if (new_index == -1) {
+    viz->curVizTrajectoryID = -1;
+  } else if (new_index != viz->curVizTrajectoryIndex) {
+    viz->curVizTrajectoryID = advanceNTrajectories(viz->trajectoryDB,
+      viz->curVizTrajectoryID, new_index - viz->curVizTrajectoryIndex);
+  }
+  viz->curVizTrajectoryIndex = new_index;
+
+  if (num_trajectories == 0) {
+    ImGui::EndDisabled();
+  }
+
+  const char *trajectory_type_str = nullptr;
+  const char *trajectory_tag_str = nullptr;
+  if (viz->curVizTrajectoryID == -1) {
+    ImGui::Text("Trajectory ID: [None]");
+    trajectory_type_str = "None";
+    trajectory_tag_str = "";
+  } else {
+    ImGui::Text("Trajectory ID: %ld", viz->curVizTrajectoryID);
+    TrajectoryType trajectory_type = getTrajectoryType(viz->trajectoryDB, viz->curVizTrajectoryID);
+    switch (trajectory_type) {
+      case TrajectoryType::Human: {
+        trajectory_type_str = "Human";
+      } break;
+      case TrajectoryType::RL: {
+        trajectory_type_str = "RL";
+      } break;
+      case TrajectoryType::Hardcoded: {
+        trajectory_type_str = "Hardcoded";
+      } break;
+      default: {
+        trajectory_type_str = "Unknown";
+      } break;
+    }
+
+    trajectory_tag_str = getTrajectoryTag(viz->trajectoryDB, viz->curVizTrajectoryID);
+    if (trajectory_tag_str == nullptr) {
+      trajectory_tag_str = "";
+    }
+  }
+
+  ImGui::Text("Trajectory Type: %s", trajectory_type_str);
+  ImGui::Text("Trajectory Tag: %s", trajectory_tag_str);
+
+  bool is_valid_trajectory = viz->curVizTrajectoryID != -1;
+  if (!is_valid_trajectory) {
+    ImGui::BeginDisabled();
+  }
+
+  if (ImGui::Button("Delete Trajectory")) {
+    removeTrajectory(viz->trajectoryDB, viz->curVizTrajectoryID);
+    viz->curVizTrajectoryID = -1;
+    viz->curVizTrajectoryIndex = -1;
+  }
+
+  if (ImGui::Button("Add Trajectory to Working Set")) {
+    viz->curWorkingTrajectories.push_back(viz->curVizTrajectoryID);
+  }
+
+  if (!is_valid_trajectory) {
+    ImGui::EndDisabled();
+  }
+
+  ImGui::PopItemWidth();
+
+  ImGui::End();
+}
+
 static Engine & uiLogic(VizState *viz, Manager &mgr)
 {
   const UserInputEvents &input_events = viz->ui->inputEvents();
@@ -3888,6 +4254,10 @@ static Engine & uiLogic(VizState *viz, Manager &mgr)
       agentInfoUI(ctx, viz);
     }
 
+    if (viz->trajectoryDB) {
+      trajectoryDBUI(ctx, viz);
+    }
+
 #ifdef DB_SUPPORT
     analyticsDBUI(ctx, viz);
 #endif
@@ -3933,7 +4303,7 @@ static void setupLightData(VizState *viz, GlobalPassData *out)
   };
 
   lights.sunColor = { 0.3f, 0.7f, 0.7f };
-  lights.sunColor *= 2.f;
+  lights.sunColor *= 1.2f;
 
   out->lights = lights;
 }
@@ -3991,12 +4361,14 @@ static void renderMap(VizState *viz,
 
   raster_enc.setIndexBufferU32(viz->mapBuffer);
 
+  float wireframe_width = viz->curView == 0 ? 0.5f : 1.0f;
+
   for (uint32_t mesh_idx = 0; mesh_idx < (uint32_t)viz->mapMeshes.size();
        mesh_idx++) {
     const MapGeoMesh &mesh = viz->mapMeshes[mesh_idx];
 
     raster_enc.drawData(MapPerDraw {
-      .wireframeConfig = { 0.9f, 0.9f, 0.2f, 1.0f },
+      .wireframeConfig = { 1.0f, 0.8f, 0.2f, wireframe_width },
       .meshVertexOffset = mesh.vertOffset,
       .meshIndexOffset = mesh.indexOffset,
       .metallic = 0.1f,
@@ -4292,6 +4664,104 @@ static void renderAgents(Engine &ctx, VizState *viz,
           mesh.vertexOffset, mesh.indexOffset, mesh.numTriangles);
     }
   });
+}
+
+static void renderAgentPaths(VizState *viz, RasterPassEncoder &raster_enc)
+{
+  raster_enc.setShader(viz->agentPathsShader);
+  raster_enc.setParamBlock(0, viz->globalParamBlock);
+
+
+  for (int team_idx = 0; team_idx < 2; team_idx++) {
+    uint32_t total_num_line_verts = 0;
+    for (int i = 0; i < viz->teamSize; i++) {
+      AgentRecentTrajectory &traj = viz->agentTrajectories[team_idx * viz->teamSize + i];
+
+      if (traj.curOffset == 0) {
+        continue;
+      }
+
+      total_num_line_verts += 2 * (std::min(traj.curOffset, (i32)traj.points.size()) - 1);
+    }
+
+    if (total_num_line_verts == 0) {
+      continue;
+    }
+
+    uint32_t num_buffer_bytes = total_num_line_verts * sizeof(Vector4);
+
+    MappedTmpBuffer paths_buffer = raster_enc.tmpBuffer(num_buffer_bytes);
+
+    Vector4 *path_vert_staging = (Vector4 *)paths_buffer.ptr;
+    for (int i = 0; i < viz->teamSize; i++) {
+      AgentRecentTrajectory &traj = viz->agentTrajectories[team_idx * viz->teamSize + i];
+
+      i32 start_offset = std::max(i32(traj.curOffset - traj.points.size()), 0);
+      i32 traj_len = traj.curOffset - start_offset;
+
+      i32 cur_offset = start_offset;
+      while (cur_offset != traj.curOffset - 1) {
+        Vector3 a = traj.points[cur_offset % traj.points.size()];
+        Vector3 b = traj.points[(cur_offset + 1) % traj.points.size()];
+
+        float a_alpha = float(cur_offset - start_offset) / float(traj_len);
+        float b_alpha = float(cur_offset + 1 - start_offset) / float(traj_len);
+
+        *path_vert_staging++ = Vector4::fromVec3W(a, a_alpha);
+        *path_vert_staging++ = Vector4::fromVec3W(b, b_alpha);
+
+        cur_offset++;
+      }
+    }
+
+    assert((char *)path_vert_staging == (char *)paths_buffer.ptr + num_buffer_bytes);
+
+    ParamBlock paths_tmp_pb = raster_enc.createTemporaryParamBlock({
+      .typeID = viz->agentPathsParamBlockType,
+      .buffers = {
+        { .buffer = paths_buffer.buffer, .offset = paths_buffer.offset, .numBytes = num_buffer_bytes },
+      },
+    });
+
+    raster_enc.setParamBlock(1, paths_tmp_pb);
+    raster_enc.drawData(team_idx == 0 ? Vector4(0, 0, 1, 1) : Vector4(1, 0, 0, 1));
+    raster_enc.draw(0, total_num_line_verts);
+  }
+}
+
+static void trajectoryDBRender(VizState *viz, RasterPassEncoder &raster_enc)
+{
+  if (viz->curVizTrajectoryID != -1) {
+    Span<const AgentTrajectoryStep> steps = getTrajectorySteps(viz->trajectoryDB, viz->curVizTrajectoryID);
+
+    raster_enc.drawData(Vector4(0, 1, 0, 1));
+    i64 num_steps = steps.size();
+
+    i64 total_num_verts = (num_steps - 1) * 2;
+    i64 num_buffer_bytes = total_num_verts * sizeof(Vector4);
+
+    MappedTmpBuffer line_data_buf = raster_enc.tmpBuffer(num_buffer_bytes);
+
+    Vector4 *line_data_staging = (Vector4 *)line_data_buf.ptr;
+
+    for (i64 i = 0; i < num_steps - 1; i++) {
+      Vector3 a = steps[i].pos;
+      Vector3 b = steps[i + 1].pos;
+
+      *line_data_staging++ = Vector4::fromVec3W(a, 1.f);
+      *line_data_staging++ = Vector4::fromVec3W(b, 1.f);
+    }
+
+    ParamBlock tmp_geo_block = raster_enc.createTemporaryParamBlock({
+      .typeID = viz->agentPathsParamBlockType,
+      .buffers = {
+        { .buffer = line_data_buf.buffer, .offset = line_data_buf.offset, .numBytes = (u32)num_buffer_bytes },
+      },
+    });
+
+    raster_enc.setParamBlock(1, tmp_geo_block);
+    raster_enc.draw(0, total_num_verts);
+  }
 }
 
 #ifdef DB_SUPPORT
@@ -4606,6 +5076,13 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   (void)renderGoalRegions;
   renderShotViz(ctx, viz, offscreen_raster_enc);
   renderZones(ctx, viz, offscreen_raster_enc);
+  if (viz->curView == 0) {
+    renderAgentPaths(viz, offscreen_raster_enc);
+    if (viz->trajectoryDB) {
+      trajectoryDBRender(viz, offscreen_raster_enc);
+    }
+  }
+
 #ifdef DB_SUPPORT
   renderAnalyticsViz(ctx, viz, offscreen_raster_enc);
 #endif

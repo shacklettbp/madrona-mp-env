@@ -541,6 +541,7 @@ struct AgentLogData {
 
 struct StepLog {
   AgentLogData agentData[consts::maxTeamSize * 2];
+  i32 curStep;
 };
 
 struct EventLogGlobalState {
@@ -773,6 +774,11 @@ struct TrajectoryCurriculum {
 
 struct PolicyWeights;
 
+enum class RewardMode : u32 {
+  Default,
+  Flank,
+};
+
 struct TaskConfig {
   bool autoReset;
   bool showSpawns;
@@ -797,6 +803,7 @@ struct TaskConfig {
   Zones zones;
 
   Task task;
+  RewardMode rewardMode;
   bool highlevelMove;
 
   VizState *viz;

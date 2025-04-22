@@ -383,7 +383,7 @@ float4 fragMain(VSOutput input) : SV_Target {
 
     color.rgb *= Vignette(input.uv);
 
-    //color.rgb = Scanlines( color.rgb, input.uv );
+    color.rgb = Scanlines( color.rgb, input.uv );
 
     if( input.uv.x > 1 || input.uv.x < 0 || input.uv.y > 1 || input.uv.y < 0 )
         color = float4(0.0, 0.0, 0.0, 1.0);

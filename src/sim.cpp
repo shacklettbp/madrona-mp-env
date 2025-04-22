@@ -2404,6 +2404,41 @@ static inline StandObservation computeStandObs(StandState stand_state)
     return stand_obs;
 }
 
+inline void computePairwiseVisibility(Engine &ctx,
+                                      MatchInfo &)
+{
+    i32 num_agents = ctx.data().numAgents;
+
+    i32 num_checks = num_agents * (num_agents - 1);
+
+    for (i32 i = 0; i < num_checks; i++) {
+        i32 a_idx = i / (num_agents - 1);
+        i32 b_idx = i % (num_agents - 1);
+
+        if (b_idx >= a_idx) {
+            b_idx += 1;
+        }
+
+        Entity a = ctx.data().agents[a_idx];
+        Entity b = ctx.data().agents[b_idx];
+
+        Vector3 a_pos = ctx.get<Position>(a);
+        a_pos.z += viewHeight(ctx.get<StandState>(a));
+
+        Vector3 b_pos = ctx.get<Position>(b);
+        b_pos.z += viewHeight(ctx.get<StandState>(b));
+
+        Aim a_aim = ctx.get<Aim>(a);
+
+        Vector3 vis_pos;
+        if (isAgentVisible(ctx, a_pos, a_aim, b, &vis_pos)) {
+            ctx.data().pairwiseVisibility[i] = true;
+        } else {
+            ctx.data().pairwiseVisibility[i] = false;
+        }
+    }
+}
+
 inline void opponentsWriteVisibilitySystem(Engine &ctx,
                                            Position pos,
                                            Aim aim,
@@ -3901,6 +3936,86 @@ inline void zoneCaptureDefendRewardSystem(
     }
 }
 
+inline void flankRewardSystem(Engine &ctx,
+                              Entity e,
+                              Position pos,
+                              Aim aim,
+                              StandState stand_state,
+                              CombatState combat_state,
+                              const Teammates &teammates,
+                              const Opponents &opponents,
+                              ExploreTracker &explore_tracker,
+                              const RewardHyperParams &reward_hyper_params,
+                              Reward &out_reward)
+{
+  out_reward.v = 0.f;
+
+  Vector3 vis_check_pos = pos;
+  vis_check_pos.z += viewHeight(stand_state);
+
+  constexpr float flank_dist = 100.f;
+
+  i32 num_teammates = ctx.data().pTeamSize - 1;
+
+  float teammate_positioning_reward = 0.f;
+  for (i32 i = 0; i < num_teammates; i++) {
+    Entity teammate = teammates.e[i];
+
+    Vector3 teammate_pos = ctx.get<Position>(teammate);
+    Vector3 teammate_dir = teammate_pos - pos;
+
+    Vector3 vis_pos;
+    bool is_teammate_visible = 
+      isAgentVisible(ctx, vis_check_pos, aim, teammate, &vis_pos);
+
+    if (teammate_dir.length2() >= flank_dist * flank_dist || !is_teammate_visible) {
+      teammate_positioning_reward += 0.001f;
+    }
+  }
+
+  out_reward.v += teammate_positioning_reward;
+
+  i32 num_opponents = ctx.data().pTeamSize;
+
+  float opponent_positioning_reward = 0.f;
+  for (i32 i = 0; i < num_opponents; i++) {
+    Entity opponent = opponents.e[i];
+
+    Vector3 opponent_pos = ctx.get<Position>(opponent);
+    opponent_pos.z += viewHeight(ctx.get<StandState>(opponent));
+
+    Vector3 vis_pos;
+    bool can_opponent_see_agent = isAgentVisible(ctx, opponent_pos, aim, e, &vis_pos);
+
+    if (!can_opponent_see_agent) {
+      opponent_positioning_reward += 0.001f;
+    }
+  }
+
+  out_reward.v += opponent_positioning_reward;
+
+  Entity tgt = combat_state.landedShotOn;
+  if (tgt != Entity::none()) {
+    Aim tgt_aim = ctx.get<Aim>(tgt);
+
+    float yaw_diff = fabsf(tgt_aim.yaw - aim.yaw);
+
+    if (yaw_diff > math::pi) {
+      if (combat_state.successfulKill) {
+        out_reward.v += 1.f;
+      } else {
+        out_reward.v += 0.2f;
+      }
+    }
+  }
+
+  uint32_t num_new_cells = explore_tracker.numNewCellsVisited;
+  explore_tracker.numNewCellsVisited = 0;
+
+  if (num_new_cells > 0) {
+    out_reward.v += float(num_new_cells) * reward_hyper_params.exploreScale;
+  }
+}
 
 inline void pvpTeamRewardSystem(Engine &ctx,
                                 TeamRewardState &team_reward_state)
@@ -4361,9 +4476,10 @@ inline void fullTeamDoneRewardSystem(
 }
 
 inline void pvpRecordSystem(Engine &ctx,
-                            MatchInfo &)
+                            MatchInfo &match_info)
 {
     StepLog &step_log = *ctx.data().recordLog;
+    step_log.curStep = match_info.curStep;
 
     for (CountT i = 0; i < consts::maxTeamSize * 2; i++) {
         if (i >= (CountT)ctx.data().numAgents) {
@@ -4404,9 +4520,10 @@ inline void pvpRecordSystem(Engine &ctx,
 }
 
 inline void pvpReplaySystem(Engine &ctx,
-                            MatchInfo &)
+                            MatchInfo &match_info)
 {
     StepLog step_log = *ctx.data().replayLog;
+    match_info.curStep = step_log.curStep;
 
     for (CountT i = 0; i < consts::maxTeamSize * 2; i++) {
         if (i >= (CountT)ctx.data().numAgents) {
@@ -5333,21 +5450,37 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                 Reward 
             >>({explore_visit});
     } else if (cfg.task == Task::Zone) {
-        reward_sys = builder.addToGraph<ParallelForNode<Engine,
-            zoneRewardSystem,
-                Position,
-                AgentPolicy,
-                TeamInfo,
-                Aim,
-                Alive,
-                Teammates,
-                Opponents,
-                CombatState,
-                BreadcrumbAgentState,
-                ExploreTracker,
-                RewardHyperParams,
-                Reward 
-            >>({explore_visit});
+        if (cfg.rewardMode == RewardMode::Flank) {
+            reward_sys = builder.addToGraph<ParallelForNode<Engine,
+                flankRewardSystem,
+                    Entity,
+                    Position,
+                    Aim,
+                    StandState,
+                    CombatState,
+                    Teammates,
+                    Opponents,
+                    ExploreTracker,
+                    RewardHyperParams,
+                    Reward
+                >>({explore_visit});
+        } else {
+            reward_sys = builder.addToGraph<ParallelForNode<Engine,
+                zoneRewardSystem,
+                    Position,
+                    AgentPolicy,
+                    TeamInfo,
+                    Aim,
+                    Alive,
+                    Teammates,
+                    Opponents,
+                    CombatState,
+                    BreadcrumbAgentState,
+                    ExploreTracker,
+                    RewardHyperParams,
+                    Reward 
+                >>({explore_visit});
+        }
     } else if (cfg.task == Task::ZoneCaptureDefend) {
         reward_sys = builder.addToGraph<ParallelForNode<Engine,
             zoneCaptureDefendRewardSystem,

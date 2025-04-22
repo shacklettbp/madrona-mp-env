@@ -224,11 +224,11 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
   float3 albedo = float3(1, 1, 1);
 
   float3 to_sun = global.lights.sunPosition - pos_w;
-  float3 to_frag = cameraPosition(global.view) - pos_w;
+  float3 to_cam = cameraPosition(global.view) - pos_w;
   float3 sun_color = global.lights.sunColor;
 
-  float3 V = normalize(to_frag);
-  float3 N = faceforward(geo_normal, V, geo_normal);
+  float3 V = normalize(to_cam);
+  float3 N = dot(geo_normal, V) > 0 ? geo_normal : -geo_normal;
   float3 L = normalize(to_sun);
 
   float metallic = perDraw.metallic;
@@ -240,7 +240,6 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
   float NdotL = max(dot(N, L), 0.0);
   float NdotH = max(dot(N, H), 0.0);
   float VdotH = max(dot(V, H), 0.0);
-
 
   float3 F0 = float3(0.04, 0.04, 0.04); // Base reflectance for dielectrics
   F0 = lerp(F0, albedo, metallic);      // Use albedo for metallic surfaces
@@ -267,7 +266,7 @@ float4 fragMain(float4 window_pos : SV_Position, V2F v2f) : SV_Target0
   float3 ambient = float3(0.05) * albedo * (1.0 - metallic);
 
   float3 emissive = perDraw.wireframeConfig.xyz * (1.0 - edgeFactor(barys));
-  emissive /= max(1.0, (length(to_frag) * 0.001f));
+  emissive /= max(1.0, (length(to_cam) * 0.001f));
 
   float3 color = ambient + Lo + emissive;
 

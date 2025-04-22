@@ -46,6 +46,7 @@ NB_MODULE(madrona_mp_env, m) {
                             uint32_t num_pbt_policies,
                             uint32_t policy_history_size,
                             const char *scene_path,
+                            bool train_flank,
                             nb::handle replay_log_path,
                             nb::handle record_log_path,
                             nb::handle event_log_path,
@@ -77,6 +78,7 @@ NB_MODULE(madrona_mp_env, m) {
                   .mapRotation = 0.f,
                 },
                 .highlevelMove = false,
+                .trainFlank = train_flank,
                 .replayLogPath = replay_log_path.is_none() ? nullptr :
                     nb::cast<const char*>(replay_log_path),
                 .recordLogPath = record_log_path.is_none() ? nullptr :
@@ -97,6 +99,7 @@ NB_MODULE(madrona_mp_env, m) {
            nb::arg("num_pbt_policies"),
            nb::arg("policy_history_size"),
            nb::arg("scene_path"),
+           nb::arg("train_flank") = false,
            nb::arg("replay_log_path") = nb::none(),
            nb::arg("record_log_path") = nb::none(),
            nb::arg("event_log_path") = nb::none(),

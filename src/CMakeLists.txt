@@ -10,6 +10,7 @@ set(SIMULATOR_SRCS
 add_library(madrona_mp_env_cpu_impl STATIC
     ${SIMULATOR_SRCS}
     viz.hpp viz.cpp  
+    trajectory_db.hpp trajectory_db.cpp
 )
 
 target_link_libraries(madrona_mp_env_cpu_impl
@@ -45,7 +46,7 @@ add_subdirectory(nav)
 
 find_package(SQLite3)
 
-if (SQLite3_FOUND)
+if (FALSE AND SQLite3_FOUND)
     add_library(madrona_mp_env_db STATIC
       db.hpp db.cpp
     )
@@ -76,7 +77,7 @@ target_link_libraries(madrona_mp_env_mgr
         meshoptimizer
 )
 
-if (SQLite3_FOUND)
+if (FALSE AND SQLite3_FOUND)
     target_link_libraries(madrona_mp_env_mgr PRIVATE
         madrona_mp_env_db
     )
@@ -157,7 +158,7 @@ target_link_libraries(convert_assets
   madrona_mp_env_nav_build
 )
 
-if (SQLite3_FOUND)
+if (FALSE AND SQLite3_FOUND)
     add_executable(build_db build_db.cpp)
     target_link_libraries(build_db
       madrona_mw_core madrona_mp_env_mgr

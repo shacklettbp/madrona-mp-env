@@ -42,7 +42,8 @@ public:
         uint32_t numPBTPolicies;
         uint32_t policyHistorySize;
         MapConfig map;
-        bool highlevelMove = true;
+        bool highlevelMove = false;
+        bool trainFlank = false;
         const char *replayLogPath = nullptr;
         const char *recordLogPath = nullptr;
         const char *eventLogPath = nullptr;
