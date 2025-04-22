@@ -774,6 +774,11 @@ struct TrajectoryCurriculum {
 
 struct PolicyWeights;
 
+enum class RewardMode : u32 {
+  Default,
+  Flank,
+};
+
 struct TaskConfig {
   bool autoReset;
   bool showSpawns;
@@ -798,6 +803,7 @@ struct TaskConfig {
   Zones zones;
 
   Task task;
+  RewardMode rewardMode;
   bool highlevelMove;
 
   VizState *viz;

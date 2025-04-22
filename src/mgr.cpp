@@ -1743,6 +1743,13 @@ Manager::Impl * Manager::Impl::init(
       policy_weights = loadPolicyWeights(mgr_cfg.policyWeightsPath);
     }
 
+    RewardMode reward_mode;
+    if (mgr_cfg.trainFlank) {
+      reward_mode = RewardMode::Flank;
+    } else {
+      reward_mode = RewardMode::Default;
+    }
+
     TaskConfig task_cfg {
         .autoReset = mgr_cfg.autoReset,
         .showSpawns = true,
@@ -1761,6 +1768,7 @@ Manager::Impl * Manager::Impl::init(
         .spawnCurriculum = spawn_curriculum,
         .zones = zones,
         .task = mgr_cfg.taskType,
+        .rewardMode = reward_mode,
         .highlevelMove = mgr_cfg.highlevelMove,
         .viz = viz_state,
         .recordLog = record_log,

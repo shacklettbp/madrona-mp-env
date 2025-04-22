@@ -182,6 +182,10 @@ struct Sim : public madrona::WorldBase {
     std::array<int, 2> filtersLastMatchedStep;
 
     WorldCurriculum episodeCurriculum = WorldCurriculum::LearnShooting;
+
+    bool pairwiseVisibility[
+      (consts::maxTeamSize * consts::numTeams - 1) *
+      (consts::maxTeamSize * consts::numTeams - 1)];
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

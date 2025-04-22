@@ -202,7 +202,9 @@ const char * getTrajectoryTag(TrajectoryDB *db, i64 id)
 void buildTrajectoryTrainingSet(TrajectoryDB *db, Span<const i64> trajectory_ids,
                                 const char *output_path)
 {
-
+  (void)db;
+  (void)trajectory_ids;
+  (void)output_path;
 }
 
 }
