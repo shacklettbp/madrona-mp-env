@@ -508,7 +508,31 @@ struct CombatState {
 };
 
 struct ShotVizRemaining {
+  struct Particle {
+    Vector3 pos;
+    Vector3 vel;
+  };
+  static const int numParticles = 20;
   int32_t numStepsRemaining;
+  int32_t numStepsTotal;
+  Particle muzzleParticles[numParticles];
+  Particle hitParticles[numParticles];
+  bool initialized;
+  bool hitEffect;
+
+  ShotVizRemaining( int duration, const Vector3 &origin, const Vector3 &hit, const Vector3 &dir, bool hit_success)
+  {
+    numStepsRemaining = duration;
+    numStepsTotal = duration;
+    for (int i = 0; i < numParticles; ++i) {
+      muzzleParticles[i].pos = origin;
+      hitParticles[i].pos = hit;
+      muzzleParticles[i].vel = dir;
+      hitParticles[i].vel = dir;
+    }
+    initialized = false;
+    hitEffect = hit_success;
+  }
 };
 
 struct TurretState {

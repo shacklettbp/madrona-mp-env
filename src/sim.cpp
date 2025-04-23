@@ -1323,7 +1323,7 @@ static inline void makeShotVizEntity(
       .team = team,
       .hit = hit_success,
     };
-    ctx.get<ShotVizRemaining>(shot_viz) = ShotVizRemaining { 20 };
+    ctx.get<ShotVizRemaining>(shot_viz) = ShotVizRemaining( 20, from, from + dir * hit_t, dir, hit_success );
 }
 
 inline void hlBattleSystem(Engine &ctx,

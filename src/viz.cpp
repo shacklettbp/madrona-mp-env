@@ -1053,7 +1053,7 @@ static void loadAssets(VizState *viz)
 
 namespace VizSystem {
 
-static void vizStep(VizState *viz, Manager &mgr);
+static void vizStep(VizState *viz, Manager &mgr, float delta_t);
 
 static void initMapCamera(VizState* viz, Manager& mgr)
 {
@@ -2543,7 +2543,7 @@ VizState * init(const VizConfig &cfg)
 
   SwapchainProperties swapchain_properties;
   viz->swapchain = gpu->createSwapchain(
-      viz->window->surface, { SwapchainFormat::SDR_SRGB },
+      viz->window->surface, { SwapchainFormat::SDR_SRGB, SwapchainFormat::SDR_UNorm },
       &swapchain_properties);
   viz->swapchainFormat = swapchain_properties.format;
 
@@ -2858,7 +2858,6 @@ VizState * init(const VizConfig &cfg)
       },
       .numPerDrawBytes = 0,
       .rasterConfig = {
-        .depthCompare = DepthCompare::Disabled,
         .writeDepth = false,
         .cullMode = CullMode::None,
         .blending = { BlendingConfig::additiveDefault() },
@@ -3604,7 +3603,7 @@ void loop(VizState *viz, Manager &mgr)
       last_sim_tick_time = cur_frame_start_time;
     }
 
-    vizStep(viz, mgr);
+    vizStep(viz, mgr, frontend_delta_t);
 
     gpu->presentSwapchainImage(viz->swapchain);
   }
@@ -4466,7 +4465,7 @@ static void renderGoalRegions(Engine &ctx, VizState *viz,
 }
 
 static void renderShotViz(Engine &ctx, VizState *viz,
-                          RasterPassEncoder &raster_enc)
+                          RasterPassEncoder &raster_enc, float delta_t)
 {
   MappedTmpBuffer line_data_buf;
   int num_lines = 0;
@@ -4503,9 +4502,16 @@ static void renderShotViz(Engine &ctx, VizState *viz,
   {
     const auto& query = ctx.query<ShotVizState, ShotVizRemaining>();
 
-    ctx.iterateQuery(query, [&](ShotVizState&, ShotVizRemaining&)
+    const int particleLifetime = 5;
+    ctx.iterateQuery(query, [&](ShotVizState&, ShotVizRemaining &remaining)
     {
       num_lines += 1;
+      if (remaining.numStepsTotal - remaining.numStepsRemaining < particleLifetime)
+      {
+        num_lines += ShotVizRemaining::numParticles;
+        if (remaining.hitEffect)
+          num_lines += ShotVizRemaining::numParticles;
+      }
     });
 
     if (num_lines == 0) {
@@ -4516,6 +4522,7 @@ static void renderShotViz(Engine &ctx, VizState *viz,
         raster_enc.tmpBuffer(sizeof(ShotVizLineData) * num_lines, 256);
 
     ShotVizLineData* out_lines = (ShotVizLineData*)line_data_buf.ptr;
+    int lineCheck = 0;
 
     ctx.iterateQuery(query,
     [&](ShotVizState& state, ShotVizRemaining& remaining)
@@ -4546,7 +4553,52 @@ static void renderShotViz(Engine &ctx, VizState *viz,
         .pad2 = {},
         .color = Vector4::fromVec3W(color, alpha),
       };
+      lineCheck++;
+
+      // Simulate the particle effects.
+      const float particleSpeed = 200.0f;
+      const float particleSize = 0.03f;
+      if (!remaining.initialized)
+      {
+        for (int i = 0; i < ShotVizRemaining::numParticles; i++) {
+          remaining.hitParticles[i].vel.x = ((std::rand() % 1024) / 512.0f - 1.0f) * particleSpeed;
+          remaining.hitParticles[i].vel.y = ((std::rand() % 1024) / 512.0f - 1.0f) * particleSpeed;
+          remaining.hitParticles[i].vel.z = ((std::rand() % 1024) / 512.0f - 1.0f) * particleSpeed;
+          remaining.muzzleParticles[i].vel.x += ((std::rand() % 1024) / 2048.0f - 0.25f);
+          remaining.muzzleParticles[i].vel.y += ((std::rand() % 1024) / 2048.0f - 0.25f);
+          remaining.muzzleParticles[i].vel.z += ((std::rand() % 1024) / 2048.0f - 0.25f);
+          remaining.muzzleParticles[i].vel *= particleSpeed * 2.0f;
+          remaining.initialized = true;
+        }
+      }
+      if (remaining.numStepsTotal - remaining.numStepsRemaining < particleLifetime) {
+        for (int i = 0; i < ShotVizRemaining::numParticles; i++) {
+          Vector3 muzzleColor = { 1.0f, 0.5f, 0.0f };
+          Vector3 hitColor = { 0.75f, 0.75f, 1.0f };
+          *out_lines++ = {
+            .start = remaining.muzzleParticles[i].pos,
+            .pad = {},
+            .end = remaining.muzzleParticles[i].pos + remaining.muzzleParticles[i].vel * particleSize,
+            .pad2 = {},
+            .color = Vector4::fromVec3W(muzzleColor, 0.5f),
+          };
+          lineCheck++;
+          if (remaining.hitEffect) {
+            *out_lines++ = {
+              .start = remaining.hitParticles[i].pos,
+              .pad = {},
+              .end = remaining.hitParticles[i].pos + remaining.hitParticles[i].vel * particleSize,
+              .pad2 = {},
+              .color = Vector4::fromVec3W(hitColor, 1.0f),
+            };
+            lineCheck++;
+          }
+          remaining.muzzleParticles[i].pos += remaining.muzzleParticles[i].vel * delta_t;
+          remaining.hitParticles[i].pos += remaining.hitParticles[i].vel * delta_t;
+        }
+      }
     });
+    assert(lineCheck ==  num_lines);
   }
 
   ParamBlock tmp_geo_block = raster_enc.createTemporaryParamBlock({
@@ -5009,7 +5061,7 @@ inline void mainMenuSystem(VizState *viz, std::string *out_path)
   gpu->submit(viz->mainQueue, viz->enc);
 }
 
-inline void renderSystem(Engine &ctx, VizState *viz)
+inline void renderSystem(Engine &ctx, VizState *viz, float delta_t)
 {
   GPURuntime *gpu = viz->gpu;
 
@@ -5074,7 +5126,7 @@ inline void renderSystem(Engine &ctx, VizState *viz)
   renderAgents(ctx, viz, offscreen_raster_enc);
   //renderGoalRegions(ctx, viz, offscreen_raster_enc);
   (void)renderGoalRegions;
-  renderShotViz(ctx, viz, offscreen_raster_enc);
+  renderShotViz(ctx, viz, offscreen_raster_enc, delta_t);
   renderZones(ctx, viz, offscreen_raster_enc);
   if (viz->curView == 0) {
     renderAgentPaths(viz, offscreen_raster_enc);
@@ -5153,13 +5205,13 @@ void setupGameTasks(VizState *, TaskGraphBuilder &)
 {
 }
 
-void vizStep(VizState *viz, Manager &mgr)
+void vizStep(VizState *viz, Manager &mgr, float delta_t)
 {
   if (viz->mainMenu) {
     mainMenuSystem(viz, nullptr);
   } else {
     Engine &ctx = uiLogic(viz, mgr);
-    renderSystem(ctx, viz);
+    renderSystem(ctx, viz, delta_t);
   }
 }
 

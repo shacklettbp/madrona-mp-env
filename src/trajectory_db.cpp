@@ -1,6 +1,7 @@
 #include "trajectory_db.hpp"
 
 #include <fstream>
+#include <filesystem>
 
 namespace madronaMPEnv {
 
