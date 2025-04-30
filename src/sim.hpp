@@ -186,6 +186,8 @@ struct Sim : public madrona::WorldBase {
     bool pairwiseVisibility[
       (consts::maxTeamSize * consts::numTeams - 1) *
       (consts::maxTeamSize * consts::numTeams - 1)];
+
+    std::array<Entity, 8> subZones;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

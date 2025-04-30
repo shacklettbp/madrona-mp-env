@@ -101,6 +101,7 @@ if args.static_flip_teams:
     sim_flags |= SimFlags.StaticFlipTeams
 
 #sim_flags |= SimFlags.EnableCurriculum
+sim_flags |= SimFlags.SubZones
 
 team_size = 6
 
@@ -148,9 +149,9 @@ if args.pbt_ensemble_size != 1 or args.pbt_past_policies != 0:
         team_size = train_team_size,
         num_train_policies = args.pbt_ensemble_size,
         num_past_policies = args.pbt_past_policies,
-        self_play_portion = 0.75 if not args.static_past else 0,
-        cross_play_portion = 0.125 if not args.static_past else 0,
-        past_play_portion = 0.125 if not args.static_past else 1,
+        self_play_portion = 0.0 if not args.static_past else 0,
+        cross_play_portion = 1.0 if not args.static_past else 0,
+        past_play_portion = 0.0 if not args.static_past else 1,
         #self_play_portion = 0.125 if not args.static_past else 0,
         #cross_play_portion = 0.5 if not args.static_past else 0,
         #past_play_portion = 0.375 if not args.static_past else 1,

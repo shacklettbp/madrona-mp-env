@@ -4445,6 +4445,7 @@ static void renderGoalRegions(Engine &ctx, VizState *viz,
           .color = Vector4::fromVec3W(
               region.attackerTeam ? attacker_region_color : defender_region_color,
               0.3f),
+          .lineWidth = 1.f,
         });
 
         raster_enc.draw(0, tris_per_region);
@@ -4636,15 +4637,16 @@ static void renderZones(Engine &ctx, VizState *viz,
 
       if (i != zone_state.curZone) {
         color = rgb8ToFloat(10, 175, 10, 1.f);
+        continue;
       } else if (zone_state.curControllingTeam == -1 ||
                  !zone_state.isCaptured) {
-        color = rgb8ToFloat(100, 230, 100, 1.f);
+        color = rgb8ToFloat(230, 230, 100, 1.f);
       } else if (zone_state.curControllingTeam == 0) {
         color = rgb8ToFloat(100, 100, 230, 1.f);
       } else if (zone_state.curControllingTeam == 1) {
         color = rgb8ToFloat(230, 100, 100, 1.f);
       } else {
-        color = rgb8ToFloat(255, 0, 255, 1);
+        color = rgb8ToFloat(255, 255, 255, 1);
       }
 
       raster_enc.drawData(GoalRegionPerDraw {
@@ -4652,6 +4654,7 @@ static void renderZones(Engine &ctx, VizState *viz,
             center, Quat::angleAxis(rotation, math::up),
             Diag3x3 { diag.x, diag.y, diag.z }),
         .color = color,
+        .lineWidth = 10.f,
       });
 
       raster_enc.draw(0, num_tris);
@@ -4664,6 +4667,37 @@ static void renderZones(Engine &ctx, VizState *viz,
   if (viz->curView == 0) {
     raster_enc.setShader(viz->goalRegionsShaderWireframeNoDepth);
     renderZones(24);
+  }
+}
+
+static void renderSubZones(Engine &ctx, VizState *viz,
+                           RasterPassEncoder &raster_enc)
+{
+  if (viz->curView != 0) {
+    return;
+  }
+
+  raster_enc.setShader(viz->goalRegionsShaderWireframeNoDepth);
+
+  for (Entity sub_zone_entity : ctx.data().subZones) {
+    SubZone &sub_zone = ctx.get<SubZone>(sub_zone_entity);
+
+    ZOBB zobb = sub_zone.zobb;
+  
+    Vector3 diag = zobb.pMax - zobb.pMin;
+    Vector3 center = 0.5f * (zobb.pMax + zobb.pMin);
+  
+    Vector4 color = rgb8ToFloat(230, 100, 230, 1.f);
+  
+    raster_enc.drawData(GoalRegionPerDraw {
+      .txfm = computeNonUniformScaleTxfm(
+          center, Quat::angleAxis(zobb.rotation, math::up),
+          Diag3x3 { diag.x, diag.y, diag.z }),
+      .color = color,
+      .lineWidth = 10.f,
+    });
+  
+    raster_enc.draw(0, 24);
   }
 }
 
@@ -5128,6 +5162,9 @@ inline void renderSystem(Engine &ctx, VizState *viz, float delta_t)
   (void)renderGoalRegions;
   renderShotViz(ctx, viz, offscreen_raster_enc, delta_t);
   renderZones(ctx, viz, offscreen_raster_enc);
+  if ((ctx.data().simFlags & SimFlags::SubZones) == SimFlags::SubZones) {
+    renderSubZones(ctx, viz, offscreen_raster_enc);
+  }
   if (viz->curView == 0) {
     renderAgentPaths(viz, offscreen_raster_enc);
     if (viz->trajectoryDB) {

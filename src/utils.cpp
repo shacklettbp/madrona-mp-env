@@ -1,5 +1,7 @@
 #include "utils.hpp"
 
+#include <algorithm>
+
 using namespace madrona;
 
 namespace madronaMPEnv {
@@ -731,14 +733,20 @@ static void curriculumSpawnPoint(
 
 void spawnAgents(Engine &ctx, bool is_respawn)
 {
+    TrainControl *train_ctrl = ctx.data().trainControl;
+
     Navmesh &navmesh = ctx.singleton<LevelData>().navmesh;
     const StandardSpawns &standard_spawns = ctx.singleton<StandardSpawns>();
     //const SpawnCurriculum &spawn_curriculum = ctx.singleton<SpawnCurriculum>();
     const MatchInfo &match_info = ctx.singleton<MatchInfo>();
 
-    const bool navmesh_spawn = (
+    bool navmesh_spawn = (
         ctx.data().simFlags & SimFlags::NavmeshSpawn) ==
         SimFlags::NavmeshSpawn;
+
+    if (!train_ctrl->evalMode && !is_respawn) {
+        navmesh_spawn = true;
+    }
     
     const bool randomize_hp_magazine = (
         ctx.data().simFlags & SimFlags::RandomizeHPMagazine) ==
@@ -879,13 +887,42 @@ void spawnAgents(Engine &ctx, bool is_respawn)
             const ZoneState &zone_state =
                 ctx.singleton<ZoneState>();
 
-            combat_state.inZone = false;
-
-            AABB zone_aabb = ctx.data().zones.bboxes[
-                zone_state.curZone];
+            AABB zone_aabb = ctx.data().zones.bboxes[zone_state.curZone];
             Vector3 zone_center = (zone_aabb.pMax + zone_aabb.pMin) / 2.f;
+            float zone_aabb_rot_angle = ctx.data().zones.rotations[zone_state.curZone];
 
+            Quat to_zone_frame = Quat::angleAxis(zone_aabb_rot_angle, math::up).inv();
+
+            zone_aabb.pMin = to_zone_frame.rotateVec(zone_aabb.pMin);
+            zone_aabb.pMax = to_zone_frame.rotateVec(zone_aabb.pMax);
+
+            Vector3 pos_in_zone_frame = to_zone_frame.rotateVec(spawn_pt);
+            spawn_pt.z += consts::standHeight / 2.f;
+
+            combat_state.inZone = zone_aabb.contains(pos_in_zone_frame);
             combat_state.minDistToZone = spawn_pt.distance(zone_center);
+        }
+
+        if ((ctx.data().simFlags & SimFlags::SubZones) == SimFlags::SubZones) {
+          i32 subzone_idx = ctx.get<AgentPolicy>(spawning_agent).idx;
+          subzone_idx = std::clamp(subzone_idx, 0, (i32)ctx.data().subZones.size() - 1);
+
+          SubZone &subzone = ctx.get<SubZone>(ctx.data().subZones[subzone_idx]);
+
+          AABB zone_aabb = { subzone.zobb.pMin, subzone.zobb.pMax };
+          Vector3 zone_center = (zone_aabb.pMax + zone_aabb.pMin) / 2.f;
+          float zone_aabb_rot_angle = subzone.zobb.rotation;
+
+          Quat to_zone_frame = Quat::angleAxis(zone_aabb_rot_angle, math::up).inv();
+
+          zone_aabb.pMin = to_zone_frame.rotateVec(zone_aabb.pMin);
+          zone_aabb.pMax = to_zone_frame.rotateVec(zone_aabb.pMax);
+
+          Vector3 pos_in_zone_frame = to_zone_frame.rotateVec(spawn_pt);
+          spawn_pt.z += consts::standHeight / 2.f;
+
+          combat_state.inSubZone = zone_aabb.contains(pos_in_zone_frame);
+          combat_state.minDistToSubZone = spawn_pt.distance(zone_center);
         }
 
         ctx.get<StandState>(spawning_agent) = {

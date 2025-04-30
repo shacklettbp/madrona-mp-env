@@ -234,6 +234,8 @@ int main(int argc, char *argv[])
       sim_flags = SimFlags::HardcodedSpawns;
     }
 
+    sim_flags |= SimFlags::SubZones;
+
     Manager mgr({
         .execMode = exec_mode,
         .gpuID = 0,
@@ -261,6 +263,8 @@ int main(int argc, char *argv[])
         .curriculumDataPath = curriculum_data_path,
         .policyWeightsPath = policy_weights_path,
     }, viz);
+    *((TrainControl *)mgr.simControlTensor().devicePtr()) = { 1, 0, 0 };
+
     mgr.init();
 
 #if 0

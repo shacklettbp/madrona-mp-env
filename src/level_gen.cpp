@@ -274,6 +274,57 @@ void createPersistentEntities(Engine &ctx, const TaskConfig &cfg)
           ctx.makeEntity<FullTeamInterface>();
       ctx.get<FullTeamID>(full_team).id = i;
     }
+
+    for (Entity &sub_zone_entity : ctx.data().subZones) {
+      sub_zone_entity = ctx.makeEntity<SubZoneEntity>();
+    }
+
+    {
+      ctx.get<SubZone>(ctx.data().subZones[0]).zobb = ZOBB {
+        .pMin = ctx.data().zones.bboxes[1].pMin,
+        .pMax = ctx.data().zones.bboxes[1].pMax,
+        .rotation = ctx.data().zones.rotations[1],
+      };
+
+      ctx.get<SubZone>(ctx.data().subZones[1]).zobb = ZOBB {
+        .pMin = ctx.data().zones.bboxes[2].pMin,
+        .pMax = ctx.data().zones.bboxes[2].pMax,
+        .rotation = ctx.data().zones.rotations[2],
+      };
+
+      ctx.get<SubZone>(ctx.data().subZones[2]).zobb = ZOBB {
+        .pMin = { -950, -500, 0 },
+        .pMax = { -50, 500, 1000 },
+        .rotation = 0.f,
+      };
+
+      ctx.get<SubZone>(ctx.data().subZones[3]).zobb = ZOBB {
+        .pMin = { 50, -500, 0 },
+        .pMax = { 950, 500, 1000 },
+        .rotation = 0.f,
+      };
+
+      ctx.get<SubZone>(ctx.data().subZones[4]).zobb = ZOBB {
+        .pMin = { -1000, -1650, 0 },
+        .pMax = { -50, -600, 1000 },
+        .rotation = 0.f,
+      };
+      ctx.get<SubZone>(ctx.data().subZones[5]).zobb = ZOBB {
+        .pMin = { 50, -1650, 0 },
+        .pMax = { 1000, -600, 1000 },
+        .rotation = 0.f,
+      };
+      ctx.get<SubZone>(ctx.data().subZones[6]).zobb = ZOBB {
+        .pMin = { -1000, 600, 0 },
+        .pMax = { -50, 1650, 1000 },
+        .rotation = 0.f,
+      };
+      ctx.get<SubZone>(ctx.data().subZones[7]).zobb = ZOBB {
+        .pMin = { 1000, 600, 0 },
+        .pMax = { 50, 1650, 1000 },
+        .rotation = 0.f,
+      };
+    }
 }
 
 void resetPersistentEntities(Engine &ctx, RandKey episode_rand_key)

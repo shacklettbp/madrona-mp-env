@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "sim.hpp"
+#include "madrona/ecs.hpp"
 #include "types.hpp"
 #include "utils.hpp"
 #include "level_gen.hpp"
@@ -493,6 +494,9 @@ void Sim::registerTypes(ECSRegistry &registry,
       registry.registerComponent<VizCamera>(); // hack when viz is disabled
     }
 
+    registry.registerComponent<SubZone>();
+    registry.registerArchetype<SubZoneEntity>();
+
     registry.registerComponent<SelfObservation>();
     registry.registerComponent<SelfPositionObservation>();
 
@@ -808,6 +812,13 @@ static inline void initWorld(Engine &ctx, bool triggered_reset)
         zone_state.stepsUntilPoint = consts::zonePointInterval;
     }
 
+    for (Entity sub_zone_entity : ctx.data().subZones) {
+      SubZone &sub_zone = ctx.get<SubZone>(sub_zone_entity);
+      sub_zone.curControllingTeam = -1;
+      sub_zone.isContested = false;
+      sub_zone.isCaptured = false;
+    }
+
     if (ctx.data().taskType == Task::ZoneCaptureDefend) {
         ZoneState &zone_state = ctx.singleton<ZoneState>();
         zone_state.curZone = 3;
@@ -839,15 +850,21 @@ inline void resetSystem(Engine &ctx, WorldReset &reset)
 
         ctx.data().curEpisodeIdx = ctx.data().worldEpisodeCounter++;
 
-        if (ctx.data().curEpisodeIdx < 50) {
-          if (ctx.data().baseRNG.sampleUniform() <
-              (ctx.data().curEpisodeIdx + 1) / (float)50) {
-            ctx.singleton<WorldCurriculum>() = WorldCurriculum::FullMatch;
+        const bool enable_curriculum =
+          ((ctx.data().simFlags & SimFlags::EnableCurriculum) ==
+              SimFlags::EnableCurriculum);
+
+        if (enable_curriculum) {
+          if (ctx.data().curEpisodeIdx < 50) {
+            if (ctx.data().baseRNG.sampleUniform() <
+                (ctx.data().curEpisodeIdx + 1) / (float)50) {
+              ctx.singleton<WorldCurriculum>() = WorldCurriculum::FullMatch;
+            } else {
+              ctx.singleton<WorldCurriculum>() = WorldCurriculum::LearnShooting;
+            }
           } else {
-            ctx.singleton<WorldCurriculum>() = WorldCurriculum::LearnShooting;
+            ctx.singleton<WorldCurriculum>() = WorldCurriculum::FullMatch;
           }
-        } else {
-          ctx.singleton<WorldCurriculum>() = WorldCurriculum::FullMatch;
         }
 
         initWorld(ctx, force_reset == 1);
@@ -1958,6 +1975,73 @@ inline void zoneSystem(Engine &ctx,
     }
 }
 
+inline void subzoneSystem(Engine &ctx,
+                          Entity e,
+                          SubZone &sub_zone)
+{
+  AABB zone_aabb = { sub_zone.zobb.pMin, sub_zone.zobb.pMax };
+  float zone_aabb_rot_angle = sub_zone.zobb.rotation;
+
+  Quat to_zone_frame = Quat::angleAxis(zone_aabb_rot_angle, math::up).inv();
+
+  zone_aabb.pMin = to_zone_frame.rotateVec(zone_aabb.pMin);
+  zone_aabb.pMax = to_zone_frame.rotateVec(zone_aabb.pMax);
+
+  CountT num_team_a_inside = 0;
+  CountT num_team_b_inside = 0;
+  for (CountT i = 0; i < (CountT)ctx.data().numAgents; i++) {
+      Entity agent = ctx.data().agents[i];
+      int32_t agent_team = ctx.get<TeamInfo>(agent).team;
+
+      i32 agent_subzone_idx = ctx.get<AgentPolicy>(agent).idx;
+      agent_subzone_idx = std::clamp(agent_subzone_idx, 0, (i32)ctx.data().subZones.size() - 1);
+
+      if (ctx.data().subZones[agent_subzone_idx] != e) {
+        continue;
+      }
+
+      Vector3 pos = ctx.get<Position>(agent);
+      pos.z += consts::standHeight / 2.f;
+
+      Vector3 pos_in_zone_frame = to_zone_frame.rotateVec(pos);
+
+      if (!zone_aabb.contains(pos_in_zone_frame)) {
+          ctx.get<CombatState>(agent).inSubZone = false;
+          continue;
+      }
+
+      CombatState &agent_combat_state = ctx.get<CombatState>(agent);
+      agent_combat_state.inSubZone = true;
+      agent_combat_state.minDistToSubZone = 0.f;
+
+      if (agent_team == 0) {
+          num_team_a_inside += 1;
+      }
+
+      if (agent_team == 1) {
+          num_team_b_inside += 1;
+      }
+  }
+
+  sub_zone.isContested = num_team_a_inside > 0 && num_team_b_inside > 0;
+
+  if (sub_zone.isContested ||
+      (num_team_a_inside == 0 && num_team_b_inside == 0)) {
+      sub_zone.curControllingTeam = -1;
+      sub_zone.isCaptured = false;
+  } else if (num_team_a_inside > 0 && num_team_b_inside == 0) {
+      if (sub_zone.curControllingTeam != 0) {
+          sub_zone.curControllingTeam = 0;
+          sub_zone.isCaptured = false;
+      }
+  } else if (num_team_a_inside == 0 && num_team_b_inside > 0) {
+      if (sub_zone.curControllingTeam != 1) {
+          sub_zone.curControllingTeam = 1;
+          sub_zone.isCaptured = false;
+      }
+  }
+}
+
 inline void cleanupShotVizSystem(Engine &ctx,
                                  Entity e,
                                  ShotVizRemaining &remaining)
@@ -2561,6 +2645,7 @@ inline void turretOpponentMasksSystem(
 inline void pvpObservationsSystem(
     Engine &ctx,
     Entity self_e,
+    AgentPolicy self_policy,
     Position self_pos,
     Rotation self_rot,
     Aim self_aim,
@@ -2712,12 +2797,8 @@ inline void pvpObservationsSystem(
 
     fillCombatOb(self_ob.combat, self_e);
 
-    const MatchInfo &match_info = ctx.singleton<MatchInfo>();
-    self_ob.fractionMatchRemaining =
-        float(consts::episodeLen - match_info.curStep) / consts::episodeLen;
-
-    ZoneObservation &zone_ob = self_ob.zone;
     if (ctx.data().taskType != Task::TDM) {
+      ZoneObservation &zone_ob = self_ob.zone;
       const auto &zone_state = ctx.singleton<ZoneState>();
 
       AABB zone_aabb =
@@ -2790,6 +2871,70 @@ inline void pvpObservationsSystem(
       } else {
         assert(false);
       }
+    }
+
+    if ((ctx.data().simFlags & SimFlags::SubZones) == SimFlags::SubZones) {
+      SubZoneObservation &zone_ob = self_ob.subZone;
+      i32 subzone_idx = self_policy.idx;
+      subzone_idx = std::clamp(subzone_idx, 0, (i32)ctx.data().subZones.size() - 1);
+
+      SubZone &subzone = ctx.get<SubZone>(ctx.data().subZones[subzone_idx]);
+
+      AABB zone_aabb = { subzone.zobb.pMin, subzone.zobb.pMax };
+      float zone_angle = subzone.zobb.rotation;
+
+      Quat zone_rot = Quat::angleAxis(zone_angle, math::up);
+      (void)zone_rot;
+
+      Vector3 zone_center = (zone_aabb.pMax + zone_aabb.pMin) / 2.f;
+
+      Vector3 normalized_center = getNormalizedPos(zone_center);
+
+      zone_ob.centerX = normalized_center.x;
+      zone_ob.centerY = normalized_center.y;
+      zone_ob.centerZ = normalized_center.z;
+
+      {
+        Vector3 to_zone_center = zone_center - self_pos;
+        float dist = to_zone_center.length();
+
+        if (dist < 1e-2f) {
+          zone_ob.toCenterDist = 0.f;
+          zone_ob.toCenterYaw = 0.f;
+          zone_ob.toCenterPitch = 0.f;
+        } else {
+          to_zone_center /= dist;
+
+          float new_yaw = -atan2f(to_zone_center.x, to_zone_center.y);
+          float new_pitch = asinf(std::clamp(to_zone_center.z, -1.f, 1.f));
+
+          float yaw_delta = new_yaw - self_aim.yaw;
+          float pitch_delta = new_pitch - self_aim.pitch;
+
+          if (yaw_delta > math::pi) {
+              yaw_delta -= 2.f * math::pi;
+          } else if (yaw_delta < -math::pi) {
+              yaw_delta += 2.f * math::pi;
+          }
+
+          zone_ob.toCenterDist = dist;
+          zone_ob.toCenterYaw = yaw_delta;
+          zone_ob.toCenterPitch = pitch_delta;
+        }
+      }
+
+      zone_ob.myTeamControlling =
+        (subzone.curControllingTeam == team_info.team) ? 1.f : 0.f;
+      zone_ob.enemyTeamControlling = 
+        (subzone.curControllingTeam != -1 && 
+         subzone.curControllingTeam != team_info.team) ? 1.f : 0.f;
+
+      zone_ob.isContested = subzone.isContested ? 1.f : 0.f;
+      zone_ob.isCaptured = subzone.isCaptured ? 1.f : 0.f;
+
+      zone_ob.selfInSubZone = ctx.get<CombatState>(self_e).inSubZone ? 1.f : 0.f;
+
+      zone_ob.id[subzone_idx] = 1.f;
     }
   }
 
@@ -3582,7 +3727,8 @@ static void learnShootingRewardSystem(
   (void)explore_tracker;
 }
 
-inline void zoneRewardSystem(Engine &ctx,
+inline void subzoneRewardSystem(Engine &ctx,
+                             Entity agent,
                              Position pos,
                              AgentPolicy agent_policy,
                              TeamInfo team_info,
@@ -3596,6 +3742,120 @@ inline void zoneRewardSystem(Engine &ctx,
                              RewardHyperParams reward_hyper_params,
                              Reward &out_reward)
 {
+    (void)agent;
+    (void)teammates;
+
+    out_reward.v = 0.f;
+
+    if (ctx.singleton<WorldCurriculum>() ==
+        WorldCurriculum::LearnShooting) {
+      learnShootingRewardSystem(ctx, combat_state,
+                                explore_tracker, out_reward);
+      return;
+    }
+
+    (void)aim;
+    (void)opponents;
+
+#if 0
+    const RewardHyperParams reward_hyper_params =
+        getRewardHyperParamsForPolicy(ctx, agent_policy);
+#endif
+
+    out_reward.v -= reward_hyper_params.breadcrumbScale * breadcrumb_state.totalPenalty;
+
+    if (combat_state.reloadedFullMag) {
+        out_reward.v -= 0.5f;
+    }
+
+    if (combat_state.successfulKill) {
+        out_reward.v += 3.f;
+    }
+
+    if (combat_state.landedShotOn != Entity::none()) {
+        out_reward.v += reward_hyper_params.shotScale * 1.f;
+    } else if (combat_state.firedShotT >= 0.f) {
+        //out_reward.v -= 0.005f;
+    }
+
+    if (combat_state.wasKilled) {
+        out_reward.v -= 1.5f;
+    }
+
+    if (combat_state.wasShotCount > 0) {
+        out_reward.v -= reward_hyper_params.shotScale * 1.f;
+    }
+
+    uint32_t num_new_cells = explore_tracker.numNewCellsVisited;
+    explore_tracker.numNewCellsVisited = 0;
+
+    if (num_new_cells > 0) {
+        out_reward.v += float(num_new_cells) * reward_hyper_params.exploreScale;
+    } else {
+        //out_reward.v -= 0.0005f;
+    }
+    
+    i32 subzone_idx = agent_policy.idx;
+    subzone_idx = std::clamp(subzone_idx, 0, (i32)ctx.data().subZones.size() - 1);
+    SubZone &subzone = ctx.get<SubZone>(ctx.data().subZones[subzone_idx]);
+
+    if (combat_state.inSubZone) {
+        out_reward.v += reward_hyper_params.inZoneScale;
+    } else {
+        AABB zone_aabb = { subzone.zobb.pMin, subzone.zobb.pMax };
+        Vector3 center = (zone_aabb.pMax + zone_aabb.pMin) / 2.f;
+
+        float dist = center.distance(pos);
+
+        if (dist < combat_state.minDistToSubZone) {
+            out_reward.v += reward_hyper_params.zoneDistScale * (
+                combat_state.minDistToSubZone - dist);
+            combat_state.minDistToSubZone = dist;
+        }
+    }
+
+    // Our team is currently contesting this point
+    if (subzone.curControllingTeam == -1) {
+        if (subzone.isContested) {
+            //out_reward.v += reward_hyper_params.zoneTeamContestScale;
+        }
+    } else {
+        if (subzone.curControllingTeam == team_info.team) {
+            out_reward.v += reward_hyper_params.zoneTeamCtrlScale;
+        } else {
+            out_reward.v -= reward_hyper_params.zoneTeamCtrlScale;
+        }
+    }
+
+    if (alive.mask == 0.f) {
+        combat_state.successfulKill = false;
+        combat_state.landedShotOn = Entity::none();
+        combat_state.wasKilled = false;
+        combat_state.wasShotCount = 0;
+        combat_state.firedShotT = -FLT_MAX;
+
+        return;
+    }
+}
+
+inline void zoneRewardSystem(Engine &ctx,
+                             Entity agent,
+                             Position pos,
+                             AgentPolicy agent_policy,
+                             TeamInfo team_info,
+                             Aim aim,
+                             const Alive &alive,
+                             const Teammates &teammates,
+                             const Opponents &opponents,
+                             CombatState &combat_state,
+                             BreadcrumbAgentState &breadcrumb_state,
+                             ExploreTracker &explore_tracker,
+                             RewardHyperParams reward_hyper_params,
+                             Reward &out_reward)
+{
+    (void)agent;
+    (void)agent_policy;
+
     out_reward.v = 0.f;
 
     if (ctx.singleton<WorldCurriculum>() ==
@@ -4988,6 +5248,7 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
         collect_obs = builder.addToGraph<ParallelForNode<Engine,
           pvpObservationsSystem,
             Entity,
+            AgentPolicy,
             Position,
             Rotation,
             Aim,
@@ -5048,6 +5309,8 @@ static void resetAndObsTasks(TaskGraphBuilder &builder, const TaskConfig &cfg,
 
 static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
+  builder.addToGraph<CompactArchetypeNode<SubZoneEntity>>({});
+
   resetAndObsTasks(builder, cfg, {});
 
   builder.addToGraph<CompactArchetypeNode<StaticGeometry>>({});
@@ -5266,12 +5529,18 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 
     if (cfg.task == Task::Zone ||
         cfg.task == Task::ZoneCaptureDefend) {
-        auto zone_sys = builder.addToGraph<ParallelForNode<Engine,
+        sim_done = builder.addToGraph<ParallelForNode<Engine,
             zoneSystem,
                 ZoneState
             >>({sim_done});
 
-        sim_done = zone_sys;
+        if ((cfg.simFlags & SimFlags::SubZones) == SimFlags::SubZones) {
+          sim_done = builder.addToGraph<ParallelForNode<Engine,
+            subzoneSystem,
+                Entity,
+                SubZone
+            >>({sim_done});
+        }
     }
 
     if (cfg.recordLog != nullptr) {
@@ -5465,8 +5734,10 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                     Reward
                 >>({explore_visit});
         } else {
-            reward_sys = builder.addToGraph<ParallelForNode<Engine,
-                zoneRewardSystem,
+            if ((cfg.simFlags & SimFlags::SubZones) == SimFlags::SubZones) {
+              reward_sys = builder.addToGraph<ParallelForNode<Engine,
+                subzoneRewardSystem,
+                    Entity,
                     Position,
                     AgentPolicy,
                     TeamInfo,
@@ -5480,6 +5751,24 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
                     RewardHyperParams,
                     Reward 
                 >>({explore_visit});
+            } else {
+              reward_sys = builder.addToGraph<ParallelForNode<Engine,
+                zoneRewardSystem,
+                    Entity,
+                    Position,
+                    AgentPolicy,
+                    TeamInfo,
+                    Aim,
+                    Alive,
+                    Teammates,
+                    Opponents,
+                    CombatState,
+                    BreadcrumbAgentState,
+                    ExploreTracker,
+                    RewardHyperParams,
+                    Reward 
+                >>({explore_visit});
+            }
         }
     } else if (cfg.task == Task::ZoneCaptureDefend) {
         reward_sys = builder.addToGraph<ParallelForNode<Engine,

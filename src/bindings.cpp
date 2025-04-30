@@ -31,6 +31,8 @@ NB_MODULE(madrona_mp_env, m) {
         .value("RandomFlipTeams", SimFlags::RandomFlipTeams)
         .value("StaticFlipTeams", SimFlags::StaticFlipTeams)
         .value("FullTeamPolicy", SimFlags::FullTeamPolicy)
+        .value("SimEvalMode", SimFlags::SimEvalMode)
+        .value("SubZones", SimFlags::SubZones)
     ;
 
     nb::class_<Manager> (m, "SimManager")

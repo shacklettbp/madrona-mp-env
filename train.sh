@@ -30,8 +30,8 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --entropy-loss-coef 0.01 \
     --value-loss-coef 1.0 \
     --num-channels 512 \
-    --pbt-ensemble-size 2 \
-    --pbt-past-policies 4 \
+    --pbt-ensemble-size 8 \
+    --pbt-past-policies 0 \
     --profile-port 5000 \
     --scene $2 \
     --eval-frequency 500 \

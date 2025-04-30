@@ -253,12 +253,12 @@ struct MatchResult {
 
 struct RewardHyperParams {
   float teamSpirit = 0.f;
-  float shotScale = 0.05f;
+  float shotScale = 0.5f;
   float exploreScale = 0.001f;
   float inZoneScale = 0.05f;
   float zoneTeamContestScale = 0.01f;
   float zoneTeamCtrlScale = 0.1f;
-  float zoneDistScale = 0.005f;
+  float zoneDistScale = 0.0005f;
   float zoneEarnedPointScale = 1.f;
   float breadcrumbScale = 0.1f;
 };
@@ -331,12 +331,27 @@ struct CombatStateObservation {
   float timeBeforeAutoheal = 0.f;
 };
 
+struct SubZoneObservation {
+  float centerX = 0.f;
+  float centerY = 0.f;
+  float centerZ = 0.f;
+  float toCenterDist = 0.f;
+  float toCenterYaw = 0.f;
+  float toCenterPitch = 0.f;
+  float myTeamControlling = 0.f;
+  float enemyTeamControlling = 0.f;
+  float selfInSubZone = 0.f;
+  float isContested = 0.f;
+  float isCaptured = 0.f;
+  std::array<float, 8> id = {};
+};
+
 // Observation state for the current agent.
 // Positions are rescaled to the bounds of the play area to assist training.
 struct SelfObservation : PlayerCommonObservation {
   CombatStateObservation combat;
-  float fractionMatchRemaining;
   ZoneObservation zone;
+  SubZoneObservation subZone;
 };
 
 struct TeammateObservation : public OtherPlayerCommonObservation {
@@ -500,6 +515,8 @@ struct CombatState {
   float firedShotT;
   bool inZone;
   float minDistToZone;
+  bool inSubZone;
+  float minDistToSubZone;
   bool hasDiedDuringEpisode;
   bool reloadedFullMag;
   Vector3 immitationGoalPosition;
@@ -768,6 +785,13 @@ struct ZOBB {
   float rotation;
 };
 
+struct SubZone {
+  ZOBB zobb;
+  int32_t curControllingTeam;
+  bool isContested;
+  bool isCaptured;
+};
+
 struct GoalRegion {
   static constexpr int maxSubRegions = 3;
 
@@ -965,6 +989,10 @@ struct PvPAgent : public madrona::Archetype<
   Done,
   AgentPolicy,
   RewardHyperParams
+> {};
+
+struct SubZoneEntity : public madrona::Archetype<
+  SubZone
 > {};
 
 struct StaticGeometry : public madrona::Archetype<

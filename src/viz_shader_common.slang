@@ -65,6 +65,7 @@ VIS struct MapPerDraw {
 VIS struct GoalRegionPerDraw {
   VIS NonUniformScaleObjectTransform txfm;
   VIS float4 color;
+  VIS float lineWidth;
 };
 
 VIS struct AnalyticsTeamHullPerDraw {

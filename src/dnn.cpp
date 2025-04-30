@@ -305,8 +305,6 @@ static void normalizeSelfOb(SelfObservation &ob,
 
   out = normalizePlayerCommonOb(ob, params, out);
   out = normalizeCombatOb(ob.combat, params.combat, out);
-  *out++ = params.fractionRemaining.invStd * (
-      ob.fractionMatchRemaining - params.fractionRemaining.mean);
 
   out = normalizeZoneOb(ob.zone, params.zone, out);
 
