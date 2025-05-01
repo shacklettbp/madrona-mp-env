@@ -22,21 +22,21 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --run-name $1 \
     --game-mode Zone \
     --num-updates 1000000 \
-    --num-worlds 1024 \
+    --num-worlds 512 \
     --lr 1e-4 \
-    --steps-per-update 110 \
-    --num-bptt-chunks 1 \
+    --steps-per-update 120 \
+    --num-bptt-chunks 4 \
     --num-minibatches 4 \
     --entropy-loss-coef 0.01 \
     --value-loss-coef 1.0 \
     --num-channels 512 \
-    --pbt-ensemble-size 8 \
+    --pbt-ensemble-size 4 \
     --pbt-past-policies 0 \
     --profile-port 5000 \
     --scene $2 \
-    --eval-frequency 500 \
-    --bf16 \
+    --eval-frequency 25 \
     --gpu-sim
+    #--bf16 \
     #--restore 15000 \
     #--restore 61000 \
     #--randomize-hp-mag \

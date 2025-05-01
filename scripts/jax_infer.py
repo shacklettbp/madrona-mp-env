@@ -82,6 +82,7 @@ elif args.crossplay:
 print(num_policies)
 
 sim_flags = SimFlags.SimEvalMode
+#sim_flags |= SimFlags.SubZones
 
 if args.full_team_policy:
     sim_flags |= SimFlags.FullTeamPolicy

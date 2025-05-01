@@ -2873,6 +2873,7 @@ inline void pvpObservationsSystem(
       }
     }
 
+#if 0
     if ((ctx.data().simFlags & SimFlags::SubZones) == SimFlags::SubZones) {
       SubZoneObservation &zone_ob = self_ob.subZone;
       i32 subzone_idx = self_policy.idx;
@@ -2934,8 +2935,11 @@ inline void pvpObservationsSystem(
 
       zone_ob.selfInSubZone = ctx.get<CombatState>(self_e).inSubZone ? 1.f : 0.f;
 
+      zone_ob.minDistToSubZone = ctx.get<CombatState>(self_e).minDistToSubZone;
+
       zone_ob.id[subzone_idx] = 1.f;
     }
+    #endif
   }
 
   const i32 my_teamsize = (i32)ctx.data().pTeamSize;
@@ -3808,8 +3812,12 @@ inline void subzoneRewardSystem(Engine &ctx,
         float dist = center.distance(pos);
 
         if (dist < combat_state.minDistToSubZone) {
-            out_reward.v += reward_hyper_params.zoneDistScale * (
-                combat_state.minDistToSubZone - dist);
+            float zone_dist_scale = reward_hyper_params.zoneDistScale;
+            if (!combat_state.hasDiedDuringEpisode) {
+                zone_dist_scale *= 10.f;
+            }
+
+            out_reward.v += zone_dist_scale * (combat_state.minDistToSubZone - dist);
             combat_state.minDistToSubZone = dist;
         }
     }
@@ -3917,8 +3925,12 @@ inline void zoneRewardSystem(Engine &ctx,
         float dist = center.distance(pos);
 
         if (dist < combat_state.minDistToZone) {
-            out_reward.v += reward_hyper_params.zoneDistScale * (
-                combat_state.minDistToZone - dist);
+            float zone_dist_scale = reward_hyper_params.zoneDistScale;
+            if (!combat_state.hasDiedDuringEpisode) {
+                zone_dist_scale *= 10.f;
+            }
+
+            out_reward.v += zone_dist_scale * (combat_state.minDistToZone - dist);
             combat_state.minDistToZone = dist;
         }
     }

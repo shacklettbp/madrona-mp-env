@@ -397,22 +397,22 @@ def make_policy(dtype):
         num_embed_channels = 64,
     )
 
-    actor_encoder = BackboneEncoder(
+    actor_encoder = RecurrentBackboneEncoder(
         net = ActorNet(dtype, use_maxpool_net=True),
-        #rnn = PolicyRNN.create(
-        #    num_hidden_channels = 512,
-        #    num_layers = 1,
-        #    dtype = dtype,
-        #),
+        rnn = PolicyRNN.create(
+            num_hidden_channels = 512,
+            num_layers = 1,
+            dtype = dtype,
+        ),
     )
 
-    critic_encoder = BackboneEncoder(
+    critic_encoder = RecurrentBackboneEncoder(
         net = CriticNet(dtype, use_maxpool_net=True),
-        #rnn = PolicyRNN.create(
-        #    num_hidden_channels = 512,
-        #    num_layers = 1,
-        #    dtype = dtype,
-        #),
+        rnn = PolicyRNN.create(
+            num_hidden_channels = 512,
+            num_layers = 1,
+            dtype = dtype,
+        ),
     )
 
     backbone = BackboneSeparate(
@@ -427,12 +427,12 @@ def make_policy(dtype):
             dtype = dtype,
         ),
         #critic = DreamerV3Critic(dtype=dtype),
-        #critic = DenseLayerCritic(dtype=dtype),
-        critic = HLGaussCritic.create(
-            dtype=dtype,
-            min_bound=-200,
-            max_bound=200,
-        ),
+        critic = DenseLayerCritic(dtype=dtype),
+        #critic = HLGaussCritic.create(
+        #    dtype=dtype,
+        #    min_bound=-200,
+        #    max_bound=200,
+        #),
     )
 
     obs_preprocess = ObservationsEMANormalizer.create(

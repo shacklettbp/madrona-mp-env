@@ -254,7 +254,7 @@ struct MatchResult {
 struct RewardHyperParams {
   float teamSpirit = 0.f;
   float shotScale = 0.5f;
-  float exploreScale = 0.001f;
+  float exploreScale = 0.005f;
   float inZoneScale = 0.05f;
   float zoneTeamContestScale = 0.01f;
   float zoneTeamCtrlScale = 0.1f;
@@ -331,6 +331,7 @@ struct CombatStateObservation {
   float timeBeforeAutoheal = 0.f;
 };
 
+#if 0
 struct SubZoneObservation {
   float centerX = 0.f;
   float centerY = 0.f;
@@ -343,15 +344,17 @@ struct SubZoneObservation {
   float selfInSubZone = 0.f;
   float isContested = 0.f;
   float isCaptured = 0.f;
+  float minDistToSubZone = 0.f;
   std::array<float, 8> id = {};
 };
+#endif
 
 // Observation state for the current agent.
 // Positions are rescaled to the bounds of the play area to assist training.
 struct SelfObservation : PlayerCommonObservation {
   CombatStateObservation combat;
   ZoneObservation zone;
-  SubZoneObservation subZone;
+  //SubZoneObservation subZone;
 };
 
 struct TeammateObservation : public OtherPlayerCommonObservation {

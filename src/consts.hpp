@@ -41,7 +41,7 @@ inline constexpr float rewardPerDist = 0.05f;
 inline constexpr float slackReward = -0.005f;
 
 // Steps per episode
-inline constexpr int32_t episodeLen = 600; //240;//1800; // 400;
+inline constexpr int32_t episodeLen = 3000; //240;//1800; // 400;
 
 // How many discrete options for actions
 inline constexpr madrona::CountT numMoveAmountBuckets = 3;

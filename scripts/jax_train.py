@@ -101,7 +101,7 @@ if args.static_flip_teams:
     sim_flags |= SimFlags.StaticFlipTeams
 
 #sim_flags |= SimFlags.EnableCurriculum
-sim_flags |= SimFlags.SubZones
+#sim_flags |= SimFlags.SubZones
 
 team_size = 6
 
@@ -246,7 +246,7 @@ cfg = TrainConfig(
     num_worlds = args.num_worlds,
     num_agents_per_world = num_agents_per_world,
     num_updates = args.num_updates,
-    lr_update_cycle_length = args.eval_frequency,
+    lr_update_cycle_length = 50000,
     actions = actions_config,
     steps_per_update = args.steps_per_update,
     num_bptt_chunks = args.num_bptt_chunks,
@@ -269,12 +269,13 @@ cfg = TrainConfig(
     ),
     pbt = pbt_cfg,
     dreamer_v3_critic = False,
-    hlgauss_critic = True,
+    hlgauss_critic = False,
+    normalize_advantages = False,
     normalize_values = False,
     value_normalizer_decay = 0.999,
     compute_dtype = dtype,
     seed = 5,
-    metrics_buffer_size = 10,
+    metrics_buffer_size = 5,
     filter_advantages = False,
     importance_sample_trajectories = False,
     importance_sample_num_minibatches = 4,
@@ -342,6 +343,8 @@ def _log_metrics_host_cb(training_mgr):
 def update_loop(training_mgr):
     assert args.eval_frequency % cfg.metrics_buffer_size == 0
 
+    training_mgr = training_mgr.rollouts_reset()
+
     def inner_iter(i, training_mgr):
         return training_mgr.update_iter()
 
@@ -381,18 +384,19 @@ def train():
 
     update_loop_compiled = madrona_learn.aot_compile(update_loop, training_mgr)
 
-    update_population_compiled = madrona_learn.aot_compile(update_population, training_mgr)
+    #update_population_compiled = madrona_learn.aot_compile(update_population, training_mgr)
 
     last_time = time()
 
     for i in range(num_outer_iters):
         training_mgr = update_loop_compiled(training_mgr)
 
-        training_mgr = update_population_compiled(training_mgr)
+        #training_mgr = update_population_compiled(training_mgr)
 
-        print(training_mgr.state.policy_states.mmr.elo)
+        #print(training_mgr.state.policy_states.mmr.elo)
 
-        training_mgr.save_ckpt(f"{args.ckpt_dir}/{args.run_name}")
+        if training_mgr.update_idx % 500 == 0:
+            training_mgr.save_ckpt(f"{args.ckpt_dir}/{args.run_name}")
     
     madrona_learn.stop_training(training_mgr)
 

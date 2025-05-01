@@ -744,9 +744,9 @@ void spawnAgents(Engine &ctx, bool is_respawn)
         ctx.data().simFlags & SimFlags::NavmeshSpawn) ==
         SimFlags::NavmeshSpawn;
 
-    if (!train_ctrl->evalMode && !is_respawn) {
-        navmesh_spawn = true;
-    }
+    //if (!train_ctrl->evalMode && !is_respawn) {
+    //    navmesh_spawn = true;
+    //}
     
     const bool randomize_hp_magazine = (
         ctx.data().simFlags & SimFlags::RandomizeHPMagazine) ==
