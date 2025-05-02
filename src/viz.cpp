@@ -1,9 +1,9 @@
 #include "viz.hpp"
 
+#undef FATAL
 #include "gas/gas.hpp"
 #include "gas/gas_ui.hpp"
 #include "gas/gas_imgui.hpp"
-#include "gas/init.hpp"
 #include "gas/shader_compiler.hpp"
 
 #include "types.hpp"
@@ -217,6 +217,7 @@ namespace madronaMPEnv {
 using namespace gas;
 
 using madrona::math::Mat3x4;
+using madrona::math::Diag3x3;
 
 struct MeshMaterial {
   Vector3 color;
@@ -413,8 +414,8 @@ struct VizState {
   UISystem *ui;
   Window *window;
 
-  GPUAPI *gpuAPI;
-  GPURuntime *gpu;
+  GPULib *gpuAPI;
+  GPUDevice *gpu;
 
   Swapchain swapchain;
   GPUQueue mainQueue;
@@ -775,7 +776,7 @@ static inline Vector4 rgb8ToFloat(uint8_t r, uint8_t g, uint8_t b,
 
 static RasterShader loadShader(VizState *viz, const char *path, RasterShaderInit init)
 {
-  StackAlloc alloc;
+  brt::StackAlloc alloc;
   ShaderCompileResult compile_result =
     viz->shaderc->compileShader(alloc, {
       .path = path,
@@ -811,7 +812,7 @@ static void loadObjects(VizState *viz,
     });
   }
 
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
   CommandEncoder &enc = viz->enc;
 
   u32 total_num_bytes;
@@ -1203,7 +1204,7 @@ static void loadHeatmapData(VizState *viz)
     heatmapBytes[i * 4 + 3] = (u8)255;
   }
 
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
 
   viz->heatmapTexture = gpu->createTexture({
     .format = TextureFormat::RGBA8_UNorm,
@@ -2530,16 +2531,16 @@ VizState * init(const VizConfig &cfg)
 
   viz->ui = UISystem::init(UISystem::Config {
     .enableValidation = false,
-    .runtimeErrorsAreFatal = false,
+    .errorsAreFatal = false,
   });
 
   viz->window = viz->ui->createMainWindow(
       "MadronaMPEnv", cfg.windowWidth, cfg.windowHeight,
       WindowInitFlags::Resizable);
   
-  viz->gpuAPI = viz->ui->gpuAPI();
-  GPURuntime *gpu = viz->gpu =
-      viz->gpuAPI->createRuntime(0, {viz->window->surface});
+  viz->gpuAPI = viz->ui->gpuLib();
+  GPUDevice *gpu = viz->gpu =
+      viz->gpuAPI->createDevice(0, {viz->window->surface});
 
   SwapchainProperties swapchain_properties;
   viz->swapchain = gpu->createSwapchain(
@@ -2549,7 +2550,7 @@ VizState * init(const VizConfig &cfg)
 
   viz->mainQueue = gpu->getMainQueue();
 
-  viz->shadercLib = InitSystem::loadShaderCompiler();
+  viz->shadercLib.load();
 
   viz->shaderc = viz->shadercLib.createCompiler();
 
@@ -2899,7 +2900,7 @@ void shutdown(VizState *viz)
   }
 #endif
 
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
 
   gpu->waitUntilWorkFinished(viz->mainQueue);
   gpu->waitUntilIdle();
@@ -2953,9 +2954,9 @@ void shutdown(VizState *viz)
   viz->ui->destroyMainWindow();
 
   viz->shadercLib.destroyCompiler(viz->shaderc);
-  InitSystem::unloadShaderCompiler(viz->shadercLib);
+  viz->shadercLib.unload();
 
-  viz->gpuAPI->destroyRuntime(gpu);
+  viz->gpuAPI->destroyDevice(gpu);
 
   viz->ui->shutdown();
 
@@ -2970,6 +2971,18 @@ void initWorld(Context &ctx, VizState *viz)
   viz_world.renderableObjectsQuery = ctx.query<Position, Rotation, Scale, ObjectID>();
 }
 
+static Vector2 getMouseDelta(const UserInput &input)
+{
+  auto [x, y] = input.mouseDelta();
+  return { x, y };
+}
+
+static Vector2 getMouseScroll(const UserInputEvents &input_events)
+{
+  auto [x, y] = input_events.mouseScroll();
+  return { x, y };
+}
+
 static void handleCamera(VizState *viz, float delta_t)
 {
   Camera &cam = viz->flyCam;
@@ -2982,7 +2995,7 @@ static void handleCamera(VizState *viz, float delta_t)
   const UserInput &input = viz->ui->inputState();
   const UserInputEvents &input_events = viz->ui->inputEvents();
 
-  Vector2 mouse_scroll = input_events.mouseScroll();
+  Vector2 mouse_scroll = getMouseScroll(input_events);
 
   if (cam.orbit) {
     // Rotate around the focus point.
@@ -2991,7 +3004,7 @@ static void handleCamera(VizState *viz, float delta_t)
       input.isDown(InputID::Shift)) {
       viz->ui->enableRawMouseInput(viz->window);
 
-      Vector2 mouse_delta = input.mouseDelta();
+      Vector2 mouse_delta = getMouseDelta(input);
 
       cam.azimuth -= mouse_delta.y * MOUSE_SPEED * delta_t;
       cam.heading += mouse_delta.x * MOUSE_SPEED * delta_t;
@@ -3044,7 +3057,7 @@ static void handleCamera(VizState *viz, float delta_t)
       viz->ui->enableRawMouseInput(viz->window);
       cam.fine_aim = false;
 
-      Vector2 mouse_delta = input.mouseDelta();
+      Vector2 mouse_delta = getMouseDelta(input);
 
       auto around_right = Quat::angleAxis(
         -mouse_delta.y * MOUSE_SPEED * delta_t, cam.right);
@@ -3366,7 +3379,7 @@ void loop(VizState *viz, Manager &mgr)
 #endif
   }
 
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
 
   auto last_sim_tick_time = std::chrono::steady_clock::now();
   auto last_frontend_tick_time = std::chrono::steady_clock::now();
@@ -3409,7 +3422,7 @@ void loop(VizState *viz, Manager &mgr)
     } else {
       viz->ui->enableRawMouseInput(viz->window);
       const UserInput &input = viz->ui->inputState();
-      Vector2 mouse_move = input.mouseDelta();
+      Vector2 mouse_move = getMouseDelta(input);
       mouse_move.x /= (0.5f * viz->window->pixelWidth);
       mouse_move.y /= (0.5f * viz->window->pixelHeight);
 
@@ -3710,7 +3723,7 @@ static void cfgUI(VizState *viz, Manager &mgr)
 
   {
     float worldbox_width = ImGui::CalcTextSize(" ").x * (
-      std::max(numDigits(viz->numWorlds) + 2, 7_i32));
+      std::max(numDigits(viz->numWorlds) + 2, i32(7)));
 
     if (viz->numWorlds == 1) {
       ImGui::BeginDisabled();
@@ -5082,7 +5095,7 @@ inline void mainMenuSystem(VizState *viz, std::string *out_path)
   ImGui::PopStyleVar();
   ImGui::End();
 
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
   viz->enc.beginEncoding();
 
   RasterPassEncoder pass = viz->enc.beginRasterPass(viz->mainmenuPass);
@@ -5097,7 +5110,7 @@ inline void mainMenuSystem(VizState *viz, std::string *out_path)
 
 inline void renderSystem(Engine &ctx, VizState *viz, float delta_t)
 {
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
 
   viz->enc.beginEncoding();
 
@@ -5256,7 +5269,7 @@ std::string bootMenu(VizState *viz)
 {
   std::string map_path = "";
 
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
 
   bool running = true;
   while (running) {
@@ -5292,7 +5305,7 @@ void loadMapAssets(VizState *viz, const char *map_assets_path)
   MapRenderableCollisionData map_render_data =
       convertCollisionDataToRenderMeshes(collision_data);
 
-  GPURuntime *gpu = viz->gpu;
+  GPUDevice *gpu = viz->gpu;
   CommandEncoder &enc = viz->enc;
 
   u32 total_num_bytes;

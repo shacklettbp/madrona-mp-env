@@ -1,3 +1,6 @@
 [submodule "src/gas"]
 	path = src/gas
 	url = https://github.com/shacklettbp/gas.git
+[submodule "src/brt"]
+	path = src/brt
+	url = https://github.com/shacklettbp/brt.git

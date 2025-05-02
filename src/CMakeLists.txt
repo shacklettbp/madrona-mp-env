@@ -1,4 +1,8 @@
-add_subdirectory(gas)
+include(brt/cmake/sys-detect.cmake)
+include(brt/cmake/cxx-setup.cmake)
+add_subdirectory(brt EXCLUDE_FROM_ALL)
+target_link_libraries(brt-libcxx INTERFACE madrona_libcxx)
+add_subdirectory(gas EXCLUDE_FROM_ALL)
 
 set(SIMULATOR_SRCS
     sim.hpp sim.inl sim.cpp
@@ -11,6 +15,10 @@ add_library(madrona_mp_env_cpu_impl STATIC
     ${SIMULATOR_SRCS}
     viz.hpp viz.cpp  
     trajectory_db.hpp trajectory_db.cpp
+)
+
+target_include_directories(madrona_mp_env_cpu_impl PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(madrona_mp_env_cpu_impl
@@ -146,6 +154,8 @@ if (TARGET madrona_viz)
     target_compile_definitions(viewer PRIVATE
         -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
     )
+
+    add_dependencies(viewer gas_shader_compiler)
 endif()
 
 add_executable(headless headless.cpp)
