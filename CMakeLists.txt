@@ -8,7 +8,6 @@ endif ()
 
 include("${MADRONA_EXTERNAL_DIR}/cmake/madrona_init.cmake")
 
-
 project(MadronaMPEnv LANGUAGES C CXX)
 
 include(setup)
