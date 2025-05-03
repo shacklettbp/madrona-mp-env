@@ -4,18 +4,19 @@ add_subdirectory(brt EXCLUDE_FROM_ALL)
 target_link_libraries(brt-libcxx INTERFACE madrona_libcxx)
 add_subdirectory(gas EXCLUDE_FROM_ALL)
 
+if (EMSCRIPTEN)
+  target_compile_definitions(gas_ui PRIVATE
+    GAS_USE_SDL=1
+  )
+endif()
+
 set(SIMULATOR_SRCS
     sim.hpp sim.inl sim.cpp
     level_gen.hpp level_gen.cpp
     sim_flags.hpp sim_flags.inl
     utils.hpp utils.cpp
 )
-
-add_library(madrona_mp_env_cpu_impl STATIC
-    ${SIMULATOR_SRCS}
-    viz.hpp viz.cpp  
-    trajectory_db.hpp trajectory_db.cpp
-)
+add_library(madrona_mp_env_cpu_impl STATIC ${SIMULATOR_SRCS})
 
 target_include_directories(madrona_mp_env_cpu_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -27,13 +28,23 @@ target_link_libraries(madrona_mp_env_cpu_impl
     PRIVATE
         madrona_common
         madrona_mw_physics
-        madrona_rendering_system
         madrona_navmesh
 )
 
 target_compile_definitions(madrona_mp_env_cpu_impl PRIVATE
     -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
 )
+if (TARGET madrona_viz OR EMSCRIPTEN)
+    target_sources(madrona_mp_env_cpu_impl PRIVATE
+        viz.hpp viz.cpp  
+        trajectory_db.hpp trajectory_db.cpp
+    )
+
+    target_link_libraries(madrona_mp_env_cpu_impl PRIVATE
+        gas_core brt
+    )
+endif()
+
 
 add_library(madrona_mp_env_importer STATIC
     map_importer.hpp map_importer.cpp
@@ -73,8 +84,6 @@ add_library(madrona_mp_env_mgr STATIC
 )
 
 target_link_libraries(madrona_mp_env_mgr 
-    PUBLIC
-        madrona_python_utils
     PRIVATE
         madrona_mp_env_cpu_impl
         madrona_mw_cpu
@@ -84,6 +93,8 @@ target_link_libraries(madrona_mp_env_mgr
         madrona_mp_env_importer
         meshoptimizer
 )
+
+target_link_libraries(madrona_mp_env_mgr PUBLIC madrona_python_utils)
 
 if (FALSE AND SQLite3_FOUND)
     target_link_libraries(madrona_mp_env_mgr PRIVATE
@@ -123,15 +134,17 @@ target_compile_definitions(madrona_mp_env_mgr PRIVATE
     -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
 )
 
-madrona_python_module(madrona_mp_env
-    bindings.cpp
-)
+if (NOT EMSCRIPTEN)
+    madrona_python_module(madrona_mp_env
+        bindings.cpp
+    )
 
-target_link_libraries(madrona_mp_env PRIVATE
-    madrona_mp_env_mgr
-)
+    target_link_libraries(madrona_mp_env PRIVATE
+        madrona_mp_env_mgr
+    )
+endif()
 
-if (TARGET madrona_viz)
+if (TARGET madrona_viz OR EMSCRIPTEN)
     add_executable(viewer viewer.cpp)
     target_link_libraries(viewer gas_core gas_ui gas_imgui
         madrona_mw_core madrona_mp_env_mgr madrona_mp_env_importer
@@ -155,7 +168,25 @@ if (TARGET madrona_viz)
         -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
     )
 
-    add_dependencies(viewer gas_shader_compiler)
+    if (NOT EMSCRIPTEN)
+        add_dependencies(viewer gas_shader_compiler)
+    endif()
+
+    if (EMSCRIPTEN)
+      target_compile_options(gas_ui PRIVATE
+        -sUSE_SDL=3
+      )
+
+      target_compile_options(viewer PRIVATE
+        -sUSE_SDL=3
+      )
+      target_link_options(viewer PRIVATE
+        -sUSE_SDL=3
+        -sINITIAL_MEMORY=2GB
+        -sALLOW_MEMORY_GROWTH=0
+        -sABORTING_MALLOC=0
+      )
+    endif()
 endif()
 
 add_executable(headless headless.cpp)

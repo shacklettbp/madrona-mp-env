@@ -538,6 +538,12 @@ struct VizState {
 
   i64 curVizTrajectoryID = -1;
   i32 curVizTrajectoryIndex = -1;
+
+  std::chrono::steady_clock::time_point last_sim_tick_time = {};
+  std::chrono::steady_clock::time_point last_frontend_tick_time = {};
+
+  float mouse_yaw_delta = 0.f;
+  float mouse_pitch_delta = 0.f;
 };
 
 PostEffectPass::PostEffectPass()
@@ -2525,7 +2531,10 @@ static void analyticsBGThread(AnalyticsDB &db)
 }
 #endif
 
-VizState * init(const VizConfig &cfg)
+static void postDeviceCreateInit(VizState *viz, VizConfig cfg, 
+                                 void (*cb)(VizState *, void *), void *data_ptr);
+
+void init(const VizConfig &cfg, void (*cb)(VizState *, void *), void *data_ptr)
 {
   VizState *viz = new VizState {};
 
@@ -2535,12 +2544,42 @@ VizState * init(const VizConfig &cfg)
   });
 
   viz->window = viz->ui->createMainWindow(
-      "MadronaMPEnv", cfg.windowWidth, cfg.windowHeight,
+    #ifdef EMSCRIPTEN
+      "#"
+    #endif
+      "MadronaMPEnv",
+      cfg.windowWidth, cfg.windowHeight,
       WindowInitFlags::Resizable);
   
   viz->gpuAPI = viz->ui->gpuLib();
-  GPUDevice *gpu = viz->gpu =
-      viz->gpuAPI->createDevice(0, {viz->window->surface});
+
+  struct PostDeviceCreateData {
+    VizState *viz;
+    void *data_ptr;
+    void (*cb)(VizState *, void *);
+    VizConfig cfg;
+  };
+  auto *cb_data = new PostDeviceCreateData { viz, data_ptr, cb, std::move(cfg) };
+
+  viz->gpuAPI->createDeviceAsync(0, {viz->window->surface},
+    [](GPUDevice *gpu, void *data_ptr) {
+      PostDeviceCreateData *cb_data = (PostDeviceCreateData *)data_ptr;
+      VizState *viz = cb_data->viz;
+      void *user_data_ptr = cb_data->data_ptr;
+      void (*cb)(VizState *, void *) = cb_data->cb;
+      VizConfig cfg = std::move(cb_data->cfg);
+      delete cb_data;
+
+      viz->gpu = gpu;
+
+      postDeviceCreateInit(viz, cfg, cb, user_data_ptr);
+    }, cb_data);
+}
+
+static void postDeviceCreateInit(VizState *viz, VizConfig cfg, 
+                                 void (*cb)(VizState *, void *), void *data_ptr)
+{
+  GPUDevice *gpu = viz->gpu;
 
   SwapchainProperties swapchain_properties;
   viz->swapchain = gpu->createSwapchain(
@@ -2885,7 +2924,7 @@ VizState * init(const VizConfig &cfg)
     viz->simTickRate = 20;
   }
 
-  return viz;
+  cb(viz, data_ptr);
 }
 
 void shutdown(VizState *viz)
@@ -3353,273 +3392,257 @@ static void trackHumanTrace(VizState *viz, Manager &mgr,
   viz->humanTrace.push_back(snapshot);
 }
 
-void loop(VizState *viz, Manager &mgr)
+static bool tick(VizState *viz, Manager &mgr)
 {
+  bool running = true;
+
   auto action_tensor = mgr.pvpDiscreteActionTensor();
+  GPUDevice *gpu = viz->gpu;
+  gpu->waitUntilReady(viz->mainQueue);
 
-  ExecMode exec_mode = mgr.execMode();
-  if (exec_mode == ExecMode::CUDA) {
-#ifdef MADRONA_CUDA_SUPPORT
-    self_obs_readback = (SelfObservation *)cu::allocReadback(
-      sizeof(SelfObservation) * num_views);
-    hp_readback = (HP *)cu::allocReadback(
-      sizeof(HP) * num_views);
-    magazine_readback = (Magazine *)cu::allocReadback(
-      sizeof(Magazine) * num_views);
-    fwd_lidar_readback = (FwdLidar *)cu::allocReadback(
-      sizeof(FwdLidar) * num_views);
-    rear_lidar_readback = (RearLidar *)cu::allocReadback(
-      sizeof(RearLidar) * num_views);
+  auto [swapchain_tex, swapchain_status] =
+    gpu->acquireSwapchainImage(viz->swapchain);
+  assert(swapchain_status == SwapchainStatus::Valid);
 
-    reward_readback = (Reward *)cu::allocReadback(
-      sizeof(Reward) * num_views);
-
-    match_result_readback = (MatchResult *)cu::allocReadback(
-      sizeof(MatchResult));
-#endif
+  {
+    bool should_exit = viz->ui->processEvents();
+    if (should_exit || (viz->window->state & WindowState::ShouldClose) != 
+        WindowState::None) {
+      running = false;
+    }
   }
 
-  GPUDevice *gpu = viz->gpu;
+  viz->simEventsState.merge(viz->ui->inputEvents());
 
-  auto last_sim_tick_time = std::chrono::steady_clock::now();
-  auto last_frontend_tick_time = std::chrono::steady_clock::now();
+  auto cur_frame_start_time = std::chrono::steady_clock::now();
+
+  float frontend_delta_t;
+  {
+    std::chrono::duration<float> duration =
+        cur_frame_start_time - viz->last_frontend_tick_time;
+    frontend_delta_t = duration.count();
+  }
+  viz->last_frontend_tick_time = cur_frame_start_time;
+
+  if (viz->curControl == 0) {
+    handleCamera(viz, frontend_delta_t);
+  } else {
+    viz->ui->enableRawMouseInput(viz->window);
+    const UserInput &input = viz->ui->inputState();
+    Vector2 mouse_move = getMouseDelta(input);
+    mouse_move.x /= (0.5f * viz->window->pixelWidth);
+    mouse_move.y /= (0.5f * viz->window->pixelHeight);
+
+    Engine &ctx = mgr.getWorldContext(viz->curWorld);
+
+    Entity agent = ctx.data().agents[viz->curControl - 1];
+
+    const float mouse_max_move = 1000.f;
+    const float mouse_accelleration = 0.8f;
+    const float fine_aim_multiplier = 0.3f;
+
+    Vector2 mouse_delta = mouse_move * viz->mouseSensitivity * frontend_delta_t;
+    // If we're holding right-mouse, do fine aim.
+    viz->flyCam.fine_aim = false;
+    if (input.isDown(InputID::MouseRight)) {
+      mouse_delta *= fine_aim_multiplier;
+      viz->flyCam.fine_aim = true;
+    }
+
+    // Mouse accelleration.
+    static Vector2 prev_mouse_delta = { 0.f, 0.f };
+    float mouse_delta_len = fmaxf(mouse_delta.length(), 0.01f);
+    mouse_delta = mouse_delta / mouse_delta_len;
+    mouse_delta_len = fminf(mouse_delta_len + fmaxf(0.0f, prev_mouse_delta.dot(mouse_delta)) * mouse_accelleration, mouse_max_move);
+    mouse_delta *= mouse_delta_len;
+    prev_mouse_delta = mouse_delta;
+
+    viz->mouse_yaw_delta -= mouse_delta.x;
+    viz->mouse_pitch_delta -= mouse_delta.y;
+
+    Aim aim = ctx.get<Aim>(agent);
+    aim.yaw -= mouse_delta.x;
+    aim.pitch -= mouse_delta.y;
+
+    ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
+    ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
+  }
+
+  auto sim_delta_t = std::chrono::duration<float>(1.f / (float)viz->simTickRate);
+
+  if (cur_frame_start_time - viz->last_sim_tick_time >= sim_delta_t) {
+    UserInput &input = viz->ui->inputState();
+    UserInputEvents &input_events = viz->simEventsState;
+    //world_input_fn(world_input_data, vizCtrl.worldIdx, user_input);
+
+    if (viz->curControl != 0) {
+      int32_t x = 0;
+      int32_t y = 0;
+      int32_t r_yaw = consts::discreteAimNumYawBuckets / 2;
+      int32_t r_pitch = consts::discreteAimNumPitchBuckets / 2;
+      int32_t f = 0;
+      int32_t r = 0;
+
+      int32_t stand;
+      {
+        PvPDiscreteAction action_readback;
+        PvPDiscreteAction *src_action =
+            (PvPDiscreteAction *)action_tensor.devicePtr();
+        src_action += viz->curWorld * viz->numViews + viz->curControl - 1;
+        memcpy(&action_readback, src_action, sizeof(PvPDiscreteAction));
+        stand = action_readback.stand;
+      }
+
+      bool shift_pressed = input.isDown(InputID::Shift);
+
+      if (input.isDown(InputID::R)) {
+        r = 1;
+      }
+
+      if (input.isDown(InputID::W)) {
+        y += 1;
+      }
+      if (input.isDown(InputID::S)) {
+        y -= 1;
+      }
+
+      if (input.isDown(InputID::D)) {
+        x += 1;
+      }
+      if (input.isDown(InputID::A)) {
+        x -= 1;
+      }
+
+      if (input.isDown(InputID::F) ||
+          input.isDown(InputID::MouseLeft) ||
+          input_events.downEvent(InputID::MouseLeft)) {
+        f = 1;
+      }
+
+      if (input.isDown(InputID::C)) {
+        stand = (stand + (shift_pressed ? 2 : 1)) % 3;
+      }
+
+      if (input.isDown(InputID::Z)) {
+        r_pitch = shift_pressed ? 0 : 2;
+      }
+      if (input.isDown(InputID::X)) {
+        r_pitch = shift_pressed ? 6 : 4;
+      }
+
+      if (input.isDown(InputID::Q)) {
+        r_yaw = shift_pressed ? 12 : 7;
+      }
+      if (input.isDown(InputID::E)) {
+        r_yaw = shift_pressed ? 0 : 5;
+      }
+
+      int32_t move_amount;
+      if (x == 0 && y == 0) {
+        move_amount = 0;
+      } else if (shift_pressed) {
+        move_amount = consts::numMoveAmountBuckets - 1;
+      } else {
+        move_amount = 1;
+      }
+
+      int32_t move_angle;
+      if (x == 0 && y == 1) {
+        move_angle = 0;
+      } else if (x == 1 && y == 1) {
+        move_angle = 1;
+      } else if (x == 1 && y == 0) {
+        move_angle = 2;
+      } else if (x == 1 && y == -1) {
+        move_angle = 3;
+      } else if (x == 0 && y == -1) {
+        move_angle = 4;
+      } else if (x == -1 && y == -1) {
+        move_angle = 5;
+      } else if (x == -1 && y == 0) {
+        move_angle = 6;
+      } else if (x == -1 && y == 1) {
+        move_angle = 7;
+      } else {
+        move_angle = 0;
+      }
+
+      mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
+        .moveAmount = move_amount,
+        .moveAngle = move_angle,
+        .fire = r > 0 ? 2 : f,
+        .stand = stand,
+      }, PvPAimAction {
+        .yaw = 0,
+        .pitch = 0,
+      }, PvPDiscreteAimAction {
+        .yaw = r_yaw,
+        .pitch = r_pitch,
+      });
+
+      (void)r_yaw;
+      (void)r_pitch;
+
+      for (int world = 0; world < viz->numWorlds; world++)
+      {
+          for (int agent = 0; agent < 6; agent++)
+          {
+              if ((viz->doAI[0] && agent < 3) || (viz->doAI[1] && agent > 2))
+                  doAI(viz, mgr, world, agent);
+          }
+      }
+
+      if (input_events.downEvent(InputID::K)) {
+        mgr.setHP(viz->curWorld, viz->curControl - 1, 0);
+      }
+    }
+
+    if (viz->simEventsState.downEvent(InputID::K1)) {
+      mgr.triggerReset(viz->curWorld);
+    }
+
+    if (viz->simEventsState.downEvent(InputID::K0)) {
+      mgr.setUniformAgentPolicy(AgentPolicy { -1 });
+    }
+
+    if (viz->simEventsState.downEvent(InputID::K9)) {
+      mgr.setUniformAgentPolicy(AgentPolicy { 0 });
+    }
+
+    trackHumanTrace(viz, mgr, viz->mouse_yaw_delta, viz->mouse_pitch_delta);
+    viz->mouse_yaw_delta = 0;
+    viz->mouse_pitch_delta = 0;
+
+    mgr.step();
+    viz->simEventsState.clear();
+
+    populateAgentTrajectories(viz, mgr);
+
+    //step_fn(step_data);
+
+    viz->last_sim_tick_time = cur_frame_start_time;
+  }
+
+  vizStep(viz, mgr, frontend_delta_t);
+
+  gpu->presentSwapchainImage(viz->swapchain);
+  
+  return running;
+}
+
+void loop(VizState *viz, Manager &mgr)
+{
+  viz->last_sim_tick_time = std::chrono::steady_clock::now();
+  viz->last_frontend_tick_time = std::chrono::steady_clock::now();
 
   initMapCamera(viz, mgr);
 
   loadHeatmapData(viz);
 
-  float mouse_yaw_delta = 0, mouse_pitch_delta = 0;
-  bool running = true;
-  while (running) {
-    gpu->waitUntilReady(viz->mainQueue);
+  viz->mouse_yaw_delta = 0;
+  viz->mouse_pitch_delta = 0;
 
-    auto [swapchain_tex, swapchain_status] =
-      gpu->acquireSwapchainImage(viz->swapchain);
-    assert(swapchain_status == SwapchainStatus::Valid);
-
-    {
-      bool should_exit = viz->ui->processEvents();
-      if (should_exit || (viz->window->state & WindowState::ShouldClose) != 
-          WindowState::None) {
-        running = false;
-      }
-    }
-
-    viz->simEventsState.merge(viz->ui->inputEvents());
-
-    auto cur_frame_start_time = std::chrono::steady_clock::now();
-
-    float frontend_delta_t;
-    {
-      std::chrono::duration<float> duration =
-          cur_frame_start_time - last_frontend_tick_time;
-      frontend_delta_t = duration.count();
-    }
-    last_frontend_tick_time = cur_frame_start_time;
-
-    if (viz->curControl == 0) {
-      handleCamera(viz, frontend_delta_t);
-    } else {
-      viz->ui->enableRawMouseInput(viz->window);
-      const UserInput &input = viz->ui->inputState();
-      Vector2 mouse_move = getMouseDelta(input);
-      mouse_move.x /= (0.5f * viz->window->pixelWidth);
-      mouse_move.y /= (0.5f * viz->window->pixelHeight);
-
-      Engine &ctx = mgr.getWorldContext(viz->curWorld);
-
-      Entity agent = ctx.data().agents[viz->curControl - 1];
-
-      const float mouse_max_move = 1000.f;
-      const float mouse_accelleration = 0.8f;
-      const float fine_aim_multiplier = 0.3f;
-
-      Vector2 mouse_delta = mouse_move * viz->mouseSensitivity * frontend_delta_t;
-      // If we're holding right-mouse, do fine aim.
-      viz->flyCam.fine_aim = false;
-      if (input.isDown(InputID::MouseRight)) {
-        mouse_delta *= fine_aim_multiplier;
-        viz->flyCam.fine_aim = true;
-      }
-
-      // Mouse accelleration.
-      static Vector2 prev_mouse_delta = { 0.f, 0.f };
-      float mouse_delta_len = fmaxf(mouse_delta.length(), 0.01f);
-      mouse_delta = mouse_delta / mouse_delta_len;
-      mouse_delta_len = fminf(mouse_delta_len + fmaxf(0.0f, prev_mouse_delta.dot(mouse_delta)) * mouse_accelleration, mouse_max_move);
-      mouse_delta *= mouse_delta_len;
-      prev_mouse_delta = mouse_delta;
-
-      mouse_yaw_delta -= mouse_delta.x;
-      mouse_pitch_delta -= mouse_delta.y;
-
-      Aim aim = ctx.get<Aim>(agent);
-      aim.yaw -= mouse_delta.x;
-      aim.pitch -= mouse_delta.y;
-
-      ctx.get<Aim>(agent) = computeAim(aim.yaw, aim.pitch);
-      ctx.get<Rotation>(agent) = Quat::angleAxis(aim.yaw, math::up);
-    }
-
-    auto sim_delta_t = std::chrono::duration<float>(1.f / (float)viz->simTickRate);
-
-    if (cur_frame_start_time - last_sim_tick_time >= sim_delta_t) {
-      UserInput &input = viz->ui->inputState();
-      UserInputEvents &input_events = viz->simEventsState;
-      //world_input_fn(world_input_data, vizCtrl.worldIdx, user_input);
-
-      if (viz->curControl != 0) {
-        int32_t x = 0;
-        int32_t y = 0;
-        int32_t r_yaw = consts::discreteAimNumYawBuckets / 2;
-        int32_t r_pitch = consts::discreteAimNumPitchBuckets / 2;
-        int32_t f = 0;
-        int32_t r = 0;
-
-        int32_t stand;
-        {
-          PvPDiscreteAction action_readback;
-          PvPDiscreteAction *src_action =
-              (PvPDiscreteAction *)action_tensor.devicePtr();
-          src_action += viz->curWorld * viz->numViews + viz->curControl - 1;
-          memcpy(&action_readback, src_action, sizeof(PvPDiscreteAction));
-          stand = action_readback.stand;
-        }
-
-        bool shift_pressed = input.isDown(InputID::Shift);
-
-        if (input.isDown(InputID::R)) {
-          r = 1;
-        }
-
-        if (input.isDown(InputID::W)) {
-          y += 1;
-        }
-        if (input.isDown(InputID::S)) {
-          y -= 1;
-        }
-
-        if (input.isDown(InputID::D)) {
-          x += 1;
-        }
-        if (input.isDown(InputID::A)) {
-          x -= 1;
-        }
-
-        if (input.isDown(InputID::F) ||
-            input.isDown(InputID::MouseLeft) ||
-            input_events.downEvent(InputID::MouseLeft)) {
-          f = 1;
-        }
-
-        if (input.isDown(InputID::C)) {
-          stand = (stand + (shift_pressed ? 2 : 1)) % 3;
-        }
-
-        if (input.isDown(InputID::Z)) {
-          r_pitch = shift_pressed ? 0 : 2;
-        }
-        if (input.isDown(InputID::X)) {
-          r_pitch = shift_pressed ? 6 : 4;
-        }
-
-        if (input.isDown(InputID::Q)) {
-          r_yaw = shift_pressed ? 12 : 7;
-        }
-        if (input.isDown(InputID::E)) {
-          r_yaw = shift_pressed ? 0 : 5;
-        }
-
-        int32_t move_amount;
-        if (x == 0 && y == 0) {
-          move_amount = 0;
-        } else if (shift_pressed) {
-          move_amount = consts::numMoveAmountBuckets - 1;
-        } else {
-          move_amount = 1;
-        }
-
-        int32_t move_angle;
-        if (x == 0 && y == 1) {
-          move_angle = 0;
-        } else if (x == 1 && y == 1) {
-          move_angle = 1;
-        } else if (x == 1 && y == 0) {
-          move_angle = 2;
-        } else if (x == 1 && y == -1) {
-          move_angle = 3;
-        } else if (x == 0 && y == -1) {
-          move_angle = 4;
-        } else if (x == -1 && y == -1) {
-          move_angle = 5;
-        } else if (x == -1 && y == 0) {
-          move_angle = 6;
-        } else if (x == -1 && y == 1) {
-          move_angle = 7;
-        } else {
-          move_angle = 0;
-        }
-
-        mgr.setPvPAction(viz->curWorld, viz->curControl - 1, PvPDiscreteAction {
-          .moveAmount = move_amount,
-          .moveAngle = move_angle,
-          .fire = r > 0 ? 2 : f,
-          .stand = stand,
-        }, PvPAimAction {
-          .yaw = 0,
-          .pitch = 0,
-        }, PvPDiscreteAimAction {
-          .yaw = r_yaw,
-          .pitch = r_pitch,
-        });
-
-        (void)r_yaw;
-        (void)r_pitch;
-
-        for (int world = 0; world < viz->numWorlds; world++)
-        {
-            for (int agent = 0; agent < 6; agent++)
-            {
-                if ((viz->doAI[0] && agent < 3) || (viz->doAI[1] && agent > 2))
-                    doAI(viz, mgr, world, agent);
-            }
-        }
-
-        if (input_events.downEvent(InputID::K)) {
-          mgr.setHP(viz->curWorld, viz->curControl - 1, 0);
-        }
-      }
-
-      if (viz->simEventsState.downEvent(InputID::K1)) {
-        mgr.triggerReset(viz->curWorld);
-      }
-
-      if (viz->simEventsState.downEvent(InputID::K0)) {
-        mgr.setUniformAgentPolicy(AgentPolicy { -1 });
-      }
-
-      if (viz->simEventsState.downEvent(InputID::K9)) {
-        mgr.setUniformAgentPolicy(AgentPolicy { 0 });
-      }
-
-      trackHumanTrace(viz, mgr, mouse_yaw_delta, mouse_pitch_delta);
-      mouse_yaw_delta = 0;
-      mouse_pitch_delta = 0;
-
-      mgr.step();
-      viz->simEventsState.clear();
-
-      populateAgentTrajectories(viz, mgr);
-
-      //step_fn(step_data);
-
-      last_sim_tick_time = cur_frame_start_time;
-    }
-
-    vizStep(viz, mgr, frontend_delta_t);
-
-    gpu->presentSwapchainImage(viz->swapchain);
-  }
+  while (tick(viz, mgr)) {}
 }
 
 void registerTypes(ECSRegistry &registry)

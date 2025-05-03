@@ -6,7 +6,6 @@
 #include <madrona/utils.hpp>
 #include <madrona/importer.hpp>
 #include <madrona/physics_assets.hpp>
-#include <madrona/tracing.hpp>
 #include <madrona/mw_cpu.hpp>
 
 #include <array>

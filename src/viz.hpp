@@ -38,7 +38,7 @@ struct VizCamera {};
 
 namespace VizSystem {
 
-VizState * init(const VizConfig &cfg);
+void init(const VizConfig &cfg, void (*cb)(VizState *, void *), void *data_ptr);
 
 std::string bootMenu(VizState *viz);
 void loadMapAssets(VizState *viz, const char *map_assets_path);
