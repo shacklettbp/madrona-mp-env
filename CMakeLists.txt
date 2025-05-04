@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-cmake_policy(VERSION 3.18)
+cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
+cmake_policy(VERSION 3.20)
 
 option(MADRONA_EXTERNAL_DIR "" "")
 if (NOT MADRONA_EXTERNAL_DIR)

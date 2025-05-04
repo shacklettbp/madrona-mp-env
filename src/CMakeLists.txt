@@ -40,8 +40,31 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
         trajectory_db.hpp trajectory_db.cpp
     )
 
+    gas_add_shaders(
+        TARGET
+            mpenv_shaders
+        SHADER_ENUM
+            ShaderID
+        SHADER_CLASS
+            VizShaders
+        CPP_NAMESPACE
+            madronaMPEnv
+        SHADERS
+            PostEffect post_effect.slang
+            SSAO ssao.slang
+            Downsample downsample.slang
+            Bloom bloom.slang
+            Agent agent.slang
+            TeamHull analytics_team_hulls.slang
+            GoalRegions goal_regions.slang
+            ShotViz shot_viz.slang
+            Objects objects.slang
+            Map map.slang
+            Paths paths.slang
+    )
+
     target_link_libraries(madrona_mp_env_cpu_impl PRIVATE
-        gas_core brt
+        gas_core brt mpenv_shaders
     )
 endif()
 
@@ -154,6 +177,7 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
 
     target_compile_definitions(madrona_mp_env_cpu_impl PRIVATE
         -DMADRONA_MP_ENV_SRC_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\"
+        -DMADRONA_MP_ENV_OUT_DIR=\"${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/\"
     )
 
     target_compile_definitions(viewer PRIVATE
@@ -169,7 +193,7 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
     )
 
     if (NOT EMSCRIPTEN)
-        add_dependencies(viewer gas_shader_compiler)
+        add_dependencies(viewer gas_shader_compiler gas_shader_compiler_frontend)
     endif()
 
     if (EMSCRIPTEN)
@@ -185,6 +209,7 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
         -sINITIAL_MEMORY=2GB
         -sALLOW_MEMORY_GROWTH=0
         -sABORTING_MALLOC=0
+        --embed-file ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/wgsl
       )
     endif()
 endif()

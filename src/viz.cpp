@@ -4,7 +4,7 @@
 #include "gas/gas.hpp"
 #include "gas/gas_ui.hpp"
 #include "gas/gas_imgui.hpp"
-#include "gas/shader_compiler.hpp"
+#include "mpenv_shaders.hpp"
 
 #include "types.hpp"
 #include "sim.hpp"
@@ -35,6 +35,10 @@
 #include <vector>
 #include <random>
 #include <stdlib.h>
+
+#ifdef EMSCRIPTEN
+#include <emscripten.h>
+#endif
 
 static constexpr float PI = 3.14159265358979323846f;
 
@@ -375,7 +379,7 @@ class PostEffectPass
 {
 public:
   PostEffectPass();
-  void Prepare(struct VizState* _viz, const char *shaderName, float resXMult, float resYMult, int colorOutputs, bool outputDepth);
+  void Prepare(struct VizState* _viz, ShaderID _shaderID, float resXMult, float resYMult, int colorOutputs, bool outputDepth);
   void AddTextureInput(gas::Texture& texture, bool volumeTexture = false );
   void AddDepthInput(gas::Texture& depth);
   void SetParams(const Vector4 &shaderParams);
@@ -396,8 +400,7 @@ private:
   ParamBlock params;
   ParamBlock params2;
   RasterShader shader;
-  std::string name;
-  std::string shaderName;
+  ShaderID shaderID;
   u16 resX;
   u16 resY;
   bool initialized;
@@ -421,8 +424,8 @@ struct VizState {
   GPUQueue mainQueue;
   TextureFormat swapchainFormat;
 
-  ShaderCompilerLib shadercLib;
-  ShaderCompiler *shaderc;
+  brt::StackAlloc persistentAlloc;
+  VizShaders vizShaders;
 
   Texture depthAttachment;
   Texture sceneColor;
@@ -551,17 +554,14 @@ PostEffectPass::PostEffectPass()
   initialized = false;
 }
 
-void PostEffectPass::Prepare(struct VizState* _viz, const char* _shaderName, float resXMult, float resYMult, int colorOutputs, bool finalOutput)
+void PostEffectPass::Prepare(struct VizState* _viz, ShaderID _shaderID, float resXMult, float resYMult, int colorOutputs, bool finalOutput)
 {
   if (initialized)
     return;
 
   viz = _viz;
-  shaderName = _shaderName;
+  shaderID = _shaderID;
  
-  name = std::string("0") + shaderName;
-  static int index = 0;
-  name[0] = '0' + index++;
   static UUID broken = { 123,0 };
   broken[1]++;
 
@@ -707,8 +707,8 @@ gas::RasterPassEncoder PostEffectPass::Execute( bool final )
       }
       });
 
-    shader = loadShader(viz, shaderName.c_str(), {
-      .byteCode = {},
+    shader = viz->gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(shaderID),
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = interface,
@@ -778,30 +778,6 @@ static inline Vector4 rgb8ToFloat(uint8_t r, uint8_t g, uint8_t b,
         srgbToLinear((float)b / 255.f),
         alpha,
     };
-}
-
-static RasterShader loadShader(VizState *viz, const char *path, RasterShaderInit init)
-{
-  brt::StackAlloc alloc;
-  ShaderCompileResult compile_result =
-    viz->shaderc->compileShader(alloc, {
-      .path = path,
-    });
-
-  if (compile_result.diagnostics.size() != 0) {
-    fprintf(stderr, "%s", compile_result.diagnostics.data());
-  }
-
-  if (!compile_result.success) {
-    FATAL("Shader compilation failed!");
-  }
-
-  init.byteCode =
-      compile_result.getByteCodeForBackend(viz->gpuAPI->backendShaderByteCodeType());
-
-  RasterShader shader = viz->gpu->createRasterShader(init);
-
-  return shader;
 }
 
 static void loadObjects(VizState *viz,
@@ -2589,9 +2565,18 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
 
   viz->mainQueue = gpu->getMainQueue();
 
-  viz->shadercLib.load();
+  viz->persistentAlloc = {};
 
-  viz->shaderc = viz->shadercLib.createCompiler();
+  std::filesystem::path shader_dir = MADRONA_MP_ENV_OUT_DIR "shaders";
+  switch (viz->gpuAPI->backendShaderByteCodeType()) {
+    case ShaderByteCodeType::SPIRV: shader_dir /= "spirv"; break;
+    case ShaderByteCodeType::WGSL: shader_dir /= "wgsl"; break;
+    case ShaderByteCodeType::MTLLib: shader_dir /= "mtl"; break;
+    case ShaderByteCodeType::DXIL: shader_dir /= "dxil"; break;
+    default: MADRONA_UNREACHABLE(); break;
+  }
+
+  viz->vizShaders.load(viz->persistentAlloc, (shader_dir / "mpenv_shaders.shader_blob").c_str());
 
   viz->depthAttachment = gpu->createTexture({
     .format = TextureFormat::Depth32_Float,
@@ -2640,9 +2625,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
     .colorAttachments = { viz->swapchain.proxyAttachment() },
   });
 
-  ImGuiSystem::init(viz->ui, gpu, viz->mainQueue, viz->shaderc,
-      viz->offscreenPassInterface,
-      DATA_DIR "imgui_font.ttf", 12.f);
+  ImGuiSystem::init(viz->ui, gpu, viz->mainQueue,
+      viz->offscreenPassInterface, shader_dir.c_str(), DATA_DIR "imgui_font.ttf", 12.f);
 
   viz->heatmapTexture = {};
   gpu->waitUntilWorkFinished(viz->mainQueue);
@@ -2726,9 +2710,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
 
   using enum VertexFormat;
 
-  viz->mapShader = loadShader(viz, 
-    MADRONA_MP_ENV_SRC_DIR "map.slang", {
-      .byteCode = {},
+  viz->mapShader = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::Map),
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = viz->offscreenPassInterface,
@@ -2740,9 +2723,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
     });
 
-  viz->renderableObjectsShader = loadShader(viz, 
-    MADRONA_MP_ENV_SRC_DIR "objects.slang", {
-      .byteCode = {},
+  viz->renderableObjectsShader = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::Objects),
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = viz->offscreenPassInterface,
@@ -2760,9 +2742,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
     });
 
-  viz->agentShader = loadShader(viz, 
-    MADRONA_MP_ENV_SRC_DIR "agent.slang", {
-      .byteCode = {},
+  viz->agentShader = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::Agent),
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = viz->offscreenPassInterface,
@@ -2781,9 +2762,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
     });
 
-  viz->goalRegionsShader = loadShader(viz,
-    MADRONA_MP_ENV_SRC_DIR "goal_regions.slang", {
-      .byteCode = {},
+  viz->goalRegionsShader = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::GoalRegions),
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = viz->offscreenPassInterface,
@@ -2796,9 +2776,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
     });
 
-  viz->goalRegionsShaderWireframe = loadShader(viz, 
-    MADRONA_MP_ENV_SRC_DIR "goal_regions.slang", {
-      .byteCode = {},
+  viz->goalRegionsShaderWireframe = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::GoalRegions),
       .vertexEntry = "vertMainWireframe",
       .fragmentEntry = "fragMainWireframe",
       .rasterPass = viz->offscreenPassInterface,
@@ -2811,9 +2790,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
     });
 
-  viz->goalRegionsShaderWireframeNoDepth = loadShader(viz, 
-    MADRONA_MP_ENV_SRC_DIR "goal_regions.slang", {
-      .byteCode = {},
+  viz->goalRegionsShaderWireframeNoDepth = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::GoalRegions),
       .vertexEntry = "vertMainWireframe",
       .fragmentEntry = "fragMainWireframeNoDepth",
       .rasterPass = viz->offscreenPassInterface,
@@ -2827,9 +2805,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
     });
 
-  viz->analyticsTeamHullShader = loadShader(viz,
-    MADRONA_MP_ENV_SRC_DIR "analytics_team_hulls.slang", {
-      .byteCode = {},
+  viz->analyticsTeamHullShader = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::TeamHull),
       .vertexEntry = "vertMain",
       .fragmentEntry = "triFrag",
       .rasterPass = viz->offscreenPassInterface,
@@ -2856,9 +2833,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
     },
   });
-  viz->agentPathsShader = loadShader(viz,
-    MADRONA_MP_ENV_SRC_DIR "paths.slang", {
-      .byteCode = {},
+  viz->agentPathsShader = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::Paths),
       .vertexEntry = "pathVert",
       .fragmentEntry = "pathFrag",
       .rasterPass = viz->offscreenPassInterface,
@@ -2886,9 +2862,8 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
     },
   });
 
-  viz->shotVizShader = loadShader(viz,
-    MADRONA_MP_ENV_SRC_DIR "shot_viz.slang", {
-      .byteCode = {},
+  viz->shotVizShader = gpu->createRasterShader({
+      .byteCode = viz->vizShaders.getByteCode(ShaderID::ShotViz),
       .vertexEntry = "vertMain",
       .fragmentEntry = "fragMain",
       .rasterPass = viz->offscreenPassInterface,
@@ -2991,9 +2966,6 @@ void shutdown(VizState *viz)
 
   gpu->destroySwapchain(viz->swapchain);
   viz->ui->destroyMainWindow();
-
-  viz->shadercLib.destroyCompiler(viz->shaderc);
-  viz->shadercLib.unload();
 
   viz->gpuAPI->destroyDevice(gpu);
 
@@ -3642,7 +3614,25 @@ void loop(VizState *viz, Manager &mgr)
   viz->mouse_yaw_delta = 0;
   viz->mouse_pitch_delta = 0;
 
+
+#ifdef EMSCRIPTEN
+  static VizState *global_viz = viz;
+  static Manager *global_mgr = &mgr;
+
+  emscripten_set_main_loop([]() {
+    bool running = tick(global_viz, *global_mgr);
+    if (!running) {
+      emscripten_cancel_main_loop();
+      VizSystem::shutdown(global_viz);
+      delete global_mgr;
+      exit(0);
+    }
+  }, 0, 1);
+#else
   while (tick(viz, mgr)) {}
+  VizSystem::shutdown(viz);
+  delete &mgr;
+#endif
 }
 
 void registerTypes(ECSRegistry &registry)
@@ -5218,7 +5208,7 @@ inline void renderSystem(Engine &ctx, VizState *viz, float delta_t)
 
   // ---  SSAO  ---
 
-  viz->ssaoPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "ssao.slang", 1.0f, 1.0f, 1, false);
+  viz->ssaoPass.Prepare(viz, ShaderID::SSAO, 1.0f, 1.0f, 1, false);
   viz->ssaoPass.AddDepthInput(viz->sceneDepth);
   viz->ssaoPass.SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f));
   viz->ssaoPass.Execute( false );
@@ -5229,21 +5219,21 @@ inline void renderSystem(Engine &ctx, VizState *viz, float delta_t)
     // ---  DOWN SAMPLE  ---
 
     float downsample_factor = 0.25f / (pass + 1);
-    viz->downsamplePasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "downsample.slang", downsample_factor, downsample_factor, 1, false);
+    viz->downsamplePasses[pass].Prepare(viz, ShaderID::Downsample, downsample_factor, downsample_factor, 1, false);
     viz->downsamplePasses[pass].AddTextureInput( pass == 0 ? viz->sceneColor : viz->downsamplePasses[pass-1].Output(0));
     viz->downsamplePasses[pass].SetParams(Vector4(4.0f, 4.0f, 0.0f, 0.0f)); // X and Y are downsample factors.
     viz->downsamplePasses[pass].Execute(false);
 
     // ---  BLOOM HORIZONTAL  ---
 
-    viz->bloomHorizontalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
+    viz->bloomHorizontalPasses[pass].Prepare(viz, ShaderID::Bloom, downsample_factor, downsample_factor, 1, false);
     viz->bloomHorizontalPasses[pass].AddTextureInput(viz->downsamplePasses[pass].Output(0));
     viz->bloomHorizontalPasses[pass].SetParams(Vector4(0.0f, 0.0f, 0.0f, 0.0f)); // 0 in X is horizontal pass.
     viz->bloomHorizontalPasses[pass].Execute(false);
 
     // ---  BLOOM VERTICAL  ---
 
-    viz->bloomVerticalPasses[pass].Prepare(viz, MADRONA_MP_ENV_SRC_DIR "bloom.slang", downsample_factor, downsample_factor, 1, false);
+    viz->bloomVerticalPasses[pass].Prepare(viz, ShaderID::Bloom, downsample_factor, downsample_factor, 1, false);
     viz->bloomVerticalPasses[pass].AddTextureInput(viz->bloomHorizontalPasses[pass].Output(0));
     viz->bloomVerticalPasses[pass].SetParams(Vector4(1.0f, 0.0f, 0.0f, 0.0f)); // 1 in X is vertical pass.
     viz->bloomVerticalPasses[pass].Execute(false);
@@ -5251,7 +5241,7 @@ inline void renderSystem(Engine &ctx, VizState *viz, float delta_t)
 
   // ---  COMPOSITE  ---
 
-  viz->finalPass.Prepare(viz, MADRONA_MP_ENV_SRC_DIR "post_effect.slang", 1.0f, 1.0f, 1, true);
+  viz->finalPass.Prepare(viz, ShaderID::PostEffect, 1.0f, 1.0f, 1, true);
   viz->finalPass.AddTextureInput(viz->ssaoPass.Output(0));
   for (int i = 0; i < DownsamplePasses; i++)
   {

@@ -66,7 +66,7 @@ void postDeviceCreate(VizState *viz, void *data_ptr)
   //sim_flags |= SimFlags::SubZones;
   sim_flags |= SimFlags::SimEvalMode;
 
-  Manager mgr({
+  Manager * mgr = new Manager({
       .execMode = args.exec_mode,
       .gpuID = 0,
       .numWorlds = args.num_worlds,
@@ -94,7 +94,7 @@ void postDeviceCreate(VizState *viz, void *data_ptr)
       .policyWeightsPath = args.policy_weights_path,
   }, viz);
 
-  mgr.init();
+  mgr->init();
 
 #if 0
   auto printObs = [&mgr,
@@ -185,9 +185,7 @@ void postDeviceCreate(VizState *viz, void *data_ptr)
   printObs();
 #endif
 
-  VizSystem::loop(viz, mgr);
-
-  VizSystem::shutdown(viz);
+  VizSystem::loop(viz, *mgr);
 }
 
 int main(int argc, char *argv[])
