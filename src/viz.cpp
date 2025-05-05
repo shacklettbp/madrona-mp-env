@@ -2516,16 +2516,17 @@ void init(const VizConfig &cfg, void (*cb)(VizState *, void *), void *data_ptr)
 
   viz->ui = UISystem::init(UISystem::Config {
     .enableValidation = false,
-    .errorsAreFatal = false,
+    .errorsAreFatal = true,
   });
 
   viz->window = viz->ui->createMainWindow(
     #ifdef EMSCRIPTEN
-      "#"
-    #endif
+      "#canvas",
+    #else
       "MadronaMPEnv",
+    #endif
       cfg.windowWidth, cfg.windowHeight,
-      WindowInitFlags::Resizable);
+      WindowInitFlags::None);
   
   viz->gpuAPI = viz->ui->gpuLib();
 
@@ -3627,7 +3628,7 @@ void loop(VizState *viz, Manager &mgr)
       delete global_mgr;
       exit(0);
     }
-  }, 0, 1);
+  }, 0, 0);
 #else
   while (tick(viz, mgr)) {}
   VizSystem::shutdown(viz);
@@ -5278,35 +5279,52 @@ void vizStep(VizState *viz, Manager &mgr, float delta_t)
   }
 }
 
-std::string bootMenu(VizState *viz)
-{
-  std::string map_path = "";
-
+static bool bootmenu_tick(VizState *viz, std::string *map_path) {
   GPUDevice *gpu = viz->gpu;
+  gpu->waitUntilReady(viz->mainQueue);
 
-  bool running = true;
-  while (running) {
-    gpu->waitUntilReady(viz->mainQueue);
+  auto [swapchain_tex, swapchain_status] =
+    gpu->acquireSwapchainImage(viz->swapchain);
+  assert(swapchain_status == SwapchainStatus::Valid);
 
-    auto [swapchain_tex, swapchain_status] =
-      gpu->acquireSwapchainImage(viz->swapchain);
-    assert(swapchain_status == SwapchainStatus::Valid);
+  bool should_exit = viz->ui->processEvents();
 
-    bool should_exit = viz->ui->processEvents();
+  mainMenuSystem(viz, map_path);
+  gpu->presentSwapchainImage(viz->swapchain);
 
-    mainMenuSystem(viz, &map_path);
-    gpu->presentSwapchainImage(viz->swapchain);
-
-    if (should_exit || (viz->window->state & WindowState::ShouldClose) != 
-        WindowState::None) {
-      running = false;
-      map_path = "";
-    } else if (!viz->mainMenu) {
-      running = false;
-    }
+  if (should_exit || (viz->window->state & WindowState::ShouldClose) != 
+      WindowState::None) {
+    *map_path = "";
+    return false;
+  } else if (!viz->mainMenu) {
+      return false;
   }
 
-  return map_path;
+  return true;
+}
+
+void bootMenu(VizState *viz, void (*cb)(VizState *, std::string scene_dir, void *), void *data_ptr)
+{
+
+  std::string map_path = "";
+
+#ifdef EMSCRIPTEN
+  static VizState *global_viz = viz;
+  static void (*global_cb)(VizState *, std::string scene_dir, void *) = cb;
+  static void *global_data_ptr = data_ptr;
+  static std::string global_map_path = "";
+
+  emscripten_set_main_loop([]() {
+    bool running = bootmenu_tick(global_viz, &global_map_path);
+    if (!running) {
+      emscripten_cancel_main_loop();
+      global_cb(global_viz, global_map_path, global_data_ptr);
+    }
+  }, 0, 0);
+#else
+  while (bootmenu_tick(viz, &map_path)) {}
+  cb(viz, map_path, data_ptr);
+#endif
 }
 
 void loadMapAssets(VizState *viz, const char *map_assets_path)

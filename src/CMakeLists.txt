@@ -31,9 +31,28 @@ target_link_libraries(madrona_mp_env_cpu_impl
         madrona_navmesh
 )
 
-target_compile_definitions(madrona_mp_env_cpu_impl PRIVATE
-    -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
-)
+if (EMSCRIPTEN)
+    # Create a custom target to copy data directory to the runtime output directory
+    add_custom_target(copy_data_files ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/data
+        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/data
+        COMMENT "Copying data files to runtime output directory"
+    )
+    
+    # Make madrona_mp_env_cpu_impl dependent on the copy_data_files target
+    add_dependencies(madrona_mp_env_cpu_impl copy_data_files)
+
+    target_compile_definitions(madrona_mp_env_cpu_impl PRIVATE
+        -DDATA_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/data/"
+    )
+else()
+    target_compile_definitions(madrona_mp_env_cpu_impl PRIVATE
+        -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
+    )
+endif()
+
+
 if (TARGET madrona_viz OR EMSCRIPTEN)
     target_sources(madrona_mp_env_cpu_impl PRIVATE
         viz.hpp viz.cpp  
@@ -180,6 +199,11 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
         -DMADRONA_MP_ENV_OUT_DIR=\"${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/\"
     )
 
+    add_compile_definitions(madrona_mp_env_cpu_impl PRIVATE
+        -DMADRONA_MP_ENV_SRC_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\"
+        -DMADRONA_MP_ENV_OUT_DIR=\"${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/\"
+    )
+
     target_compile_definitions(viewer PRIVATE
         -DMADRONA_MP_ENV_SRC_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\"
     )
@@ -188,9 +212,15 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
         target_link_libraries(viewer madrona_cuda)
     endif()
 
-    target_compile_definitions(viewer PRIVATE
-        -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
-    )
+    if (EMSCRIPTEN)
+        target_compile_definitions(viewer PRIVATE
+            -DDATA_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/data/"
+        )
+    else()
+        target_compile_definitions(viewer PRIVATE
+            -DDATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../data/"
+        )
+    endif()
 
     if (NOT EMSCRIPTEN)
         add_dependencies(viewer gas_shader_compiler gas_shader_compiler_frontend)
@@ -209,7 +239,9 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
         -sINITIAL_MEMORY=2GB
         -sALLOW_MEMORY_GROWTH=0
         -sABORTING_MALLOC=0
-        --embed-file ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/wgsl
+        #-sASSERTIONS=1
+        --embed-file=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/wgsl
+        --embed-file=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/data/
       )
     endif()
 endif()

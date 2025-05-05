@@ -33,21 +33,24 @@ struct InitArgs {
   char *trajectory_db_path;
 };
 
-void postDeviceCreate(VizState *viz, void *data_ptr)
+void postBootMenu(VizState *viz, std::string scene_dir, void *data_ptr)
 {
   InitArgs args;
   {
     InitArgs *init_args_ptr = (InitArgs *)data_ptr;
     args = *init_args_ptr;
     delete (InitArgs *)data_ptr;
+
+    args.scene_dir = scene_dir;
   }
 
   if (args.scene_dir.empty()) {
-    args.scene_dir = VizSystem::bootMenu(viz);
-    if (args.scene_dir.empty()) {
-      return;
-    }
+    return;
   }
+
+#ifdef EMSCRIPTEN
+  args.scene_dir = MADRONA_MP_ENV_OUT_DIR + args.scene_dir;
+#endif
 
   std::string collision_data_file = args.scene_dir + "/collisions.bin";
   std::string navmesh_file = args.scene_dir + "/navmesh.bin";
@@ -186,6 +189,17 @@ void postDeviceCreate(VizState *viz, void *data_ptr)
 #endif
 
   VizSystem::loop(viz, *mgr);
+}
+
+void postDeviceCreate(VizState *viz, void *data_ptr)
+{
+  InitArgs &args = *(InitArgs *)data_ptr;
+
+  if (args.scene_dir.empty()) {
+    VizSystem::bootMenu(viz, postBootMenu, data_ptr);
+  } else {
+    postBootMenu(viz, args.scene_dir, data_ptr);
+  }
 }
 
 int main(int argc, char *argv[])

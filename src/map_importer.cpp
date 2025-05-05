@@ -423,6 +423,7 @@ MapNavmesh importNavmesh(const char *path, AABB world_bounds)
     (void)world_bounds;
 
     std::ifstream navmesh_file(path, std::ios::binary);
+    assert(navmesh_file.is_open());
 
     uint32_t num_verts;
     navmesh_file.read((char *)&num_verts, sizeof(uint32_t));

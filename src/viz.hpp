@@ -40,7 +40,7 @@ namespace VizSystem {
 
 void init(const VizConfig &cfg, void (*cb)(VizState *, void *), void *data_ptr);
 
-std::string bootMenu(VizState *viz);
+void bootMenu(VizState *viz, void (*cb)(VizState *, std::string scene_dir, void *), void *data_ptr);
 void loadMapAssets(VizState *viz, const char *map_assets_path);
 
 void shutdown(VizState *viz);
