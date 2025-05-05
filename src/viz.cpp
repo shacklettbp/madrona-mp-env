@@ -2845,6 +2845,7 @@ static void postDeviceCreateInit(VizState *viz, VizConfig cfg,
       },
       .numPerDrawBytes = sizeof(Vector4),
       .rasterConfig = {
+        .writeDepth = false,
         .depthBias = 200000,
         .depthBiasSlope = 2e-2f,
         .depthBiasClamp = 1e-4f,

@@ -239,7 +239,9 @@ if (TARGET madrona_viz OR EMSCRIPTEN)
         -sINITIAL_MEMORY=2GB
         -sALLOW_MEMORY_GROWTH=0
         -sABORTING_MALLOC=0
-        #-sASSERTIONS=1
+        -sASSERTIONS=1
+        #-sSTACK_OVERFLOW_CHECK=2
+        #--pre-js=${CMAKE_SOURCE_DIR}/asan-options.js
         --embed-file=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/shaders/wgsl
         --embed-file=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/data/
       )
