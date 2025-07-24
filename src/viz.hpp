@@ -36,6 +36,8 @@ struct VizConfig {
 
 struct VizCamera {};
 
+#ifndef MADRONA_GPU_MODE
+
 namespace VizSystem {
 
 void init(const VizConfig &cfg, void (*cb)(VizState *, void *), void *data_ptr);
@@ -54,5 +56,7 @@ void setupGameTasks(VizState *viz, madrona::TaskGraphBuilder &builder);
 void loop(VizState *viz, Manager &mgr);
 
 };
+
+#endif
 
 }
